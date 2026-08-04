@@ -117,7 +117,7 @@ cylinder is the extraction cache: a run you resume, or repeat, pays nothing for 
 already read.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontSize":"19px","lineColor":"#475569","primaryTextColor":"#111827"}}}%%
+%%{init: {"theme":"base","flowchart":{"wrappingWidth":260},"themeVariables":{"fontSize":"19px","lineColor":"#475569","primaryTextColor":"#111827"}}}%%
 flowchart TB
     subgraph r1 ["<span style='font-size:24px'><b>1 · frame the task</b></span>"]
         direction LR
@@ -129,9 +129,9 @@ flowchart TB
         search["<b>search</b><br/>BALANCED<br/>seed terms into<br/>PubMed queries"] --> dedupe["<b>dedupe</b><br/>code<br/>PMID, DOI,<br/>normalized title"] --> rank["<b>rank</b><br/>code<br/>recency, citations,<br/>diversity"]
     end
 
-    subgraph r3 ["<span style='font-size:24px'><b>3 · choose what to read — a thin topic sends a second round back to step 2</b></span>"]
+    subgraph r3 ["<span style='font-size:24px'><b>3 · choose what is worth reading</b></span>"]
         direction LR
-        p2{{"PAUSE 2 · OPTIONAL<br/>only with --interactive<br/>approve the pool<br/>before screening"}} -.-> screen["<b>screen</b><br/>FAST<br/>keep or drop,<br/>and which topic"] --> curate["<b>curate</b><br/>BALANCED<br/>what to keep,<br/>what is missing"]
+        p2{{"PAUSE 2 · OPTIONAL<br/>only with --interactive<br/>approve the pool<br/>before screening"}} -.-> screen["<b>screen</b><br/>FAST<br/>keep or drop,<br/>and which topic"] --> curate["<b>curate</b><br/>BALANCED<br/>what to keep,<br/>what is missing,<br/>whether to search again"]
     end
 
     subgraph r4 ["<span style='font-size:24px'><b>4 · read and record</b></span>"]
@@ -141,7 +141,7 @@ flowchart TB
         review{{"<b>review</b> · OPTIONAL<br/>only with --review<br/>a person signs<br/>the bundle off"}}
     end
 
-    subgraph r5 ["<span style='font-size:24px'><b>5 · write it out</b></span>"]
+    subgraph r5 ["<span style='font-size:24px'><b>5 · build the bundle and check it</b></span>"]
         direction LR
         emit["<b>emit_okf</b><br/>code<br/>markdown, indexes,<br/>catalog"] --> validate["<b>validate</b><br/>code<br/>the OKF contract,<br/>as a gate"] --> vectors["<b>index_vectors</b><br/>code<br/>embeds the<br/>finished bundle"] --> out(["okf/ and<br/>vectors/"])
     end
@@ -180,6 +180,11 @@ file writing and validation are code, and behave the same way every time.
 **The charter** is the first thing a run produces: your question turned into a population, an
 outcome, inclusion rules, and the topics the corpus will be filed under. It governs every stage
 after it, and it is written to `charter.yaml` so you can read it, edit it, and rerun from it.
+
+**Step 3 can send the run back to step 2.** When curation finds a topic short of papers *and* a
+query no earlier round has already run, the search repeats for that topic alone. Both conditions
+matter: without the second, a topic that is thin because the literature is thin would re-run the
+same searches, arrive at the same shortfall, and have paid twice for it.
 
 Three model tiers, set in `.env`: **FAST** screens abstracts, **BALANCED** plans queries, curates,
 and reads the papers, **REASONING** writes the charter.
