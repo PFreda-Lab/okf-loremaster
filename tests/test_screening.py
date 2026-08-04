@@ -349,6 +349,43 @@ async def test_the_screen_budget_is_global_across_rounds(
     assert any("screen budget" in note for note in run.state["warnings"])
 
 
+async def test_a_spent_budget_stops_the_run_rather_than_paying_for_a_round_that_cannot_help(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Because the budget is global, a spent one makes another round pointless in advance.
+
+    A real run did this: round two planned queries, retrieved 232 new records, ranked
+    150 of them, screened zero, and re-curated the identical kept set. Nothing about the
+    gap can change while the screener — the only thing that turns a candidate into a
+    paper — is out of budget, so the round is refused before it is paid for. The gap is
+    still reported, and the warning names the flag that would actually fix it, so the
+    reason ends up in `log.md` rather than only in the routing.
+    """
+    run = await full_run(
+        settings_factory, tmp_path, monkeypatch, screen_budget=UNIQUE_FIRST_ROUND
+    )
+
+    assert run.state["rounds"] == 1
+    assert len(run.scripted.screened) == UNIQUE_FIRST_ROUND
+    assert run.gaps == ["delta"]
+    assert not any(UNLOCK_PHRASE in term for term in run.fake.esearch_terms)
+    assert any("--screen-budget" in note for note in run.state["warnings"])
+
+
+async def test_a_budget_with_room_left_still_goes_back_for_another_round(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard has to mean exactly "spent", not "nearly spent" — one paper of headroom
+    is enough to be worth a round, and the run must not talk itself out of one."""
+    run = await full_run(
+        settings_factory, tmp_path, monkeypatch, screen_budget=UNIQUE_FIRST_ROUND + 1
+    )
+
+    assert run.state["rounds"] == 2
+    assert len(run.scripted.screened) == UNIQUE_FIRST_ROUND + 1
+    assert any(UNLOCK_PHRASE in term for term in run.fake.esearch_terms)
+
+
 async def test_the_bounds_hold_on_the_finished_run(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -464,6 +464,51 @@ not bundles: deleting it loses the ability to resume, and nothing else.
 
 ---
 
+## Why Open Knowledge Format
+
+[OKF](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
+is a small open convention for making a folder of markdown self-describing: YAML frontmatter on
+every document, an `index.md` per folder, an optional `resource_descriptor.yaml`, and three reserved
+keys that answer where a document came from (`sources`), what produced it (`generated`), and who
+stood behind it (`verified`). That is close to the whole of it. We target v0.2.
+
+**Why a format at all.** What comes out of a run is read by an LLM agent, and agents read markdown
+natively — no client library, no schema server, no version to negotiate. `cp -r` moves a bundle,
+`ls` and `cat` are a sufficient tool set, and the coupling to whatever consumes it is files on disk
+in both directions. A database would answer queries faster and be worse at everything else this
+corpus exists for, starting with a person being able to open one file and check it. Choosing a
+published convention over one of our own is what lets a consumer that has never heard of this
+project still walk the folder correctly.
+
+**Why this one.** Its three reserved keys happen to be the three questions a corpus of
+machine-extracted findings has to answer before it is worth anything. A model wrote every document
+here, so `generated` names the model and the node that called it. Every claim in it is somebody
+else's, so `sources` carries the PMID and the PubMed URL. And nobody has necessarily checked it, so
+`verified` is written only when a human signs off — OKF derives a document's trust tier from that
+key specifically, which makes *unverified* the default we get for free rather than a disclaimer we
+have to remember to write.
+
+**How we use it.** As specified, plus flat keys of our own the spec does not define — `strength`,
+`strength_score`, `text_basis` — which a conforming reader ignores and one that knows them gets for
+free. The spec is permissive about that, and the section below is the contract we hold ourselves to
+on top of it.
+
+**Nothing in a bundle asks to be believed on its own authority.** The same rule holds at two levels.
+`predictors.md` points into the corpus: every line is a filename and a row number, and nothing is on
+it that is not in a paper's own document, so an index that could be read *instead of* the papers
+never quietly becomes the papers. Each document then points one level further out — `sources` at the
+PubMed record, the quote under each table at the sentence the number came from, `text_basis` at how
+much of the paper was actually read. The external structure a bundle points into is PubMed itself;
+what we add is the summarization and the structure, never a replacement for the source. Every
+statement in the corpus has an address, and you can go to it.
+
+The one thing we do not do is reproduce the article. `license` records what the source reported,
+verbatim and never inferred, and `export_safe` says whether the document may leave. From a paper
+under publisher copyright, what crosses into the bundle is the quoted spans an extracted number came
+from, and nothing else.
+
+---
+
 ## What downstream can rely on
 
 Both outputs are **detected, not configured**: a conforming directory dropped into a consumer's
@@ -530,7 +575,7 @@ specifically, so an unsigned bundle is *unverified* rather than merely unannotat
 
 ## Status
 
-Runs end to end and writes a validated bundle. 1,554 tests, none of which touch the network.
+Runs end to end and writes a validated bundle. 1,563 tests, none of which touch the network.
 
 ```bash
 conda run -n okf-loremaster pytest

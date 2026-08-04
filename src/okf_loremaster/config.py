@@ -126,6 +126,14 @@ class Settings(BaseSettings):
     # Bibliographic records are effectively immutable; a month is conservative.
     http_cache_ttl_days: int = 30
 
+    # A CA bundle to verify against, instead of the default trust store. Needed on a
+    # network whose proxy terminates TLS and presents its own certificate: verification
+    # then fails against a certificate that is not in any public store, and the failure
+    # looks exactly like the service being down. Unset means the default store. Never
+    # set this to disable verification — there is deliberately no option for that, since
+    # the whole provenance claim rests on the bytes having come from who they say.
+    ca_bundle: Path | None = None
+
     # --- Embeddings --------------------------------------------------------
     # Must be locally runnable: downstream consumers reject remote embedders on
     # attach. Pinned by revision so a rebuild reproduces the same vectors.

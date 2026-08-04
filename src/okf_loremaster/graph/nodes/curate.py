@@ -24,7 +24,7 @@ from typing import Any
 
 from okf_loremaster.config import Role
 from okf_loremaster.curation import enforce_bounds
-from okf_loremaster.graph.state import Deps, RunState, span
+from okf_loremaster.graph.state import Deps, RunState, screen_budget_spent, span
 from okf_loremaster.prompts import CURATE_SYSTEM, curate_user
 from okf_loremaster.ranking import similarity, text_tokens, tokens, topic_affinity
 from okf_loremaster.schemas import (
@@ -94,6 +94,15 @@ async def curate_node(state: RunState, deps: Deps) -> dict[str, Any]:
             missing=missing,
         )
         for note in placement.warnings:
+            warnings.append(note)
+            deps.warn(NODE, note)
+
+        if placement.gaps and screen_budget_spent(state, deps):
+            note = (
+                f"{len(placement.gaps)} topic(s) are short and searching again cannot "
+                f"help: the screen budget of {deps.screen_budget} is spent, so no paper "
+                "a new round found could be screened. Raise --screen-budget to fill them."
+            )
             warnings.append(note)
             deps.warn(NODE, note)
 

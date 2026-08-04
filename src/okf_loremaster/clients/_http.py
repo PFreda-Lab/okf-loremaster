@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import random
+import ssl
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -208,6 +209,7 @@ class HttpClient:
     timeout: float = 30.0
     max_retries: int = 4
     user_agent: str = "okf-loremaster"
+    ca_bundle: Path | None = None
     stats: HttpStats = field(default_factory=HttpStats)
     _client: httpx.AsyncClient | None = field(default=None, init=False, repr=False)
 
@@ -218,6 +220,7 @@ class HttpClient:
                 transport=self.transport,
                 headers={"User-Agent": self.user_agent},
                 follow_redirects=True,
+                verify=str(self.ca_bundle) if self.ca_bundle is not None else True,
             )
         return self._client
 
@@ -271,6 +274,8 @@ class HttpClient:
             try:
                 response = await client.get(url, params=dict(params or {}))
             except (httpx.TimeoutException, httpx.TransportError) as exc:
+                if _is_certificate_failure(exc):
+                    raise HttpError(f"{_redact(url)}: {_CERTIFICATE_ADVICE}") from exc
                 if attempt == attempts:
                     raise HttpError(f"{_redact(url)}: {type(exc).__name__}") from exc
                 reason = type(exc).__name__
@@ -304,6 +309,37 @@ class HttpClient:
                 )
             await asyncio.sleep(delay)
         raise AssertionError("unreachable")
+
+
+_CERTIFICATE_ADVICE = (
+    "TLS certificate verification failed. This is almost always a proxy on your own "
+    "network terminating TLS and presenting its own certificate, not the service being "
+    "down. Point OKF_LOREMASTER_CA_BUNDLE at your organization's CA file."
+)
+
+
+def _is_certificate_failure(exc: BaseException) -> bool:
+    """Whether a transport error is really a TLS trust failure.
+
+    Worth telling apart from every other `ConnectError` for two reasons, both learned
+    from a run that reported `ConnectError from icite.od.nih.gov` three times and then
+    ranked without citation metrics. Retrying is pointless — a certificate does not
+    become trusted between attempts — so this raises on the first one instead of
+    sleeping through a backoff schedule that cannot help. And the generic message sends
+    a reader to the service's status page when the service is fine and the interception
+    is local, which is the more expensive half of the mistake.
+
+    Read off the `__cause__` chain rather than the exception type: httpx reports this as
+    a plain `ConnectError`, and only the `ssl.SSLError` underneath it says what happened.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ssl.SSLError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _backoff(attempt: int) -> float:

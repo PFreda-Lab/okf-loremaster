@@ -8,8 +8,15 @@ Re-record with `python scripts/record_fixtures.py --email you@example.org`.
 
 from __future__ import annotations
 
-from okf_loremaster.clients import Clients
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from okf_loremaster.clients import Clients, build_clients
 from okf_loremaster.clients.bioc import NON_CONTENT_SECTIONS, is_unavailable, normalize_pmcid
+from okf_loremaster.config import ConfigError
+from okf_loremaster.events import EventBus
 
 # Fixed ids, matching the recorder. See scripts/record_fixtures.py for why each is here.
 RETRACTED = "9500320"
@@ -300,3 +307,19 @@ async def test_stats_accumulate_across_hosts(replay_clients: Clients) -> None:
     assert replay_clients.stats.requests == 2
     assert replay_clients.ncbi_http.stats.requests == 1
     assert replay_clients.icite_http.stats.requests == 1
+
+
+def test_a_ca_bundle_that_is_not_there_fails_before_the_first_request(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """Otherwise a typo in the path presents as every host being unreachable.
+
+    Which is the failure this variable exists to explain, so getting it wrong must not
+    produce the same symptom the right value cures.
+    """
+    settings = settings_factory(
+        ncbi_email="test@example.org", ca_bundle=tmp_path / "not-here.pem"
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        build_clients(settings, bus=EventBus())
+    assert "OKF_LOREMASTER_CA_BUNDLE" in str(excinfo.value)

@@ -54,7 +54,7 @@ from okf_loremaster.graph.nodes import (
     search_node,
     validate_node,
 )
-from okf_loremaster.graph.state import Deps, RunState, initial_state
+from okf_loremaster.graph.state import Deps, RunState, initial_state, screen_budget_spent
 from okf_loremaster.llm.estimate import SpendEstimate, project_spend
 from okf_loremaster.ranking import SelectionComparison
 from okf_loremaster.schemas import (
@@ -234,16 +234,20 @@ def _after_rank(state: RunState) -> str:
 def _after_curate(deps: Deps) -> Callable[[RunState], str]:
     """Back to search for another round, or on to reading what was kept.
 
-    Three conditions, all of which must hold for another round: a charter to search
-    with, rounds left, and a gap plan carrying at least one query no earlier round
-    already ran. The last is the one that matters — without it a topic that is thin
-    because the literature is thin would re-run the same searches and arrive at the same
-    shortfall, having paid twice.
+    Four conditions, all of which must hold for another round: a charter to search with,
+    rounds left, screening budget left, and a gap plan carrying at least one query no
+    earlier round already ran. Two of them exist because a round that cannot change the
+    outcome still costs money — without the gap-plan check a topic that is thin because
+    the literature is thin would re-run the same searches and arrive at the same
+    shortfall, and without the budget check a round can search and rank and re-curate
+    while the screener, which is what turns a candidate into a paper, sits at zero.
     """
 
     def route(state: RunState) -> str:
         charter = state.get("charter")
         if charter is None or int(state.get("rounds") or 0) >= max(1, deps.max_rounds):
+            return "fulltext"
+        if screen_budget_spent(state, deps):
             return "fulltext"
         plan = pending_gap_plan(charter, state, deps)
         return "search" if plan is not None and plan.queries else "fulltext"

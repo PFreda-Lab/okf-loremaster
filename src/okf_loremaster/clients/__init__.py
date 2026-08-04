@@ -126,6 +126,12 @@ def build_clients(
     )
     user_agent = f"{settings.ncbi_tool} (mailto:{settings.ncbi_email or 'unset'})"
 
+    if settings.ca_bundle is not None and not settings.ca_bundle.is_file():
+        raise ConfigError(
+            f"OKF_LOREMASTER_CA_BUNDLE points at {settings.ca_bundle}, which is not a "
+            "file. Leave it unset to use the default trust store."
+        )
+
     def make(rate: float) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter(rate),
@@ -135,6 +141,7 @@ def build_clients(
             timeout=settings.http_timeout,
             max_retries=settings.http_max_retries,
             user_agent=user_agent,
+            ca_bundle=settings.ca_bundle,
         )
 
     ncbi_http = make(ncbi_rate(settings))

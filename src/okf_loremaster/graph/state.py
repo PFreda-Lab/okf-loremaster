@@ -193,6 +193,24 @@ class Deps:
         self.bus.emit(WarningEvent(node=node, message=message))
 
 
+def screen_budget_spent(state: RunState, deps: Deps) -> bool:
+    """Whether the screener can still look at anything it has not already seen.
+
+    The budget is global across rounds rather than per round, so once there are as many
+    verdicts as it allows, no later round can screen a single new paper however many a
+    re-query finds. A real run walked into exactly that: round two planned two queries,
+    retrieved 232 new records, ranked 150 of them, screened **zero**, and re-curated the
+    identical kept set — paying for a query-planning call and a curation pass that could
+    not, by construction, change the outcome.
+
+    Lives here rather than in the router because two callers need the same answer: the
+    edge out of `curate` decides on it, and `curate` itself says so out loud, since a
+    topic under its floor that cannot be fixed by searching again is a reason to raise
+    `--screen-budget` and the run should not make that inference private.
+    """
+    return len(state.get("verdicts") or []) >= max(0, deps.screen_budget)
+
+
 def initial_state(
     run_id: str,
     prompt: str,

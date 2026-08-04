@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 import time
 from pathlib import Path
 from typing import Any
@@ -222,6 +223,47 @@ async def test_retries_are_exhausted_then_raised(tmp_path: Path) -> None:
     client = _client(handler, tmp_path)
     with pytest.raises(HttpError, match="503"):
         await client.get_text(URL, cacheable=False)
+
+
+async def test_a_certificate_failure_is_not_retried_and_names_the_cause(
+    tmp_path: Path,
+) -> None:
+    """A certificate does not become trusted between attempts.
+
+    Found on a corporate network that TLS-intercepts one NIH host and not another: the
+    run reported `ConnectError` three times, backed off between them, and concluded the
+    service was unavailable. The service was fine. Both halves of that are fixed here —
+    one attempt, and a message that points at the proxy rather than at NIH.
+    """
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ConnectError(
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed "
+            "certificate"
+        ) from ssl.SSLCertVerificationError("certificate verify failed")
+
+    client = _client(handler, tmp_path)
+    with pytest.raises(HttpError, match="CA_BUNDLE"):
+        await client.get_text(URL, cacheable=False)
+    assert calls["n"] == 1, "a retry cannot make a certificate trusted"
+    assert client.stats.retries == 0
+
+
+async def test_an_ordinary_connect_error_is_still_retried(tmp_path: Path) -> None:
+    """The narrow rule stays narrow: only a TLS trust failure is treated as permanent."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.ConnectError("connection refused")
+        return httpx.Response(200, text="ok")
+
+    client = _client(handler, tmp_path)
+    assert await client.get_text(URL, cacheable=False) == "ok"
+    assert calls["n"] == 3
 
 
 async def test_error_messages_never_leak_the_key(tmp_path: Path) -> None:
