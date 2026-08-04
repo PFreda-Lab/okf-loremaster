@@ -28,8 +28,9 @@ relationship invents an agreement or a disagreement no paper claimed, and it doe
 invisibly; failing to merge two that are leaves two adjacent entries a reader can see and
 join for themselves. So the merge rule is exact normalized match, then one conservative
 pass over phrases that differ by exactly one qualifier — never more than one, and never
-one that flips the meaning, which is what `_POLARITY` is for. Every merge prints the
-surface forms it absorbed, so any of them can be disputed.
+one that flips the meaning, which is what `_NOT_A_QUALIFIER` is for. Every merge prints the
+surface forms it absorbed, so any of them can be disputed, and the heading over them is
+never allowed to assert something only some of them say.
 
 Both halves of that rule are narrower than they first were, and both were narrowed by
 the same failure on a real corpus: a normalization that discarded too much handed the
@@ -41,9 +42,11 @@ Embeddings would cluster better and are not used: `--finalize okf` never builds 
 the common path would silently get the worse clustering, and reaching for them here would
 drag the `[vectors]` extra into a file every run writes.
 
-Nothing here names a condition, a specialty or a cohort. `_POLARITY` is a property of
-English rather than of a literature — `high`, `former` and `reduced` flip a meaning in
-any field, which is the test `CLAUDE.md` sets for a constant that may live in `src/`.
+Nothing here names a condition, a specialty or a cohort. The word lists are properties of
+English and of research design rather than of a literature — `high`, `former` and `reduced`
+flip a meaning in any field, and `treatment`, `prevention` and `cessation` turn an exposure
+into an intervention in any field, which is the test `CLAUDE.md` sets for a constant that
+may live in `src/`.
 """
 
 from __future__ import annotations
@@ -107,9 +110,39 @@ _POLARITY = frozenset(
     """.split()  # noqa: SIM905  — a wrapped word block reads better than a quoted list
 )
 
+# Words that name something done *to* the variable rather than a property *of* it. A
+# corpus reported "postoperative pain" as raising the risk of its outcome and
+# "postoperative pain treatment" as lowering it; one differing token, no polarity word in
+# sight, and the two merged under a single heading that then carried both signs. Treating
+# a thing is not a narrower reading of having it — it is the opposite intervention on it —
+# so these are refused for the same reason `_POLARITY` is, one level up: polarity flips
+# where a variable sits on its axis, these flip whether the row is about the variable at
+# all.
+#
+# English and research design, not medicine. "Treatment", "prevention" and "cessation"
+# turn an exposure into an intervention in any literature, which is the test `CLAUDE.md`
+# sets for a constant that may live here.
+_INTERVENTION = frozenset(
+    """
+    adherence administration avoidance cessation control discontinuation initiation
+    intervention management prevention preventive prophylaxis screening supplementation
+    therapy treated treatment withdrawal
+    """.split()  # noqa: SIM905  — a wrapped word block reads better than a quoted list
+)
+
+# One differing token drawn from either set is not a qualifier, and the merge is refused.
+_NOT_A_QUALIFIER = _POLARITY | _INTERVENTION
+
 # Plural forms these endings produce are not plurals. Stripping the `s` from `status`,
 # `analysis` or `stress` would make three words that no longer match themselves.
 _NOT_A_PLURAL = ("ss", "us", "is", "os", "as")
+
+# A threshold written into a predictor's name: a comparator and a number, with whatever
+# unit follows. Used only to decide a heading, never to build a key — a cutoff is content
+# and `surface_key` keeps it.
+_THRESHOLD = re.compile(r"[<>≤≥=~]*\s*\d+(?:\.\d+)?\s*[\w/%]*")
+_EMPTIED = re.compile(r"\(\s*\)")
+_DANGLING = re.compile(r"[\s,;:]+([)\]])")
 
 
 def surface_key(text: str) -> frozenset[str]:
@@ -157,12 +190,13 @@ def _absorbs(host: frozenset[str], guest: frozenset[str]) -> bool:
     what "the same phrase with a qualifier" actually means, and the cases that need more
     than one are better left as two adjacent entries a reader can join.
 
-    Two kinds of single word are still refused. A polarity word points the phrase the
-    other way. And an initialism is not a qualifier at all: "SD of sleep duration" is a
-    statistic computed over the variable rather than a narrower reading of it, and the
-    same holds for whatever a given field abbreviates. Only an initialism can leave a
-    token this short in a key — `text_tokens` drops every other two-character fragment —
-    so the length is a reliable test for one without naming any.
+    Three kinds of single word are still refused. A polarity word points the phrase the
+    other way, and an intervention word makes it about acting on the variable rather than
+    having it — `_NOT_A_QUALIFIER` is both. And an initialism is not a qualifier at all:
+    "SD of sleep duration" is a statistic computed over the variable rather than a narrower
+    reading of it, and the same holds for whatever a given field abbreviates. Only an
+    initialism can leave a token this short in a key — `text_tokens` drops every other
+    two-character fragment — so the length is a reliable test for one without naming any.
     """
     if not host or not guest or host == guest:
         return False
@@ -171,9 +205,26 @@ def _absorbs(host: frozenset[str], guest: frozenset[str]) -> bool:
     difference = host ^ guest
     if len(difference) > 1:
         return False
-    if difference & _POLARITY:
+    if difference & _NOT_A_QUALIFIER:
         return False
     return all(len(token) > 2 for token in difference)
+
+
+def _numbers(text: str) -> frozenset[str]:
+    """Every number a surface form carries. Two forms agree when these match."""
+    return frozenset(re.findall(r"\d+(?:\.\d+)?", text))
+
+
+def _without_thresholds(text: str) -> str:
+    """The same phrase with its cutoffs removed, and the punctuation they leave tidied.
+
+    Only ever reached when no member of the group was written without one, so the choice
+    is between a heading that names the group and a heading that names one of its rows.
+    Falls back to the original if there is nothing left, which is the case for a predictor
+    whose whole name is a number.
+    """
+    stripped = _DANGLING.sub(r"\1", _EMPTIED.sub(" ", _THRESHOLD.sub(" ", text)))
+    return " ".join(stripped.split()).strip(" ,;:-.") or text
 
 
 @dataclass(slots=True)
@@ -185,12 +236,27 @@ class _Cluster:
 
     @property
     def label(self) -> str:
-        """The commonest surface form, then the shortest, then alphabetical.
+        """The commonest surface form, then the shortest, then alphabetical — but never
+        one asserting a threshold the group does not agree on.
 
         Commonest because it is how the corpus mostly says it; the rest of the ordering
         exists so that two runs over the same records agree on the heading.
+
+        The threshold rule was added after two corpora in a row printed a heading that was
+        false for something underneath it: `Comorbidity index score (≥1)` over a group that
+        also held `Charlson Comorbidity Index (CCI) score ≥8`, and before that a `≥3` over
+        forms carrying no cutoff at all. A heading is read as the name of the group, so a
+        cutoff in it is a claim about every row. Merging papers that dichotomized the same
+        variable at different points is right — they are studying the same thing — but the
+        name of the result cannot be one of the cutoffs. So a form without one wins if the
+        corpus wrote any, and if every form carries one the cutoff comes off the heading.
+        `surface_forms` still prints all of them, which is where the detail belongs.
         """
-        return min(self.counts.items(), key=lambda item: (-item[1], len(item[0]), item[0]))[0]
+        ranked = sorted(self.counts.items(), key=lambda item: (-item[1], len(item[0]), item[0]))
+        forms = [form for form, _ in ranked]
+        if len({_numbers(form) for form in forms}) == 1:
+            return forms[0]
+        return next((form for form in forms if not _numbers(form)), _without_thresholds(forms[0]))
 
     @property
     def forms(self) -> list[str]:

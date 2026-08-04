@@ -575,7 +575,7 @@ specifically, so an unsigned bundle is *unverified* rather than merely unannotat
 
 ## Status
 
-Runs end to end and writes a validated bundle. 1,563 tests, none of which touch the network.
+Runs end to end and writes a validated bundle. 1,570 tests, none of which touch the network.
 
 ```bash
 conda run -n okf-loremaster pytest

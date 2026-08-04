@@ -189,6 +189,102 @@ def test_a_statistic_computed_over_a_variable_is_not_a_narrower_reading_of_it() 
     assert sorted(labels(result)) == ["SD of sleep duration", "Sleep duration"]
 
 
+def test_treating_a_thing_is_not_a_narrower_reading_of_having_it() -> None:
+    """A corpus reported pain as increasing an outcome and pain *treatment* as decreasing
+    it. One differing token and no polarity word, so they merged and the group carried
+    both signs under a heading naming only the exposure."""
+    result = index(
+        paper("1", row("Postoperative pain", direction=Direction.INCREASES)),
+        paper("2", row("Postoperative pain", direction=Direction.INCREASES)),
+        paper("3", row("Postoperative pain treatment", direction=Direction.DECREASES)),
+        paper("4", row("Postoperative pain treatment", direction=Direction.DECREASES)),
+    )
+    assert sorted(labels(result)) == ["Postoperative pain", "Postoperative pain treatment"]
+
+
+def test_an_intervention_word_is_refused_wherever_it_sits_in_the_phrase() -> None:
+    """The guard is on the differing token, not on where it appears — a prefix flips the
+    claim exactly as far as a suffix does."""
+    result = index(
+        paper("1", row("Smoking")),
+        paper("2", row("Smoking")),
+        paper("3", row("Smoking cessation")),
+        paper("4", row("Smoking cessation")),
+        paper("5", row("Delirium screening")),
+        paper("6", row("Delirium screening")),
+        paper("7", row("Delirium")),
+        paper("8", row("Delirium")),
+    )
+    assert sorted(labels(result)) == [
+        "Delirium",
+        "Delirium screening",
+        "Smoking",
+        "Smoking cessation",
+    ]
+
+
+def test_an_ordinary_qualifier_still_merges() -> None:
+    """The new refusals must not turn the second pass off. `preoperative` narrows the
+    reading; it does not change what is being measured."""
+    result = index(
+        paper("1", row("Cognitive impairment")),
+        paper("2", row("Cognitive impairment")),
+        paper("3", row("Preoperative cognitive impairment")),
+    )
+    assert labels(result) == ["Cognitive impairment"]
+
+
+# --- what the heading over a group may claim --------------------------------
+
+
+def test_a_heading_never_asserts_a_cutoff_the_group_disagrees_on() -> None:
+    """Two papers dichotomizing one variable at different points are studying the same
+    variable, so merging them is right — but naming the result after one of the cutoffs
+    makes the heading false for the other row. Seen twice on real corpora, most recently
+    `Comorbidity index score (≥1)` standing over a `≥8` row."""
+    result = index(
+        paper("1", row("Comorbidity index score (≥1)")),
+        paper("2", row("Charlson comorbidity index score ≥8")),
+    )
+    assert labels(result) == ["Comorbidity index score"]
+
+    group = result.groups[0]
+    assert group.surface_forms == [
+        "Comorbidity index score (≥1)",
+        "Charlson comorbidity index score ≥8",
+    ], "the cutoffs are not lost, only moved off the heading"
+
+
+def test_a_form_the_corpus_wrote_without_a_cutoff_is_preferred_to_stripping_one() -> None:
+    """Stripping is the fallback. If any paper named the bare variable, that is the
+    heading — it is a phrase somebody actually wrote."""
+    result = index(
+        paper("1", row("Age ≥70 years")),
+        paper("2", row("Age ≥79 years")),
+        paper("3", row("Age")),
+    )
+    assert labels(result) == ["Age"]
+
+
+def test_a_cutoff_every_paper_agrees_on_stays_in_the_heading() -> None:
+    """Nothing to disambiguate, so nothing is taken away. Removing a shared cutoff would
+    make the heading vaguer than the corpus."""
+    result = index(
+        paper("1", row("Sleep duration ≤6h/d")),
+        paper("2", row("Sleep duration ≤6h/d")),
+    )
+    assert labels(result) == ["Sleep duration ≤6h/d"]
+
+
+def test_a_predictor_that_is_only_a_number_keeps_its_name() -> None:
+    """Stripping would leave nothing at all, and a group has to be called something."""
+    result = index(
+        paper("1", row("ASA ≥3")),
+        paper("2", row("ASA 4")),
+    )
+    assert labels(result) == ["ASA"]
+
+
 def test_two_phrases_that_merely_share_words_are_not_merged() -> None:
     """Overlap is not containment. These share `intake` and nothing else that matters."""
     result = index(
