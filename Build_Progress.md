@@ -35,6 +35,45 @@ and the alternatives that were rejected and why.
 
 ---
 
+## 2026-08-03 — README: the schematic redrawn, and a pause documented in the wrong place
+
+Post-step-10 fix, prompted by the diagram being hard to follow on GitHub.
+
+**A real error, not just a layout complaint: pause 2 was drawn and described after *curation*.** It is
+after **`rank`** — the graph is compiled `interrupt_after=["charter", "rank"]`. The placement is the
+entire point of that pause: it lands *before* `screen`, which is the highest-volume call in the run,
+so approving the pool is what bounds the bill. Documented after curation, it reads as a formality
+that happens once the money is already spent. Fixed in the diagram and in the prose, which now also
+says why the pauses are interrupts rather than prompts inside a node.
+
+**The ASCII schematic is now Mermaid**, which GitHub renders natively. Amber nodes are agents, gray
+is code, blue is you — so "which of these is an agent" is carried by color and an explicit
+`· DEEP agent` label, rather than by a bare role tag the reader has to decode.
+
+- **Laid out as four left-to-right rows stacked top-to-bottom**, not one vertical column. Thirteen
+  nodes in a single column rendered 3200 px tall — a scroll marathon nobody reads. Rows bring it to
+  1584 × 823. A pure `LR` flow is the other trap: it comes out wide enough that GitHub scales the
+  text down to unreadable.
+- **First draft put the table's detail in the node labels**, which is what made the boxes tall. The
+  table below the diagram already carries the detail; the diagram carries the shape.
+- **`p2` must live inside the loop subgraph.** Outside it, with `rank` and `screen` inside, Mermaid
+  pushed it out to the far left and drew a long lateral edge across the figure.
+- Rendered with `@mermaid-js/mermaid-cli` and inspected before committing rather than pushed and
+  eyeballed on GitHub — `<b>` and `<br/>` both survive, and the cluster fill needed overriding
+  because Mermaid's default yellow fights the amber agent nodes.
+
+**`search` is now described accurately.** It had read "writes the PubMed query plan", which hides the
+two-stage split: `charter` (DEEP) produces each shelf's **seed terms**, and `search` (MID) turns
+those into real queries. Both the diagram and the node table now say so, and both record that a
+re-query round is `queries.gap_plan` — built **in code** from the curator's gap list, not a second
+agent call.
+
+**Caveat for whoever publishes this:** `pyproject.toml` sets `readme = "README.md"`, and PyPI does
+not render Mermaid — it would show the block as source. Private and unpublished, so GitHub
+readability wins for now; revisit at publish time.
+
+---
+
 ## 2026-08-03 — Step 10: `export`, `inspect`, the README, and the downstream gate
 
 **Status:** complete, and the build with it. The gate is met: a finished bundle dropped into a

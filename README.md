@@ -163,42 +163,57 @@ A LangGraph pipeline of thirteen nodes, checkpointed to SQLite so an interrupted
 it stopped. Two of the edges are conditional: curation can send the graph back for another search
 round, and ranking can end it early when nothing survived.
 
-```
-              plain-language task            or  --charter charter.yaml
-                       │
-                       ▼
-          ┌─────────────────────────┐
-          │  charter        DEEP    │   shelf taxonomy · vocabularies · population · outcome
-          └────────────┬────────────┘
-                       │   ⏸  pause 1 — you read and edit the charter
-                       ▼
-  ┌────────────────────────────────────────────────────────────────────┐
-  │   search  MID  ─▶  dedupe  ─▶  rank  ─▶  screen  FAST  ─▶  curate  MID
-  │      ▲                                                        │    │
-  │      └────────  re-query round, for the shelves that came up short  │
-  └────────────────────────────────┬───────────────────────────────────┘
-                       │   ⏸  pause 2 — you approve the curated set
-                       ▼
-       fulltext  ─▶  extract  DEEP  ─▶  reconcile  ─▶  review
-                       │
-                       ▼
-       emit_okf  ─▶  validate  ─▶  index_vectors
-                       │                    │
-                       ▼                    ▼
-                  <bundle>/          <bundle>.chroma/
-                       │                    │
-                       └────────┬───────────┘
-                                ▼
-                  resources/ of a downstream
-                  feature-construction agentic system
+**Amber is a model making a judgment; gray is deterministic code; blue is you.** Five of the
+thirteen nodes are agents, and each one is labeled with the model role it runs on.
+
+```mermaid
+flowchart TB
+    subgraph r1 ["decide what to look for"]
+        direction LR
+        task(["your task,<br/>in plain language"]) --> charter["<b>charter</b> · DEEP agent<br/>task → shelves, scope,<br/>seed terms"] --> p1{{"PAUSE 1<br/>read and edit<br/>the charter"}}
+    end
+
+    subgraph r2 ["find and curate — repeats up to --max-rounds"]
+        direction LR
+        search["<b>search</b> · MID agent<br/>seed terms → real<br/>PubMed queries"] --> dedupe["<b>dedupe</b> · code<br/>PMID, DOI,<br/>normalized title"] --> rank["<b>rank</b> · code<br/>recency, citations,<br/>MMR"] --> p2{{"PAUSE 2<br/>approve the pool,<br/>before screening<br/>is paid for"}} --> screen["<b>screen</b> · FAST agent<br/>keep? and which shelf<br/>one call per abstract"] --> curate["<b>curate</b> · MID agent<br/>what to keep, and<br/>what is missing"]
+        curate -. "thin shelves — gap queries built in code" .-> search
+    end
+
+    subgraph r3 ["read and record"]
+        direction LR
+        fulltext["<b>fulltext</b> · code<br/>BioC check,<br/>license verbatim"] --> extract["<b>extract</b> · DEEP agent<br/>predictors, nulls,<br/>vocabulary hints"] --> reconcile["<b>reconcile</b> · code<br/>every number<br/>re-checked in the text"] --> review["<b>review</b> · you, with --review<br/>sign-off → verified:"]
+    end
+
+    subgraph r4 ["write the bundle"]
+        direction LR
+        emit["<b>emit_okf</b> · code<br/>markdown, indexes,<br/>catalog, descriptor"] --> validate["<b>validate</b> · code<br/>the OKF contract,<br/>as a gate"] --> vectors["<b>index_vectors</b> · code<br/>embeds the<br/>finished bundle"] --> out(["bundle/ + bundle.chroma/<br/>→ resources/ of a downstream<br/>feature-construction agentic system"])
+    end
+
+    p1 --> search
+    curate --> fulltext
+    review --> emit
+    rank -. "nothing survived" .-> out
+
+    classDef agent fill:#fcd34d,stroke:#b45309,stroke-width:2px,color:#111827
+    classDef code fill:#e5e7eb,stroke:#6b7280,color:#111827
+    classDef human fill:#93c5fd,stroke:#1d4ed8,stroke-width:2px,color:#111827
+    classDef io fill:#a7f3d0,stroke:#047857,color:#111827
+    class charter,search,screen,curate,extract agent
+    class dedupe,rank,fulltext,reconcile,emit,validate,vectors code
+    class p1,p2,review human
+    class task,out io
+    style r1 fill:#f8fafc,stroke:#cbd5e1,color:#475569
+    style r2 fill:#f8fafc,stroke:#cbd5e1,color:#475569
+    style r3 fill:#f8fafc,stroke:#cbd5e1,color:#475569
+    style r4 fill:#f8fafc,stroke:#cbd5e1,color:#475569
 ```
 
 ### Agents only for judgment
 
 | Node | Who | What it decides |
 |---|---|---|
-| `charter` | **DEEP** model | Turns the task into shelves, vocabularies, population and outcome |
-| `search` | **MID** model | Writes the PubMed query plan; the HTTP is code |
+| `charter` | **DEEP** model | Turns your task into population, outcome, inclusion rules, vocabularies, and a shelf taxonomy — each shelf carrying its own seed terms |
+| `search` | **MID** model | Turns those seed terms into real PubMed queries — field tags, MeSH, date and language limits. Running them is code, and the re-query round is built in code from the curator's gap list, not by asking a model twice |
 | `dedupe` | code | PMID / DOI / normalized title |
 | `rank` | code | Recency, citations (iCite), and MMR for diversity |
 | `screen` | **FAST** model | Include or exclude, and which shelf, one call per abstract |
@@ -221,10 +236,16 @@ curation, **DEEP** for the charter and extraction. Any provider LiteLLM supports
 
 ### Two pauses, on purpose
 
-A run stops after the charter and again after curation. Both are the cheap moments: a bad shelf
-taxonomy caught at the first pause costs nothing, and the same taxonomy caught after extraction has
-already been paid for. `--yes` skips both; `--dry-run` prints the plan and its projected cost
-having made zero LLM calls.
+A run stops after the charter and again after ranking. Both are the cheap moments, and the second
+one is placed deliberately: it comes *before* the screener, which is the highest-volume call in the
+run by a wide margin. You see the pool that was actually retrieved and decide whether it is worth
+screening at all. A bad shelf taxonomy caught at the first pause costs nothing; the same taxonomy
+caught after extraction has already been paid for twice.
+
+They are interrupts, not prompts inside a node — the graph is compiled with
+`interrupt_after=["charter", "rank"]` against a SQLite checkpointer, so the state is written whether
+or not anyone answers. That is what makes `--resume <run-id>` work, and what keeps nodes printless.
+`--yes` skips both; `--dry-run` prints the plan and its projected cost having made zero LLM calls.
 
 ---
 
