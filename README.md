@@ -260,6 +260,7 @@ okf-loremaster build "<your question>" -o my-corpus  # do it
 | Flag | Default | |
 |---|---|---|
 | `-o, --out` | a dated name | folder name, under the output directory |
+| `--charter <file>` | drafted from your question | reuse a saved `charter.yaml`; see [Reusing a charter](#reusing-a-charter) |
 | `--dry-run` | off | plan and cost the run without calling a model |
 | `--finalize okf\|vectors\|both` | asks at the end | `okf` skips the embedding pass entirely |
 | `--interactive`, `-i` | off | stop at the charter, and again at the pool |
@@ -276,6 +277,38 @@ okf-loremaster build "<your question>" -o my-corpus  # do it
 `--finalize` is asked at the end rather than up front so you can see what was built before
 deciding. One caveat: the embedding pass runs during the build, so answering "OKF only" at the
 prompt discards work that already happened. Pass `--finalize okf` up front to skip it instead.
+
+### Quoting a run somewhere else
+
+`--tui` draws over the scrollback, so when it closes its output is gone. Every run therefore saves
+its log to `<run>/run.log` as plain text — no color, no markup, and including the lines the pane
+scrolled past — ending with what the run cost. The path is printed when the run finishes.
+
+```bash
+cat bundles/my-run/run.log
+```
+
+On screen, drag to select and press `c`. That copy goes through an escape sequence some terminals
+discard — macOS Terminal is one — so if nothing lands on the clipboard, either hold Option while
+dragging, which uses the terminal's own selection, or use the file.
+
+### Reusing a charter
+
+Every run writes the charter it worked from to `<run>/charter.yaml`. Hand it back with `--charter`
+and the reasoning call is skipped entirely — the run starts from that document instead of drafting
+a new one. The question comes off the charter too, so there is nothing to retype.
+
+```bash
+okf-loremaster build --charter bundles/first-attempt/charter.yaml -o second-attempt --tui
+```
+
+Three things it is for. **Editing.** Stopping at the charter pause tells you to go and edit
+`charter.yaml`; this is how you feed the edited file back. **Comparing.** A charter is drafted by a
+model, so the same question asked twice gives two different runs — pinning the charter is the only
+way to change one thing and see what it did. **Saving.** A charter you are happy with is worth
+keeping; it is short, readable YAML, and it is the whole scope of a run in one file.
+
+Not combinable with `--resume`, which replays the charter its run was built with.
 
 ### Stopping and resuming
 

@@ -220,6 +220,15 @@ def build(
         str | None,
         typer.Argument(help="What you want to know. Not needed with --resume."),
     ] = None,
+    charter: Annotated[
+        Path | None,
+        typer.Option(
+            "--charter",
+            help="Reuse a charter.yaml instead of drafting one. Skips the reasoning call.",
+            exists=True,
+            dir_okay=False,
+        ),
+    ] = None,
     out: Annotated[
         Path | None,
         typer.Option("-o", "--out", help="Folder name, under the output directory."),
@@ -306,6 +315,18 @@ def build(
     # incoherent. A dry run's deliverable *is* the printed plan, and a full-screen app
     # takes the screen back when it closes; a terminal that cannot drive a live region
     # cannot drive an app either.
+    if charter is not None and resume is not None:
+        # Refused rather than ranked. A resumed run replays from its checkpoint, where
+        # the charter node has already run and its answer is recorded, so a charter
+        # passed here would be read, reported in `--help` as doing something, and then
+        # quietly ignored. Silently disregarding a file the user named is worse than
+        # stopping.
+        console.print(
+            "[red]--charter cannot be combined with --resume[/red] — a resumed run "
+            "replays the charter it was built with. Start a fresh run to use another."
+        )
+        raise typer.Exit(code=1)
+
     full_screen = tui
     if tui and dry_run:
         console.print("[dim]note[/dim]  --dry-run prints its plan, so --tui is not used here.")
@@ -320,6 +341,7 @@ def build(
 
     options = RunOptions(
         prompt=prompt or "",
+        charter_path=charter,
         out=out,
         pool_size=pool_size,
         screen_budget=screen_budget,

@@ -250,6 +250,75 @@ async def test_a_progress_line_with_no_counter_is_shown_without_asking_for_verbo
     assert "rank: citation metrics for" in log
 
 
+def panel_text(app: LoremasterApp, which: str) -> str:
+    """A widget as it is painted — the pipeline pane, or the meter.
+
+    Read off the rendered lines rather than the renderable: Textual 8 wraps what a
+    `Static` was given in a `Visual`, so there is no attribute holding the Rich object
+    back, and the painted text is the honest thing to assert on anyway.
+    """
+    from textual.geometry import Region
+    from textual.widgets import Static
+
+    widget = app.query_one(f"#{which}", Static)
+    lines = widget.render_lines(Region(0, 0, widget.size.width, widget.size.height))
+    return "\n".join("".join(segment.text for segment in line) for line in lines)
+
+
+async def test_a_node_with_nothing_to_count_still_shows_that_it_is_moving(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one place a run looks hung.
+
+    Everything else on screen changes when a node reports something, and a model call
+    reports nothing until it answers. The charter is one reasoning-tier request with a
+    300-second timeout behind it, so a working run and a hung one were indistinguishable
+    for up to five minutes. `_tick` is driven directly rather than by waiting on the real
+    clock — what is under test is that a tick moves the display, not that Textual can
+    schedule one.
+    """
+    from okf_loremaster.events import NodeStarted
+
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: asking(app))
+        # The pause sits *between* nodes, so the charter has already finished and reports
+        # its duration. Started by hand to hold a node open, which a real slow call does
+        # and a fake corpus never will.
+        app._handle(NodeStarted(node="screen"))
+        for _ in range(3):
+            app._tick()
+        await pilot.pause()
+        panel, meter = panel_text(app, "nodes"), panel_text(app, "meter")
+        await pilot.press("q")
+
+    assert "3s" in panel, "the running node does not say how long it has been running"
+    assert "0m03s" in meter
+
+
+async def test_the_clock_stops_when_the_run_does(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finished run that keeps counting reads as one that is still going."""
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path, interactive=False)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: app.outcome is not None)
+        settled = app._elapsed
+        for _ in range(3):
+            app._tick()
+        await pilot.press("q")
+
+    assert app._elapsed == settled
+
+
 # --- getting the run out of the terminal --------------------------------------
 
 
@@ -280,14 +349,64 @@ async def test_the_log_is_kept_as_text_so_it_can_be_pasted_rather_than_photograp
     assert "\x1b[" not in written, "written to be pasted, so no color codes"
 
 
+async def test_the_transcript_ends_with_what_the_run_cost(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tokens and dollars live on the meter, which is a widget and not a log line.
+
+    So the one number somebody opens a transcript to find was the one thing the transcript
+    did not have. A real run's `run.log` held a pre-run estimate table and no total, which
+    is worse than nothing: the estimate reads like an actual.
+    """
+    from okf_loremaster.run import TRANSCRIPT_FILENAME
+
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path, interactive=False)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: app.outcome is not None)
+        await pilot.press("q")
+
+    assert app.outcome is not None
+    last = (app.outcome[1] / TRANSCRIPT_FILENAME).read_text(encoding="utf-8").strip()
+    assert "tok" in last.rsplit("\n", 1)[-1]
+
+
 def test_copying_a_selection_is_in_the_footer_where_it_can_be_found() -> None:
     """Textual has selected on drag and copied on ctrl+c since 7.0, bound with
     `show=False`. Undiscoverable is the same as missing when the reason the log pane
     exists is that a warning can be quoted somewhere else."""
-    copies = [b for b in LoremasterApp.BINDINGS if getattr(b, "action", "") == "screen.copy_text"]
+    copies = [b for b in LoremasterApp.BINDINGS if getattr(b, "action", "") == "copy"]
 
     assert copies, "nothing in the footer says a selection can be copied"
     assert all(b.show for b in copies)
+
+
+async def test_pressing_copy_with_nothing_selected_says_so_instead_of_nothing(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Textual's `screen.copy_text` raises `SkipAction` on an empty selection, so the key
+    advertised in the footer did nothing at all and the app looked broken. It is a missing
+    drag, and the message that says so also names the file that needs no drag."""
+    from okf_loremaster.run import TRANSCRIPT_FILENAME
+
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path, interactive=False)
+    said: list[str] = []
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: app.outcome is not None)
+        monkeypatch.setattr(app, "notify", lambda message, **kw: said.append(message))
+        await pilot.press("c")
+        await pilot.press("q")
+
+    assert said, "pressing c with no selection said nothing"
+    assert "nothing selected" in said[0]
+    assert TRANSCRIPT_FILENAME in said[0]
 
 
 async def test_declining_the_charter_stops_the_run_without_failing_it(

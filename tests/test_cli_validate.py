@@ -16,6 +16,7 @@ about.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import typer.main
@@ -71,6 +72,67 @@ def test_resuming_does_not_require_the_question_to_be_typed_again(
     assert result.exit_code == 1
     assert "no run 20200101-000000-dead" in result.output
     assert "no prompt" not in result.output
+
+
+def test_a_saved_charter_can_be_handed_back_to_a_fresh_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The workflow the charter pause has always assumed and the CLI could not reach.
+
+    Declining at the first pause tells the user to go and edit `charter.yaml`, and every
+    run writes one — but `--charter` did not exist, so there was no way to hand the
+    edited file back. It also makes a rerun comparable: a charter is drafted by a
+    nondeterministic reasoning call, so the same prompt twice is two different runs and
+    a fix cannot be checked against the charter that broke.
+    """
+    charter = tmp_path / "charter.yaml"
+    charter.write_text(
+        "prompt: a question\ntask: a question\npopulation: adults\noutcome: an outcome\n",
+        encoding="utf-8",
+    )
+    seen: list[Any] = []
+
+    async def stop(options: Any, **kwargs: Any) -> Any:
+        seen.append(options)
+        raise ValueError("reached the runner")
+
+    monkeypatch.setattr("okf_loremaster.run.build_run", stop)
+    result = runner.invoke(app, ["build", "--charter", str(charter)])
+
+    # No prompt on the command line: it comes off the charter, which is the point.
+    assert "no prompt" not in result.output
+    assert seen and seen[0].charter_path == charter
+
+
+def test_a_charter_is_refused_with_resume_rather_than_read_and_ignored(
+    tmp_path: Path,
+) -> None:
+    """A resumed run replays the charter node from its checkpoint. Accepting a file here
+    and then disregarding it is the failure mode worth refusing outright."""
+    charter = tmp_path / "charter.yaml"
+    charter.write_text("prompt: a question\ntask: a question\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app, ["build", "--charter", str(charter), "--resume", "20200101-000000-dead"]
+    )
+
+    assert result.exit_code == 1
+    assert "--charter cannot be combined with --resume" in result.output
+
+
+def test_a_charter_that_is_not_there_is_named_before_anything_starts(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(app, ["build", "--charter", str(tmp_path / "nope.yaml")])
+
+    assert result.exit_code != 0
+    assert "nope.yaml" in _uncolored(result.output)
+
+
+def _uncolored(output: str) -> str:
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", output)
 
 
 def test_with_no_runs_yet_the_listing_says_so_rather_than_failing(

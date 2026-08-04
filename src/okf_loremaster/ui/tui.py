@@ -236,7 +236,7 @@ class LoremasterApp(App[None]):
     # visible binding on the same action puts it in the footer where it can be found.
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "stop", "quit"),
-        Binding("c", "screen.copy_text", "copy selection"),
+        Binding("c", "copy", "copy selection"),
     ]
 
     def __init__(
@@ -273,6 +273,11 @@ class LoremasterApp(App[None]):
         self._errors = 0
         self._progress: tuple[int, int] | None = None
         self._transcript: list[RenderableType] = []
+        # Seconds, counted by `_tick` rather than measured, so nothing here needs a wall
+        # clock. Whole run, and the current node — the second is what answers "is this
+        # stuck", because it resets and the first never does.
+        self._elapsed = 0
+        self._node_elapsed = 0
 
     # --- layout ------------------------------------------------------------
 
@@ -303,6 +308,7 @@ class LoremasterApp(App[None]):
                 "[dim]drag to select · c or ctrl+c copies · q stops and checkpoints[/dim]"
             )
         )
+        self.set_interval(1.0, self._tick)
         # `exit_on_error=False` because a failed run is a result to be reported, not a
         # crash: the exception is stored and re-raised by the caller once the app closes.
         self._worker = self.run_worker(self._drive(), name="build", exit_on_error=False)
@@ -377,6 +383,34 @@ class LoremasterApp(App[None]):
         """Send to the log pane what a modal would have shown, on an autonomous run."""
         self._write(item)
 
+    # --- getting text out --------------------------------------------------
+
+    def action_copy(self) -> None:
+        """`c`. Textual's own copy, plus a sentence about what just happened.
+
+        Its `screen.copy_text` does nothing visible in both of the cases that actually
+        occur: with no selection it raises `SkipAction`, and with one it writes an OSC 52
+        escape that — per Textual's own docstring — macOS Terminal discards. Pressing a
+        key advertised in the footer and getting silence reads as a broken app, when the
+        first case is a missing drag and the second is the terminal. Both have an answer,
+        and `run.log` is the answer that never depends on either.
+        """
+        selection = self.screen.get_selected_text()
+        if not selection:
+            self.notify(
+                "nothing selected — drag over the log first. The whole run is saved to "
+                f"{TRANSCRIPT_FILENAME} beside the bundle either way.",
+                title="copy",
+                severity="warning",
+            )
+            return
+        self.copy_to_clipboard(selection)
+        self.notify(
+            f"{len(selection):,} characters sent to the clipboard. macOS Terminal ignores "
+            f"this; iTerm2 and Ghostty do not, and {TRANSCRIPT_FILENAME} always works.",
+            title="copy",
+        )
+
     # --- quitting ----------------------------------------------------------
 
     def action_stop(self) -> None:
@@ -406,6 +440,7 @@ class LoremasterApp(App[None]):
             case NodeStarted():
                 self._node = event.node
                 self._progress = None
+                self._node_elapsed = 0
                 self._status[event.node] = RUNNING
                 self._refresh_nodes()
                 # In the log as well as in the pipeline pane. The pane says which node is
@@ -495,7 +530,9 @@ class LoremasterApp(App[None]):
         """
         buffer = io.StringIO()
         Console(file=buffer, width=100, no_color=True, force_terminal=False).print(
-            *self._transcript, sep="\n"
+            *self._transcript,
+            Text.from_markup(self._meter()),
+            sep="\n",
         )
         # A run whose output is on disk is not a failure because its transcript could not
         # be. The lines are still on screen either way.
@@ -509,16 +546,46 @@ class LoremasterApp(App[None]):
         table.add_column(justify="right", style="dim")
         for node in NODES:
             style = "bold" if node == self._node else ""
+            # A running node with nothing to count shows how long it has been running
+            # instead of an empty cell — that is the charter, and it is the one place a
+            # run looks hung. A counter wins where there is one: `12/40` says more.
+            detail = self._detail[node]
+            if node == self._node and not detail and not self._done:
+                detail = f"{self._node_elapsed}s"
             table.add_row(
                 Text.from_markup(self._status[node]),
                 Text(node, style=style),
-                Text(self._detail[node]),
+                Text(detail),
             )
         self.query_one("#nodes", Static).update(table)
 
-    def _refresh_meter(self) -> None:
+    def _tick(self) -> None:
+        """Move the clock once a second, whether or not an event arrived.
+
+        Everything else on the meter changes only when a node reports something, and a
+        model call reports nothing until it answers. The charter is one reasoning-tier
+        request with a 300-second timeout behind it, so a working run and a hung one
+        looked exactly alike for up to five minutes. A number that keeps moving is the
+        difference, and it costs one repaint a second.
+        """
+        if self._done:
+            return
+        self._elapsed += 1
+        self._node_elapsed += 1
+        self._refresh_meter()
+        self._refresh_nodes()
+
+    def _meter(self) -> str:
+        """The meter line as markup — what tokens and dollars this run has spent.
+
+        Separate from painting it because it is also the last line of the transcript. The
+        meter is a widget, not a log line, so a run's actual cost was on screen and
+        nowhere else: `run.log` held the pre-run estimate and no total, which is the one
+        number somebody reads a transcript to find.
+        """
         cost = format_cost(self._usd, calls=self._calls, unpriced=self._unpriced)
-        parts = [self._node or "starting", f"{self._tokens:,} tok", cost]
+        clock = f"{self._elapsed // 60}m{self._elapsed % 60:02d}s"
+        parts = [self._node or "starting", clock, f"{self._tokens:,} tok", cost]
         if self._progress is not None:
             current, total = self._progress
             parts.insert(1, f"{current}/{total}")
@@ -530,7 +597,10 @@ class LoremasterApp(App[None]):
             parts = ["[green]finished[/green] — press q to close", *parts[1:]]
         elif self._stopping:
             parts = ["[yellow]stopping[/yellow]", *parts[1:]]
-        self.query_one("#meter", Static).update(Text.from_markup("  ".join(parts)))
+        return "  ".join(parts)
+
+    def _refresh_meter(self) -> None:
+        self.query_one("#meter", Static).update(Text.from_markup(self._meter()))
 
 
 async def build_run_tui(
