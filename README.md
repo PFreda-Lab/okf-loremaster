@@ -12,8 +12,9 @@ writes a directory of markdown documents in
 okf-loremaster build "predictors of 30-day readmission after heart failure hospitalization" --index
 ```
 
-The run is autonomous end to end. `--interactive` adds two checkpoints for anyone who wants to
-steer it, and `--review` adds a sign-off step at the end; neither is required.
+By default the run goes from question to finished bundle without stopping to ask you anything. Add
+`--interactive` for two checkpoints where you can look at what it has done and redirect it, and
+`--review` for a sign-off step before the bundle is written. Both are optional.
 
 - [Who this is for](#who-this-is-for)
 - [What it produces](#what-it-produces)
@@ -49,9 +50,9 @@ feature-construction agent can rank candidates by effect size, avoid proposing w
 reported as null, respect the timing that separates a legitimate predictor from leakage, and weigh a
 full-text claim differently from an abstract-derived one.
 
-The target size is 120–250 papers. That is a browsability ceiling rather than a recall target: it is
-roughly the size at which an agent can still read the whole corpus. This is not a systematic-review
-tool.
+The target size is 120–250 papers — roughly the most an agent can still read end to end. It is a cap
+on how big the corpus should get, not a claim about how much has been published. This is not a
+systematic-review tool.
 
 OKF is a public format. A bundle is plain markdown and YAML, so any consumer that reads OKF reads
 this one. The coupling to a downstream system is files on disk — no shared import, no shared
@@ -137,7 +138,7 @@ Quoted from the paper, by row:
 Pooled across trials with heterogeneous protocols and durations.
 ````
 
-Three properties of that document matter more than the rest:
+Three things about this document matter more than the rest:
 
 **The quote line under the table.** Every effect size is reproduced beside the sentence it came
 from, **exactly as published** — typography, brackets, the mangled `=< 0.01` and all. That is the
@@ -147,8 +148,8 @@ post-processing pass, which downgrades the row's confidence and logs a warning r
 the run.
 
 **`# Null or non-significant findings` is never omitted.** A paper that reported none says so
-explicitly. An absent section and a null result are different claims, and a validator inserts the
-placeholder, so omission is impossible rather than merely discouraged.
+explicitly. A missing section and a reported null are not the same claim, and a validator inserts
+the placeholder, so the section cannot be left out by accident.
 
 **`text_basis` and `license` are recorded per document.** Most of PubMed is abstract-only under
 publisher copyright; a minority is open access. The bundle records which is which for every paper,
@@ -168,9 +169,8 @@ search round, and ranking can end it early if nothing survived.
 
 ### The three model tiers
 
-Five of the thirteen stages call a language model. Rather than naming a specific model in the code,
-each of those stages asks for a **tier**, and configuration decides which model serves it. The tiers
-are:
+Five of the thirteen stages call a language model. No stage names a specific model. Instead each one
+asks for a **tier**, and your configuration decides which model that tier maps to. The tiers are:
 
 | Tier | Meaning | Used by |
 |---|---|---|
@@ -183,8 +183,9 @@ be made per tier instead of per run. Any provider LiteLLM supports will work.
 
 ### The pipeline
 
-**Amber is a model deciding. Gray is deterministic code. Every dashed blue box and dashed blue
-arrow is a switch that is off — those three steps do not happen unless a flag turns them on.**
+**Yellow boxes are decisions made by a language model. Gray boxes are ordinary code. Dashed blue
+boxes and arrows are optional steps that only run when you turn them on — the two pauses need
+`--interactive`, and the review step needs `--review`.**
 
 ```mermaid
 flowchart TB
@@ -243,7 +244,7 @@ if asked for.
 
 | Stage | Decided by | What it decides |
 |---|---|---|
-| `charter` | REASONING model | Turns the task into a population, an outcome, inclusion rules, vocabularies, and a set of topics — each topic carrying its own seed terms |
+| `charter` | REASONING model | Turns the task into a population, an outcome, inclusion rules, vocabularies, and a set of topics — each topic carrying its own seed terms. The prompt asks it to first list every way the outcome could vary and only then group those into topics, and to look beyond the one specialty the question most obviously belongs to |
 | `search` | BALANCED model | Turns those seed terms into real PubMed queries: field tags, MeSH, date and language limits. Running the queries is code, and a follow-up round is assembled in code from the curator's list of gaps rather than by asking a model a second time |
 | `dedupe` | code | Collapses duplicates by PMID, DOI and normalized title |
 | `rank` | code | Orders candidates by recency and citation count, then spreads the selection across topics for diversity |
@@ -270,6 +271,15 @@ which is the highest-volume model call in the run by a wide margin, so a pool wo
 rejected before it is paid for. A wrong set of topics caught at the first checkpoint costs almost
 nothing; the same mistake caught after extraction has been paid for twice.
 
+The first checkpoint is worth taking on a question you have not run before, because **the charter is
+the only stage that decides how broad the review is.** No later stage can widen it: the screener
+files papers into the topics that already exist, and the curator's `missing` field adds depth to a
+topic rather than adding a new one. If a whole class of predictor is missing from the charter, it
+will be missing from the bundle. The prompt pushes against this — it asks the model to list the
+mechanisms first and to check whether all its topics come from the same specialty — but reading the
+charter yourself once is cheaper than hoping that worked. Use `okf-loremaster charter "<task>"` to
+draft one on its own, edit it, then build from it with `--charter path/to/charter.yaml`.
+
 Without the flag the run does not stop, but it still prints both views — the charter it drafted and
 the pool it retrieved, with the projected cost — so an unattended run is not a silent one.
 
@@ -283,9 +293,10 @@ model calls.
 
 ## The interface
 
-Two renderers over the same event stream. **Stages never print** — they emit typed events and a
-renderer subscribes. That is what lets the console, the full-screen interface and `--json` be exact
-views of one run rather than three code paths that drift.
+Three ways to watch a run, all reading the same stream of events. **No stage prints anything
+itself** — each one emits typed events and a renderer displays them. That is why the console, the
+full-screen interface and `--json` always agree: they are three views of one run rather than three
+separate code paths that can drift apart.
 
 **Console** (default) — progress per stage, live token and cost meters, and a summary at the end.
 
@@ -341,10 +352,9 @@ name; **papers** is how many documents that folder holds; **full text** is how m
 read from full text rather than from the abstract alone; **predictors** counts predictor rows across
 those papers; **permissive** counts documents whose license permits redistribution.
 
-The `effect sizes` line is the one worth reading closely. It separates magnitudes that numeric
-verification confirmed against the source text from rows where the paper reported no magnitude at
-all — the difference between a corpus an agent can quote with a number and one it can only
-paraphrase.
+The `effect sizes` line is the one worth reading closely. `verified` counts numbers that were found
+in the source text when re-checked; `reported none` counts rows where the paper gave no magnitude at
+all. An agent can quote the first kind with a number and can only paraphrase the second.
 
 ---
 
@@ -436,10 +446,10 @@ Build a bundle end to end. Pass a task, or `--charter` a drafted one.
 | `--json` | off | Machine-readable events on stdout |
 | `-v, --verbose <int>` | `0` | Verbosity |
 
-`--review` is refused in combination with `--dry-run` or `--json`: each of those means nobody is
-going to read the bundle, and signing anyway would write an attestation naming a person who never
-saw it. It combines freely with the default autonomous run — signing off on a finished bundle and
-steering the search that produced it are separate decisions.
+`--review` is refused alongside `--dry-run` or `--json`: each of those means nobody is going to read
+the bundle, and signing anyway would record a person's name against something they never saw. It
+does work on a normal autonomous run, though — signing off on a finished bundle and steering the
+search that produced it are separate decisions.
 
 ### `index <bundle>`
 
@@ -455,8 +465,8 @@ order, a catalog that disagrees with the disk, an unresolvable link, a duplicate
 quality signals: an untagged document, an empty topic, an unmapped vocabulary key, a remote
 embedding model a consumer will reject. Warnings never fail the gate.
 
-This is the same code the run itself uses, reached without a run — which is the only way to check a
-bundle somebody else built, or one built six months ago.
+This is the same code the run uses, just available on its own. It is the only way to check a bundle
+somebody else built, or one built six months ago.
 
 ### `export <bundle> -o <dest>`
 
@@ -474,8 +484,8 @@ validates and attaches on its own. Three details are worth knowing:
   means the file was hand-edited; a redistribution decision takes the conservative side, and the
   file is named in a warning rather than dropped silently.
 
-An emptied topic keeps its directory and an index saying so — "no papers survived the filter" and
-"this topic does not exist" are different claims.
+A topic that the filter empties still keeps its directory, with an index saying every paper was
+filtered out. That way a consumer can tell an empty topic from one that was never there.
 
 ### `inspect <bundle>`
 
@@ -530,10 +540,11 @@ bundle back with the code that wrote it.
 
 ### The vector index
 
-Optional and derived. It is built by **walking the finished bundle**, never by a second extraction
-pass, so running `index <bundle>` a year later produces the same store `build --index` did on the
-day. It sits *beside* the bundle rather than inside it, so nothing that copies a bundle drags a
-binary store along and nothing that reads one mistakes the store for a topic.
+Optional and derived. It is built by **walking the finished bundle**, never by extracting from the
+papers a second time, so running `index <bundle>` a year later produces the same store that
+`build --index` would have produced at the time. It sits *beside* the bundle rather than inside it,
+so copying a bundle does not drag a binary store along and nothing reading a bundle mistakes the
+store for a topic.
 
 Each paper contributes two levels of chunk: one **concept** chunk carrying the whole document except
 the predictor table, and one **predictor** chunk per table row, with the population, outcome
@@ -576,10 +587,11 @@ okf-loremaster validate bundles/hf-readmission
 okf-loremaster inspect  bundles/hf-readmission
 ```
 
-Add `--interactive` to step 3 to be asked before screening is paid for, and `--review` to sign the
-bundle off before it is written. Neither changes what is produced, only who is consulted.
+Add `--interactive` to step 3 to be asked before you pay for screening, and `--review` to sign the
+bundle off before it is written. Neither changes what gets built — only whether you are asked along
+the way.
 
-Then hand it to the downstream system — the whole integration is a copy:
+Then hand it to the downstream system. The whole integration is a copy:
 
 ```bash
 mkdir -p ../my-feature-agent/resources
@@ -587,9 +599,9 @@ cp -R bundles/hf-readmission        ../my-feature-agent/resources/okf
 cp -R bundles/hf-readmission.chroma ../my-feature-agent/resources/rag
 ```
 
-Its evidence agents pick both up by detection: the OKF bundle is browsed and read whole, the vector
-store is queried for recall, and each becomes a separate reviewer rather than one agent's blend of
-the two. Nothing is imported from this package and nothing is imported from that one.
+Its evidence agents find both on their own — no registration step. One agent browses and reads the
+OKF bundle, a second queries the vector store, and they stay separate rather than one agent mixing
+the two. Neither package imports anything from the other.
 
 To share the corpus outside your institution, filter it to what may be redistributed first:
 
@@ -622,7 +634,7 @@ that wrote it, and — with `--review` — who signed it off. OKF v0.2 derives i
 
 `build` runs end to end and writes a validated OKF bundle, `--tui` drives it full screen, `index`
 derives the vector store, and `validate`, `export` and `inspect` work on any conforming bundle
-without an API key. The suite is 1,400+ tests and never reaches the network.
+without an API key. The suite is 1,427 tests and never reaches the network.
 
 ```bash
 conda run -n okf-loremaster pytest        # the suite never reaches the network

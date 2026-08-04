@@ -62,6 +62,22 @@ not query syntax — no field tags, no boolean operators, no quotation marks.
 6. `vocabularies` — the coding or classification systems in which findings from this \
 literature would be recorded, lowercased, as bare keys.
 
+Before you divide anything, list out the distinct ways the outcome could actually vary — \
+the separate mechanisms, exposures, and circumstances that researchers have proposed as \
+explaining it. Build the taxonomy from that list. If you pick the headings first and \
+fill them in afterward, whole classes of predictor never get considered at all.
+
+Look beyond the one field the question obviously belongs to. That field has published \
+the most on this outcome, so it will fill the taxonomy by default unless you go looking \
+elsewhere. What gets left out is what other fields study: causes further upstream, the \
+conditions under which people are treated and measured, and factors acting on the whole \
+person rather than on the mechanism. If every topic you wrote could have come from the \
+same department, you stopped too early.
+
+Widen the explanation, not the question. `population` and `outcome` stay exactly as the \
+request set them. You are asking what could account for that outcome in that population \
+— not about a different outcome, a related condition, or a broader population.
+
 On the taxonomy: divide by the kind of evidence a reader would go looking for, not by \
 publication type or study design. A topic that would hold two papers is not a topic; a \
 topic that would hold half the corpus is two topics.
@@ -230,10 +246,10 @@ paper proposed for this topic at once. Return a single JSON object and nothing e
 Give one decision per paper offered, with its `pmid` copied exactly as given.
 
 Keep a paper when it belongs on this topic specifically, not merely somewhere in the \
-review. Seeing the topic whole is what lets you notice what the screener could not: \
-prefer the paper reporting a usable finding over the one that only mentions the topic, \
-prefer the primary report over a narrative review of it, and where several papers report \
-the same result from the same cohort, keep the fullest one.
+review. Because you see the whole topic at once, you can catch what the screener could \
+not: prefer the paper reporting a usable finding over the one that only mentions the \
+topic, prefer the primary report over a narrative review of it, and where several papers \
+report the same result from the same cohort, keep the fullest one.
 
 The topic's floor and ceiling are given below. Neither is a quota to fill. Keeping a \
 paper that does not belong is worse than a thin topic: a shortfall is refilled by a \
