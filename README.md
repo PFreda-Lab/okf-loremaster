@@ -14,6 +14,10 @@ okf-loremaster build "predictors of 30-day readmission after heart failure hospi
 That is the whole system. One command, running unattended, from question to finished bundle. At the
 end it asks what you want to keep: the OKF corpus, the vector store, or both.
 
+Under the hood it is an agentic system, and a deliberately small one: **five agents, each with a
+single kind of judgment to make**, wrapped in ordinary code that checks their work and does
+everything that is not a judgment. [The roster is below](#the-roster).
+
 ---
 
 ## What you get
@@ -177,31 +181,70 @@ The stages are nodes of a [LangGraph](https://langchain-ai.github.io/langgraph/)
 the state is checkpointed to SQLite as each one finishes. That is what makes a stopped run
 resumable rather than merely restartable, and it is why `--resume` needs nothing but a run id.
 
-Stages that need a model reach for one of three tiers, marked in the diagram in capitals. The tiers
-are named for the job, not for a vendor: you bind each to whatever model you like in `.env`, and
-nothing in the code names a provider. The examples below name families rather than versions, which
-turn over quickly; `.env.example` carries a set of exact ids to start from.
+### The roster
 
-- **FAST** — screening, and nothing else. One call per pooled paper makes this the highest-volume
-  tier by a wide margin, so it wants the cheapest model that can follow a rubric. The judgment is
-  deliberately narrow — keep or drop this abstract, and which topic it belongs to — and a wrong
-  call is recoverable, because curation sees the whole kept set afterward. Examples: Claude Haiku,
-  GPT Luna.
-- **BALANCED** — planning the queries, curating, and reading the papers. Reading is where a run's
-  money goes: one call per kept paper, so two hundred of them against every other stage's handful.
-  It sits on the middle tier rather than the top one because what keeps an extraction honest is
-  code, not model size — every number is checked back against the paper's own text and every quote
-  is sliced out of it, so a number the paper does not contain is stripped no matter which model
-  wrote it. Examples: Claude Sonnet, GPT Terra.
-- **REASONING** — the charter, once. Every later stage inherits it, so a wrong population or a
-  badly drawn set of topics costs the whole run, and no downstream check will catch either. It is
-  a single call, which makes the most capable model you have also the cheapest place to spend.
-  Examples: Claude Opus, GPT Sol.
+Five agents. Each has its own prompt, its own output schema, and its own model tier, and each is
+asked for exactly one kind of judgment. Nothing else in a run calls a model at all.
 
-**Yellow is a decision made by a language model. Gray is ordinary code. Dashed blue only runs when
-you ask for it** — the two pauses need `--interactive`, the sign-off needs `--review`. The green
-cylinder is the extraction cache: a run you resume, or repeat, pays nothing for a paper it has
-already read.
+| Agent | Node | Tier | Calls | The judgment it is asked for |
+|---|---|---|---|---|
+| **Charter Writer** | `charter` | REASONING | 1 | the population, the outcome, the inclusion rules, and the topics the corpus will be filed under |
+| **Query Planner** | `search` | BALANCED | 1 per round | which concepts to search for, and how to combine them |
+| **Screener** | `screen` | FAST | 1 per pooled paper | keep or drop this abstract, and which topic it belongs to |
+| **Curator** | `curate` | BALANCED | 1 per topic | which of the kept papers a topic should hold, and what it is still missing |
+| **Reader** | `extract` | BALANCED | 1 per kept paper | what this paper reports — predictor rows, null findings, vocabulary hints |
+
+**The Charter Writer** goes first and matters most. Everything downstream is scoped by what it
+decides, and no later check catches a wrong population or a badly drawn set of topics. It never
+paraphrases your question back at you: a charter records what was asked for, and a paraphrase of a
+request is not the request.
+
+**The Query Planner** proposes concepts and boolean structure and stops there — the language and
+date filters are added afterward by code, so every query in a plan carries identical ones. It is
+called again, for one topic at a time, when the Curator reports a gap.
+
+**The Screener** is the highest-volume agent by a wide margin and has the narrowest job. One paper
+per call, never a batch: forty abstracts in one call is cheaper per token, but it returns forty
+verdicts whose alignment to the input is the model's to get right, and one dropped row shifts every
+later verdict onto the wrong paper — silently, in the one stage nothing downstream can
+sanity-check. A wrong call here is recoverable, because the Curator sees the whole kept set after.
+
+**The Curator** is the only point in a run where a topic is seen whole, which is what makes "these
+four papers report the same result from the same cohort" noticeable at all. It judges; then
+`curation.enforce_bounds` applies the ceiling, the floor and the global target. Splitting it that
+way is what makes topic sizes reproducible across runs even though the judgment behind them is not.
+
+**The Reader** makes one call per kept paper — two hundred against every other agent's handful — so
+whatever it is bound to sets the price of a run. What keeps it honest is not its tier but the code
+that runs after it: every number is looked for in the text it actually read, every quote is sliced
+out of that text, and anything not found is removed and the row's confidence lowered. That check
+does not improve on a more expensive model, because a number the paper does not contain fails it
+either way.
+
+**Everything else is ordinary code and behaves the same way every time**: deduplication, ranking,
+MMR diversification, license logic, the numeric re-check, `predictors.md`, file writing, validation,
+embedding and indexing. There is no agent that supervises the others, and no agent decides when a
+run ends — the graph does.
+
+### Binding the tiers
+
+The three tiers are named for the job, not for a vendor: you bind each to whatever model you like in
+`.env`, and nothing in the code names a provider. The examples below name families rather than
+versions, which turn over quickly; `.env.example` carries a set of exact ids to start from.
+
+- **FAST** — the Screener, and nothing else. It wants the cheapest model that can follow a rubric.
+  Examples: Claude Haiku, GPT Luna.
+- **BALANCED** — the Query Planner, the Curator and the Reader. The middle tier rather than the top
+  one because what keeps an extraction honest is code, not model size. Examples: Claude Sonnet,
+  GPT Terra.
+- **REASONING** — the Charter Writer, once. A single call, which makes the most capable model you
+  have also the cheapest place to spend. Examples: Claude Opus, GPT Sol.
+
+### The graph
+
+**Yellow is one of the five agents. Gray is ordinary code. Dashed blue only runs when you ask for
+it** — the two pauses need `--interactive`, the sign-off needs `--review`. The green cylinder is the
+extraction cache: a run you resume, or repeat, pays nothing for a paper it has already read.
 
 ```mermaid
 %%{init: {"theme":"base","flowchart":{"wrappingWidth":260},"themeVariables":{"fontSize":"19px","lineColor":"#475569","primaryTextColor":"#111827"}}}%%
@@ -260,10 +303,6 @@ flowchart TB
     style r4 fill:#f8fafc,stroke:#cbd5e1,color:#475569
     style r5 fill:#f8fafc,stroke:#cbd5e1,color:#475569
 ```
-
-**A model is used only where there is a judgment to make** — framing the task, writing queries,
-screening, curating, reading a paper. Deduplication, ranking, license logic, the numeric re-check,
-file writing and validation are code, and behave the same way every time.
 
 **The charter** is the first thing a run produces: your question turned into a population, an
 outcome, inclusion rules, and the topics the corpus will be filed under. It governs every stage
