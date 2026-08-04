@@ -246,6 +246,40 @@ async def test_a_highly_cited_paper_outranks_a_quiet_one(
     assert metrics[RETRACTED].rcr_or_default > metrics[NO_PMC].rcr_or_default
 
 
+def test_a_batch_of_ids_never_builds_a_url_icite_refuses() -> None:
+    """iCite answers an over-long URL with HTTP 413, and the old batch of 500 always
+    built one: every run with a real pool ranked with no citation metrics, and said so
+    in a single line that read like the service was down.
+
+    Measured 2026-08-04: a 4,107-character URL answered, 4,217 did not.
+    """
+    from okf_loremaster.clients.icite import ID_BUDGET, batches
+
+    chunks = list(batches([str(30000000 + i) for i in range(1310)]))
+
+    assert all(len(",".join(chunk)) <= ID_BUDGET for chunk in chunks)
+    assert sum(len(chunk) for chunk in chunks) == 1310, "no id may be dropped"
+
+
+def test_batching_is_by_length_because_pmids_are_not_all_one_length() -> None:
+    """A count tuned for 8-digit ids overflows on 9-digit ones. The budget is on the
+    string the ids actually build, so both pack to the same number of characters."""
+    from okf_loremaster.clients.icite import batches
+
+    short = list(batches([str(1000000 + i) for i in range(600)], budget=100))
+    long = list(batches([str(100000000 + i) for i in range(600)], budget=100))
+
+    assert all(len(",".join(c)) <= 100 for c in short + long)
+    assert len(long) > len(short), "longer ids must pack fewer to a request"
+
+
+def test_an_id_longer_than_the_whole_budget_is_still_sent() -> None:
+    """Dropping it would lose a paper's metrics silently; looping forever would hang."""
+    from okf_loremaster.clients.icite import batches
+
+    assert list(batches(["1", "x" * 50, "2"], budget=10)) == [["1"], ["x" * 50], ["2"]]
+
+
 # --- shared plumbing -------------------------------------------------------
 
 

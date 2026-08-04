@@ -279,6 +279,7 @@ async def run_build(
     charter: Charter | None = None,
     dry_run: bool = False,
     resume: bool = False,
+    directory: str = "",
 ) -> RunState:
     """Drive the graph from start to finish, stopping at each pause.
 
@@ -302,6 +303,7 @@ async def run_build(
                 prompt,
                 dry_run=dry_run,
                 charter=charter,
+                directory=directory,
             )
         )
 

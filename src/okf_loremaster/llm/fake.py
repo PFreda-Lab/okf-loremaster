@@ -77,17 +77,28 @@ class FakeCompletion:
         # A reply longer than the budget it was given is what truncation looks like
         # from outside, so the fake reports it the way a provider would.
         budget = kwargs.get("max_tokens")
-        cut_off = isinstance(budget, int) and _estimate_tokens(text) > budget
+        ceiling = budget if isinstance(budget, int) else 0
+        cut_off = ceiling > 0 and _estimate_tokens(text) > ceiling
+        finish = "length" if cut_off else "stop"
+        completion_tokens = _estimate_tokens(text)
+
+        # ...and a provider reports it differently once a schema is in play, which is
+        # the whole reason this is modeled rather than assumed. A `response_format` is
+        # delivered as a forced tool call; a tool call truncated mid-arguments comes
+        # back as a *clean stop*, with the budget fully spent and the partial JSON
+        # discarded. Measured on the balanced model 2026-08-04 at three budgets: 64/64,
+        # 256/256 and 1024/1024 tokens, `finish_reason='stop'`, `content='{}'` every
+        # time. A fake that reported "length" here let a truncation bug ship green.
+        if cut_off and kwargs.get("response_format") is not None:
+            text, finish, completion_tokens = "{}", "stop", ceiling
+
         return FakeResponse(
             choices=[
-                FakeChoice(
-                    message=FakeMessage(content=text),
-                    finish_reason="length" if cut_off else "stop",
-                )
+                FakeChoice(message=FakeMessage(content=text), finish_reason=finish)
             ],
             usage=FakeUsage(
                 prompt_tokens=_estimate_tokens(prompt_text),
-                completion_tokens=_estimate_tokens(text),
+                completion_tokens=completion_tokens,
             ),
         )
 

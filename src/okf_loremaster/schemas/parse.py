@@ -100,7 +100,7 @@ def extract_json(text: str) -> str:
 
 def parse_model(text: str, model_cls: type[M]) -> M:
     """Validate a model reply into `model_cls`, or raise `SchemaError`."""
-    return _validate(_payload(text), model_cls, text)
+    return _validate(_unwrap(_payload(text), model_cls), model_cls, text)
 
 
 def parse_model_with(text: str, model_cls: type[M], **known: Any) -> M:
@@ -114,7 +114,7 @@ def parse_model_with(text: str, model_cls: type[M], **known: Any) -> M:
     `known` wins over whatever the reply said, so a model that volunteered the field
     anyway cannot override us.
     """
-    payload = _payload(text)
+    payload = _unwrap(_payload(text), model_cls)
     if not isinstance(payload, dict):
         raise SchemaError(
             "reply is not a JSON object",
@@ -140,19 +140,57 @@ def _payload(text: str) -> Any:
             ) from exc
 
 
+def _unwrap(payload: Any, model_cls: type[Model]) -> Any:
+    """Peel one envelope key off a reply that nested the object we asked for.
+
+    Providers implement schema-constrained output as a forced tool call: the schema
+    becomes a tool's input schema, and the model fills that tool. Models regularly fill
+    it with an envelope — `{"parameters": {...}}`, or the tool's own name as the key —
+    rather than the schema's top-level fields. Both were observed on consecutive calls
+    to the same model, so the key cannot be matched by name.
+
+    This is the most expensive failure this module can have, because nothing about it
+    looks like one. The reply is valid JSON and validates cleanly, so no error is
+    raised, no repair is retried, and on a schema whose fields are all optional every
+    field lands on its default. That is how one run emitted 184 blank papers, at full
+    price, and passed every check downstream.
+
+    Peeled only when the outer object cannot be the schema itself: exactly one key, not
+    a field the schema declares, wrapping an object. Anything else is returned as it
+    came and fails validation in the ordinary way.
+    """
+    if not isinstance(payload, dict) or len(payload) != 1:
+        return payload
+    ((key, inner),) = payload.items()
+    if not isinstance(inner, dict) or key in _field_names(model_cls):
+        return payload
+    return inner
+
+
+def _field_names(model_cls: type[Model]) -> set[str]:
+    """Every name the schema answers to, field names and aliases alike."""
+    names: set[str] = set()
+    for name, field in model_cls.model_fields.items():
+        names.add(name)
+        if field.alias:
+            names.add(field.alias)
+    return names
+
+
 def _validate(payload: Any, model_cls: type[M], text: str) -> M:
     try:
         return model_cls.model_validate(payload)
     except ValidationError as exc:
         raise SchemaError(
-            f"reply did not match {model_cls.__name__}: {exc.error_count()} problem(s)",
+            f"reply did not match {model_cls.__name__}: "
+            f"{exc.error_count()} problem(s) — {_problems(exc)}",
             hint=repair_hint(exc),
             raw=text,
         ) from exc
 
 
-def repair_hint(exc: ValidationError) -> str:
-    """A short, field-level instruction for a follow-up message.
+def _problems(exc: ValidationError) -> str:
+    """The first few failures, as `field: what was wrong`.
 
     Capped at three problems: past that the reply is wrong in kind rather than in
     detail, and a long list of field paths is a worse prompt than a short one.
@@ -161,7 +199,18 @@ def repair_hint(exc: ValidationError) -> str:
     for error in exc.errors()[:3]:
         location = ".".join(str(part) for part in error["loc"]) or "<root>"
         lines.append(f"{location}: {error['msg']}")
-    return "Fix these fields and reply with JSON only — " + "; ".join(lines)
+    return "; ".join(lines)
+
+
+def repair_hint(exc: ValidationError) -> str:
+    """A short, field-level instruction for a follow-up message.
+
+    The same problems the message carries. A count on its own — "1 problem(s)" — is
+    what a warning says when it has the answer in hand and declines to pass it on:
+    two topics failed curation for a whole run and the log could not say which field
+    was wrong, when the exception knew all along.
+    """
+    return "Fix these fields and reply with JSON only — " + _problems(exc)
 
 
 def response_format_for(model_cls: type[Model], *, name: str = "") -> dict[str, Any]:

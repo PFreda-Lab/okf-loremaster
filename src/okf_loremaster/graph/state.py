@@ -67,6 +67,9 @@ class RunState(TypedDict, total=False):
     # Stamped once, when the state is first built. Checkpointed so the manifest of a
     # resumed run reports when the work started rather than when it was picked back up.
     started_at: datetime
+    # The run folder, as a string because this is checkpointed. Recorded so a resume
+    # without `-o` writes where the run already was — see `run.run_directory`.
+    directory: str
 
     # charter
     charter: Charter | None
@@ -196,12 +199,14 @@ def initial_state(
     *,
     dry_run: bool = False,
     charter: Charter | None = None,
+    directory: str = "",
 ) -> RunState:
     return RunState(
         run_id=run_id,
         prompt=prompt,
         dry_run=dry_run,
         started_at=datetime.now(UTC),
+        directory=directory,
         charter=charter,
         warnings=[],
     )

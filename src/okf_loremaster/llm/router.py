@@ -23,7 +23,7 @@ from functools import lru_cache
 from typing import Any, Protocol
 
 from okf_loremaster.config import Role, Settings
-from okf_loremaster.events import EventBus, LLMCall, WarningEvent
+from okf_loremaster.events import EventBus, LLMCall, Progress, WarningEvent
 
 # Provider errors that are worth another attempt. Anything else - a bad key, a
 # malformed request, a model that does not exist - fails immediately, because
@@ -243,10 +243,17 @@ class Router:
         }
         self.ledger = CostLedger()
         self._budget_warned = False
-        # Flipped once, by the first call the provider refuses schema-constrained
-        # output for. Every later call omits `response_format` rather than spending
-        # another round trip discovering the same thing.
-        self._schema_refused = False
+        # Models this deployment refuses schema-constrained output for, learned as they
+        # are called. Every later call to one of them omits `response_format` rather
+        # than spending another round trip discovering the same thing.
+        #
+        # Per model, not per router. Access is granted model by model — measured on one
+        # workspace where `claude-opus-5` was refused while `claude-sonnet-5` and
+        # `claude-haiku-4-5` were allowed. A single flag meant the charter call, which
+        # runs on the reasoning tier, spoke for the other two: it tripped on the first
+        # node of every run and quietly dropped the schema from screening and
+        # extraction, which had never been refused anything.
+        self._schema_refused: set[str] = set()
 
     async def complete(
         self,
@@ -272,7 +279,7 @@ class Router:
                     temperature=temperature,
                     response_format=response_format,
                 )
-                if not _hit_token_ceiling(response):
+                if not _hit_token_ceiling(response, budget):
                     break
                 if growth + 1 == _TRUNCATION_ATTEMPTS:
                     self._bus.emit(
@@ -391,16 +398,20 @@ class Router:
                     # can only flip once per call, so this cannot loop.
                     attempt -= 1
                     schema_retried = True
-                    if not self._schema_refused:
-                        # Announce it once for the run, however many calls discover it.
-                        self._schema_refused = True
+                    if model not in self._schema_refused:
+                        # Said once per model, however many calls discover it, and said
+                        # quietly. Nothing is wrong and nothing is lost: every prompt
+                        # asks for JSON in words too, and `parse_model` absorbs fences,
+                        # preamble and envelopes either way. A yellow banner on the
+                        # first node of every single run trains people to ignore the
+                        # banner, which is the opposite of what warnings are for.
+                        self._schema_refused.add(model)
                         self._bus.emit(
-                            WarningEvent(
+                            Progress(
                                 node=node,
                                 message=(
-                                    "this workspace does not allow schema-constrained "
-                                    "output; asking for JSON in the prompt instead. "
-                                    "Replies are parsed and repaired as before."
+                                    f"{model} does not accept schema-constrained output "
+                                    f"here; asking for JSON in the prompt instead"
                                 ),
                             )
                         )
@@ -463,7 +474,7 @@ class Router:
             kwargs["api_key"] = self._settings.api_key
         if self._settings.api_base:
             kwargs["api_base"] = self._settings.api_base
-        if response_format is not None and not self._schema_refused:
+        if response_format is not None and model not in self._schema_refused:
             kwargs["response_format"] = response_format
 
         if self._completion_fn is not None:
@@ -566,13 +577,29 @@ def _shape(response: Any) -> str:
     return f"{completion_tokens} tokens billed, {len(text):,} chars written"
 
 
-def _hit_token_ceiling(response: Any) -> bool:
+def _hit_token_ceiling(response: Any, budget: int = 0) -> bool:
     """Whether the model was cut off mid-reply by `max_tokens`.
 
     Worth asking separately from "did it parse", because the two failures want
     opposite responses. A reply the model finished and got wrong is repaired by
     showing it the error; a reply it never finished is repaired only by room to
     finish, and re-asking with the same budget just truncates in the same place.
+
+    Asked two ways, because the obvious one goes blind on the schema-constrained
+    path. Measured 2026-08-04 on the balanced model, same prompt, three budgets:
+
+        with a response_format     finish_reason='stop'    64/64, 256/256, 1024/1024
+        without one                finish_reason='length'  256/256
+
+    A schema is delivered as a forced tool call, and a tool call truncated mid
+    arguments is reported as a clean stop with the whole budget spent and the
+    partial JSON thrown away — `content` comes back as `{}` or empty. So the
+    retry that exists precisely to rescue cut-off curation calls stopped firing
+    the moment schemas were enabled, and the node just failed instead.
+
+    Spending the entire budget is the signal that survives that. It can in
+    principle be a reply that ended exactly on the boundary; the cost of being
+    wrong is one retry with more room, against a topic curated on nothing.
     """
     try:
         reason = response.choices[0].finish_reason
@@ -580,8 +607,10 @@ def _hit_token_ceiling(response: Any) -> bool:
         try:
             reason = response["choices"][0]["finish_reason"]
         except (IndexError, KeyError, TypeError):
-            return False
-    return str(reason) in ("length", "max_tokens")
+            reason = ""
+    if str(reason) in ("length", "max_tokens"):
+        return True
+    return budget > 0 and _int_attr(response, "usage", "completion_tokens") >= budget
 
 
 def _int_attr(response: Any, container: str, name: str) -> int:

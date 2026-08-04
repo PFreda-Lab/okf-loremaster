@@ -141,6 +141,12 @@ async def _extract_all(
         user = extract_user(context=contexts[slug], paper=source.text)
         key = fingerprint(EXTRACT_SYSTEM, user)
         hit = cache.get(source.pmid, key) if cache is not None else None
+        # A blank entry is not a saving, it is a poisoned one, and it was written by a
+        # version that could not tell the difference. Treated as a miss it is re-read
+        # once and overwritten, so a cache full of them heals as it is used rather than
+        # having to be found and deleted by hand.
+        if hit is not None and _is_blank(hit):
+            hit = None
         if hit is not None:
             reused += 1
             outcome: Extraction | str = hit
@@ -189,7 +195,20 @@ async def _extract_one(
             return f"extraction call failed ({type(exc).__name__}: {exc})", used_retry
 
         try:
-            return parse_model(result.text, Extraction), used_retry
+            parsed = parse_model(result.text, Extraction)
+            if _is_blank(parsed):
+                raise SchemaError(
+                    "reply validated but carried no extracted content",
+                    hint=(
+                        "Reply with a single JSON object whose top-level keys are the "
+                        "schema's own fields — description, bottom_line, study_design, "
+                        "n, population, outcome_definition, predictors, null_findings, "
+                        "vocabulary_hints, caveats, tags. Do not nest them under a "
+                        "wrapper key."
+                    ),
+                    raw=result.text,
+                )
+            return parsed, used_retry
         except SchemaError as exc:
             if attempt == 2 or not exc.hint:
                 return f"extraction reply did not parse ({exc})", used_retry
@@ -202,6 +221,19 @@ async def _extract_one(
 
     # Unreachable: both branches of the loop return. Present so the type is honest.
     return "extraction did not complete", used_retry
+
+
+def _is_blank(extraction: Extraction) -> bool:
+    """Whether an extraction says nothing whatsoever about the paper.
+
+    Every field on `Extraction` is optional, which is deliberate — a paper that reports
+    no null finding should not fail a schema over it. The cost of that is a reply the
+    model never really answered validating cleanly into defaults, so the emptiness has
+    to be caught here instead. A paper can honestly have no predictor rows; none can
+    have no description, no bottom line and no predictors at once, because the first two
+    describe the paper rather than its findings.
+    """
+    return not (extraction.description or extraction.bottom_line or extraction.predictors)
 
 
 def _scope(charter: Charter, slug: str) -> str:

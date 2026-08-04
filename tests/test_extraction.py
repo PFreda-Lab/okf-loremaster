@@ -227,6 +227,19 @@ def extract_state(*pmids: str, text: str | None = None) -> RunState:
 
 UNPARSEABLE: dict[str, Any] = {"predictors": "one row, in prose"}
 
+# A reply that validates and says nothing — what a schema whose fields are all optional
+# does with an envelope it does not recognize, and with a model that answered with `{}`.
+BLANK: dict[str, Any] = {}
+
+
+def wrapped(key: str) -> ExtractFn:
+    """An extractor that nests its answer under `key` instead of at the top level."""
+
+    def extract(source: str) -> dict[str, Any]:
+        return {key: supported(source)}
+
+    return extract
+
 
 def failing(times: int) -> ExtractFn:
     """An extractor whose first `times` replies do not satisfy the schema."""
@@ -280,6 +293,77 @@ async def test_a_reply_that_never_parses_drops_the_paper_after_exactly_one_retry
     # Every paper failed, so the bundle is not a reading of the literature and the run
     # says so in as many words rather than emitting a confident-looking empty topic.
     assert any("more than half the extractions failed" in note for note in warnings)
+
+
+@pytest.mark.parametrize("envelope", ["parameters", "json_tool_call"])
+async def test_an_answer_nested_under_a_wrapper_key_is_still_the_answer(
+    settings_factory: Any, tmp_path: Path, envelope: str
+) -> None:
+    """Schema-constrained output is a forced tool call, and a model filling that tool
+    puts the object under `parameters` or under the tool's own name often enough that
+    one run came back wrapped 184 times out of 185. It costs one call to unwrap and a
+    whole run not to."""
+    model = scripted(wrapped(envelope))
+
+    async with node_deps(settings_factory, tmp_path, scripted=model) as deps:
+        update = await extract_node(extract_state(OPEN), deps)
+
+    assert len(model.extracted) == 1, "unwrapping should not cost a repair call"
+    assert update["extractions"][OPEN].predictors, "the wrapped rows were thrown away"
+    assert not update["warnings"]
+
+
+async def test_an_extraction_with_nothing_in_it_is_a_failure_not_a_paper(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """The second line of defense, and the one that matters most.
+
+    Every field on `Extraction` is optional, so a reply that answered nothing validates
+    perfectly and emits a document with no bottom line and no rows — indistinguishable
+    from a paper that genuinely reported little, and priced the same as a real reading.
+    A blank result has to be loud, whatever made it blank.
+    """
+    model = scripted(lambda _: BLANK)
+
+    async with node_deps(settings_factory, tmp_path, scripted=model) as deps:
+        update = await extract_node(extract_state(OPEN), deps)
+
+    assert len(model.extracted) == 2, "a blank reply should be challenged once"
+    assert update["extractions"] == {}
+    assert any("no extracted content" in note for note in update["warnings"])
+
+
+async def test_a_blank_cache_entry_is_a_miss_so_a_poisoned_cache_heals_itself(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """A cache written by a version that could not tell a blank reading from a real one
+    is worse than an empty cache: it answers instantly, costs nothing, and hands back
+    the same nothing forever. Re-reading once is the only way out that does not involve
+    the user finding a directory and deleting it."""
+    root = tmp_path / "readings"
+    cache = ExtractionCache(root)
+    state = extract_state(OPEN)
+
+    async with node_deps(
+        settings_factory, tmp_path, scripted=scripted(supported), extraction_cache=cache
+    ) as deps:
+        await extract_node(state, deps)
+
+    # Correctly keyed and holding nothing — what the poisoned run left on disk, since
+    # the version that wrote it could not tell a blank reading from a real one. Written
+    # by hand because the guard under test is what stops one being written now.
+    entries = list(root.rglob("*.json"))
+    assert len(entries) == 1
+    entries[0].write_text(Extraction().model_dump_json(), encoding="utf-8")
+
+    model = scripted(supported)
+    async with node_deps(
+        settings_factory, tmp_path, scripted=model, extraction_cache=cache
+    ) as deps:
+        update = await extract_node(state, deps)
+
+    assert len(model.extracted) == 1, "a blank entry was served as a saving"
+    assert update["extractions"][OPEN].predictors
 
 
 async def test_with_no_model_nothing_is_extracted_and_the_run_says_why(
@@ -540,7 +624,9 @@ async def test_provenance_names_the_model_that_read_the_paper_and_the_ids_it_rea
         update = await reconcile_node(reconcile_state({OPEN: read_of(OPEN)}), deps)
 
     record = update["records"][0]
-    assert record.generated_by == "okf-loremaster/extract/fake/deep"
+    # The balanced tier, because that is the one `extract` calls. Naming any other is a
+    # bundle that credits its contents to a model which never saw the paper.
+    assert record.generated_by == "okf-loremaster/extract/fake/mid"
     assert [ref.id for ref in record.sources] == [f"pmid:{OPEN}", f"pmc:{pmcid_for(OPEN)}"]
     assert record.domain == "alpha"
     assert record.license == license_for(OPEN)

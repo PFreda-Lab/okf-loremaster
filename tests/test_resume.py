@@ -31,7 +31,7 @@ async def resume(settings_factory: Any, tmp_path: Path, run_id: str, **overrides
     """Pick a run back up the way the CLI does: an id, and no question retyped."""
     from fake_ncbi import FakeNCBI
 
-    options = RunOptions(out=tmp_path / "run", resume=run_id, **overrides)
+    options = RunOptions(resume=run_id, **{"out": tmp_path / "run", **overrides})
     state, _ = await build_run(
         options,
         console=Console(file=io.StringIO(), width=160, no_color=True),
@@ -39,6 +39,24 @@ async def resume(settings_factory: Any, tmp_path: Path, run_id: str, **overrides
         transport=FakeNCBI().transport(),
     )
     return state
+
+
+async def resume_directory(
+    settings_factory: Any, tmp_path: Path, run_id: str, **overrides: Any
+) -> Path:
+    """Where a resume decided to write, which is not the same question as where the run
+    it resumed wrote — a finished run replays and its checkpointed `bundle` never moves,
+    so asserting on that would pass whatever the directory logic did."""
+    from fake_ncbi import FakeNCBI
+
+    options = RunOptions(resume=run_id, **{"out": tmp_path / "run", **overrides})
+    _, directory = await build_run(
+        options,
+        console=Console(file=io.StringIO(), width=160, no_color=True),
+        settings=run_settings(settings_factory, tmp_path),
+        transport=FakeNCBI().transport(),
+    )
+    return directory
 
 
 # --- finding a run again ------------------------------------------------------
@@ -122,6 +140,37 @@ async def test_a_resumed_run_writes_the_same_bundle_to_the_same_place(
     assert state["bundle"] == run.state["bundle"]
     assert state["run_id"] == run.state["run_id"]
     assert state["validated"] is True
+
+
+async def test_a_resume_that_omits_the_name_lands_where_the_name_put_it(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`-o` names the run, not the invocation.
+
+    Resumed without it, the run used to fall back to the id, finish in a second folder
+    called `20260804-111902-b537`, and leave the named one holding a half-built bundle
+    that nobody was watching. The name is checkpointed with the run and read back, the
+    same way the prompt is.
+    """
+    run = await full_run(settings_factory, tmp_path, monkeypatch)
+
+    landed = await resume_directory(settings_factory, tmp_path, run.state["run_id"], out=None)
+
+    assert landed == tmp_path / "run"
+    assert str(run.state["run_id"]) not in str(landed)
+
+
+async def test_a_resume_that_names_somewhere_else_is_obeyed(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Remembering the name must not make it impossible to change."""
+    run = await full_run(settings_factory, tmp_path, monkeypatch)
+
+    landed = await resume_directory(
+        settings_factory, tmp_path, run.state["run_id"], out=tmp_path / "elsewhere"
+    )
+
+    assert landed == tmp_path / "elsewhere"
 
 
 async def test_a_second_run_of_the_same_question_re_reads_no_papers(

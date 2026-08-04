@@ -147,9 +147,16 @@ def _reconcile_one(
 
 
 def _provenance(deps: Deps) -> str:
-    """`generated.by`, naming the model that actually did the reading."""
+    """`generated.by`, naming the model that actually did the reading.
+
+    The balanced tier, because that is the one `extract` calls. This said reasoning for
+    as long as extraction ran there, and went on saying it after the node moved — so
+    every file in a bundle credited its contents to a model that never saw the paper.
+    Provenance nobody can check is provenance nobody should trust, so it is bound to
+    the same `Role` the extract node passes to the router.
+    """
     try:
-        model = deps.settings.model_for(Role.REASONING) if deps.router is not None else ""
+        model = deps.settings.model_for(Role.BALANCED) if deps.router is not None else ""
     except ConfigError:
         model = ""
     return f"okf-loremaster/extract/{model}" if model else "okf-loremaster/extract"

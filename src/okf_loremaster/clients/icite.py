@@ -16,15 +16,28 @@ consume the E-utilities budget.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from okf_loremaster.clients._http import HttpClient
 
 BASE = "https://icite.od.nih.gov/api/pubs"
 
-# iCite accepts large id lists; 500 keeps URLs comfortably short.
-BATCH = 500
+# iCite rejects a request whose URL runs much past 4 KB with HTTP 413, so the batch is
+# budgeted in characters rather than counted in ids. Measured 2026-08-04: 370 ids (a
+# 4,107-character URL) answered, 380 (4,217) did not. The previous batch of 500 built a
+# 5,537-character URL and therefore failed every time it was used in anger — every run
+# large enough to matter ranked with no citation metrics at all, and said so in one
+# line nobody read as fatal.
+#
+# Counting ids is the wrong unit anyway: a PMID is 7 to 9 characters, so a batch sized
+# against one length overflows at another. This budget is on the string the ids build.
+#
+# It is well under 4 KB because the joined string is not what gets sent: each separating
+# comma is escaped to `%2C`, which inflates the URL by about a fifth. Measured against
+# the live service, a full pool of 1,310 PMIDs packs into 4 requests whose largest URL
+# is 3,700 characters and answers 200.
+ID_BUDGET = 3000
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,14 +76,32 @@ class ICiteClient:
         self, pmids: Sequence[str], *, node: str = "rank"
     ) -> dict[str, CitationMetrics]:
         out: dict[str, CitationMetrics] = {}
-        ids = [str(p) for p in pmids]
-        for start in range(0, len(ids), BATCH):
-            chunk = ids[start : start + BATCH]
+        for chunk in batches([str(p) for p in pmids]):
             raw = await self._http.get_text(
                 BASE, params={"pmids": ",".join(chunk)}, node=node
             )
             out.update(parse_icite(raw))
         return out
+
+
+def batches(ids: Sequence[str], budget: int = ID_BUDGET) -> Iterator[list[str]]:
+    """Split ids into chunks whose joined length stays inside the URL budget.
+
+    An id longer than the whole budget still goes out on its own rather than being
+    dropped or looping forever — one over-long request that iCite may refuse is a
+    better failure than a paper silently missing its metrics.
+    """
+    batch: list[str] = []
+    length = 0
+    for pmid in ids:
+        addition = len(pmid) + (1 if batch else 0)
+        if batch and length + addition > budget:
+            yield batch
+            batch, length, addition = [], 0, len(pmid)
+        batch.append(pmid)
+        length += addition
+    if batch:
+        yield batch
 
 
 def parse_icite(raw: str) -> dict[str, CitationMetrics]:

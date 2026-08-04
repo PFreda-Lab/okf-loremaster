@@ -102,6 +102,43 @@ def test_the_sentinel_survives_a_json_round_trip() -> None:
     assert reloaded.null_findings[0].is_sentinel
 
 
+def test_a_reply_wrapped_in_an_envelope_key_is_unwrapped_rather_than_emptied() -> None:
+    """The failure that cost a whole run.
+
+    Schema-constrained output is implemented as a forced tool call, and a model filling
+    that tool regularly nests the object inside `parameters`, or inside the tool's own
+    name, instead of writing the schema's fields at the top level. Both keys came back
+    from consecutive calls to one model, so the fix cannot match on the name.
+
+    Left alone this is silent: the reply is valid JSON, every field on `Extraction` is
+    optional, so it validates into an object with nothing in it and reads downstream as
+    a paper that reported nothing.
+    """
+    body = (
+        '{"bottom_line": "Adherence predicts suppression.", '
+        '"predictors": [{"predictor": "adherence", "outcome": "suppression"}]}'
+    )
+    for envelope in ("parameters", "json_tool_call", "extraction", "response"):
+        parsed = parse_model(f'{{"{envelope}": {body}}}', Extraction)
+        assert parsed.bottom_line == "Adherence predicts suppression.", envelope
+        assert len(parsed.predictors) == 1, envelope
+
+
+def test_an_envelope_named_after_a_real_field_is_left_alone() -> None:
+    """Unwrapping is only safe while the outer key cannot be the schema's own."""
+    with pytest.raises(SchemaError):
+        parse_model('{"predictors": {"predictor": "adherence"}}', Extraction)
+
+    parsed = parse_model('{"bottom_line": "x"}', Extraction)
+    assert parsed.bottom_line == "x"
+
+
+def test_a_reply_with_two_keys_is_never_unwrapped() -> None:
+    """Two keys is a reply that answered, wrongly or partly. Only one is an envelope."""
+    parsed = parse_model('{"bottom_line": "x", "study_design": "cohort"}', Extraction)
+    assert parsed.study_design == "cohort"
+
+
 def test_real_null_findings_are_kept_and_recognized() -> None:
     extraction = Extraction(
         null_findings=[NullFinding(predictor="a tested factor", detail="no association")]
@@ -658,6 +695,21 @@ def test_a_missing_required_field_raises_with_a_field_level_hint() -> None:
         parse_model('{"include": true}', ScreenVerdict)
     assert "pmid" in caught.value.hint
     assert "JSON" in caught.value.hint
+
+
+def test_the_failure_message_names_the_field_and_not_just_a_count() -> None:
+    """`1 problem(s)` is a warning holding the answer and declining to pass it on.
+
+    That is what two topics failed curation with for a whole run: the log could say
+    only that something had not matched, so the next step was to reproduce a call
+    that had already happened once and reported nothing.
+    """
+    with pytest.raises(SchemaError) as caught:
+        parse_model('{"include": true}', ScreenVerdict)
+
+    message = str(caught.value)
+    assert "1 problem(s)" in message
+    assert "pmid" in message, "the count without the field is the defect being fixed"
 
 
 def test_a_reply_with_no_json_raises() -> None:

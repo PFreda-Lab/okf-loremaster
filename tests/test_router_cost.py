@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from okf_loremaster.config import Role
-from okf_loremaster.events import EventBus, LLMCall, WarningEvent
+from okf_loremaster.events import EventBus, LLMCall, Progress, WarningEvent
 from okf_loremaster.llm.fake import FakeChoice, FakeCompletion, FakeMessage, FakeResponse, FakeUsage
 from okf_loremaster.llm.router import Router, format_cost
 
@@ -25,11 +25,13 @@ def _router(
     settings_factory: Any, *, completion: Any = None, **overrides: Any
 ) -> tuple[Router, EventBus]:
     settings = settings_factory(
-        model_fast="gateway/deployment",
-        model_balanced="gateway/deployment",
-        model_reasoning="gateway/deployment",
-        api_key="k",
-        **overrides,
+        **{
+            "model_fast": "gateway/deployment",
+            "model_balanced": "gateway/deployment",
+            "model_reasoning": "gateway/deployment",
+            "api_key": "k",
+            **overrides,
+        }
     )
     bus = EventBus()
     return Router(settings, bus, completion_fn=completion or FakeCompletion()), bus
@@ -152,15 +154,21 @@ async def test_retries_are_exhausted_then_raised(settings_factory: Any) -> None:
 SCHEMA = {"type": "json_schema", "json_schema": {"name": "t", "schema": {"type": "object"}}}
 
 
-def _refusing_completion(replies: tuple[str, ...] = ("{}",)) -> FakeCompletion:
+def _refusing_completion(
+    replies: tuple[str, ...] = ("{}",), *, only: str | None = None
+) -> FakeCompletion:
     """A provider that rejects `response_format` the way a gated workspace does.
 
     The wording is the provider's own, because that string is what the router matches
     on. A test that invented a friendlier message would pass while the real one failed.
+
+    `only` refuses a single model and allows the rest, which is what access granted
+    model by model looks like — and what a router-wide flag gets wrong.
     """
 
     def reply(kwargs: dict[str, Any]) -> str:
-        if "response_format" in kwargs:
+        refused = only is None or kwargs.get("model") == only
+        if "response_format" in kwargs and refused:
             raise ValueError(
                 'AnthropicException - {"type":"error","error":{"type":'
                 '"invalid_request_error","message":"structured_outputs not supported '
@@ -190,9 +198,15 @@ async def test_a_workspace_without_schema_support_falls_back_rather_than_failing
     assert result.text == "{}"
     assert completion.call_count == 2, "one rejected call, then one without the schema"
     assert "response_format" not in completion.calls[1]
-    warnings = [e for e in _events(bus, queue) if isinstance(e, WarningEvent)]
-    assert len(warnings) == 1, "a silent downgrade is the thing to avoid"
-    assert "schema-constrained" in warnings[0].message
+
+    events = _events(bus, queue)
+    # Not a warning. Nothing is wrong, nothing is lost, and it recurs on the first node
+    # of every run against a deployment that gates this — a yellow banner every time
+    # teaches people to stop reading yellow banners.
+    assert not [e for e in events if isinstance(e, WarningEvent)]
+    notes = [e for e in events if isinstance(e, Progress) and "schema-constrained" in e.message]
+    assert len(notes) == 1, "a silent downgrade is still the thing to avoid"
+    assert "gateway/deployment" in notes[0].message, "the note must name the model refused"
 
 
 async def test_the_refusal_is_learned_once_not_rediscovered_per_call(
@@ -207,6 +221,37 @@ async def test_the_refusal_is_learned_once_not_rediscovered_per_call(
 
     assert completion.call_count == 4, "one rejection, then three clean calls"
     assert all("response_format" not in call for call in completion.calls[1:])
+
+
+async def test_one_model_being_refused_does_not_speak_for_the_others(
+    settings_factory: Any,
+) -> None:
+    """Access is granted model by model, so the memory has to be too.
+
+    Measured on a live workspace: `claude-opus-5` was refused while `claude-sonnet-5`
+    and `claude-haiku-4-5` were allowed. With one flag for the router, the charter call
+    — which runs on the reasoning tier, first node of the run — tripped it and every
+    later call dropped a schema it would have been given. Screening and extraction, the
+    two nodes that make hundreds of calls, spent whole runs unconstrained because of a
+    model neither of them uses.
+    """
+    completion = _refusing_completion(only="gateway/deep")
+    router, _ = _router(
+        settings_factory,
+        completion=completion,
+        model_reasoning="gateway/deep",
+        model_balanced="gateway/mid",
+        model_fast="gateway/quick",
+    )
+
+    await router.complete(Role.REASONING, MESSAGES, node="charter", response_format=SCHEMA)
+    await router.complete(Role.BALANCED, MESSAGES, node="extract", response_format=SCHEMA)
+    await router.complete(Role.FAST, MESSAGES, node="screen", response_format=SCHEMA)
+
+    refused, balanced, fast = completion.calls[1], completion.calls[2], completion.calls[3]
+    assert "response_format" not in refused, "the refused model kept being asked"
+    assert "response_format" in balanced, "balanced lost a schema it was never refused"
+    assert "response_format" in fast, "fast lost a schema it was never refused"
 
 
 async def test_the_fallback_does_not_spend_a_retry(settings_factory: Any) -> None:
@@ -254,8 +299,12 @@ async def test_every_call_in_flight_survives_the_first_refusal(settings_factory:
     )
 
     assert [r.text for r in results] == ["{}"] * 8, "not one of them may be lost"
-    warnings = [e for e in _events(bus, queue) if isinstance(e, WarningEvent)]
-    assert len(warnings) == 1, "announced once for the run, however many discover it"
+    notes = [
+        e
+        for e in _events(bus, queue)
+        if isinstance(e, Progress) and "schema-constrained" in e.message
+    ]
+    assert len(notes) == 1, "announced once per model, however many discover it"
 
 
 # --- truncation ------------------------------------------------------------
@@ -291,6 +340,37 @@ async def test_the_tokens_of_a_discarded_truncated_reply_are_still_billed(
     await router.complete(Role.BALANCED, MESSAGES, node="curate", max_tokens=64)
 
     assert router.ledger.calls == 2, "the abandoned attempt is a call that happened"
+
+
+async def test_a_schema_constrained_reply_cut_off_is_also_retried_with_room(
+    settings_factory: Any,
+) -> None:
+    """The same rescue, on the path where the obvious signal lies.
+
+    A schema is sent as a forced tool call, and a tool call truncated mid-arguments is
+    reported as `finish_reason='stop'` with `content='{}'` and the budget fully spent —
+    so the retry that exists for exactly this stopped firing the moment schemas were
+    enabled. Two topics in one run were curated from the screener's fallback because of
+    it, logged as a schema mismatch, which is the wrong problem with the wrong fix.
+
+    Spending the whole budget is the signal that survives a provider lying about why
+    it stopped.
+    """
+    completion = FakeCompletion(replies=("x" * 400,))
+    router, bus = _router(settings_factory, completion=completion)
+    queue = bus.subscribe()
+
+    await router.complete(
+        Role.BALANCED,
+        MESSAGES,
+        node="curate",
+        max_tokens=64,
+        response_format={"type": "json_schema", "json_schema": {"name": "t"}},
+    )
+
+    assert [call["max_tokens"] for call in completion.calls] == [64, 128]
+    messages = [e.message for e in _events(bus, queue) if isinstance(e, WarningEvent)]
+    assert any("cut off" in m for m in messages)
 
 
 async def test_a_reply_that_fits_is_not_retried(settings_factory: Any) -> None:

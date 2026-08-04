@@ -102,6 +102,10 @@ class PastRun:
     prompt: str
     reached: str
     finished: bool
+    # Where the original run wrote, so resuming it without `-o` lands there again
+    # instead of in a second folder named after the id. Empty for a run checkpointed
+    # before this was recorded.
+    directory: str = ""
 
 
 def started_at(run_id: str) -> datetime | None:
@@ -190,6 +194,7 @@ async def _read_run(saver: Any, run_id: str) -> PastRun:
         # about the graph rather than about the work.
         reached=_reached(values),
         finished=bool(values.get("validated")),
+        directory=str(values.get("directory") or ""),
     )
 
 
@@ -249,17 +254,28 @@ class RunOptions:
     verbose: int = 0
 
 
-def run_directory(options: RunOptions, settings: Settings, run_id: str) -> Path:
+def run_directory(
+    options: RunOptions, settings: Settings, run_id: str, *, remembered: str = ""
+) -> Path:
     """The folder holding everything this run produces — `okf/` and `vectors/`.
 
     One folder rather than two siblings so that moving the deliverable into a consumer
     is a single copy. Without `-o` the run id names it, which is unique and sortable but
     not memorable. With `-o` the name is the user's, resolved under the configured
     output directory — see `Settings.resolve_output`.
+
+    `remembered` is where the run being resumed wrote the first time. It wins over the
+    run id, because `-o` is a property of the run rather than of the invocation: a run
+    named on Monday and resumed on Tuesday without retyping the name used to finish in
+    a second folder called `20260804-111902-b537`, leaving the named one half-built and
+    the finished bundle somewhere nobody looked for it. An explicit `-o` still wins over
+    both, which is how a resumed run is deliberately written somewhere else.
     """
-    if options.out is None:
-        return settings.output_dir / run_id
-    return settings.resolve_output(options.out)
+    if options.out is not None:
+        return settings.resolve_output(options.out)
+    if remembered:
+        return Path(remembered)
+    return settings.output_dir / run_id
 
 
 # --- the build command ------------------------------------------------------
@@ -300,6 +316,7 @@ async def build_run(
 
     charter = _load_charter(options.charter_path)
     prompt = options.prompt or (charter.prompt if charter is not None else "")
+    past: PastRun | None = None
     if options.resume is not None:
         # Read back rather than retyped. On resume the prompt is not an input at all —
         # the graph replays from the checkpoint and never re-reads it — so a prompt
@@ -322,7 +339,9 @@ async def build_run(
     # Decided here, before the graph starts, and carried on `Deps`. The emit node must
     # not work it out for itself: a resumed run would then land somewhere else than the
     # run it resumed.
-    directory = run_directory(options, resolved, run_id)
+    directory = run_directory(
+        options, resolved, run_id, remembered=past.directory if past is not None else ""
+    )
     corpus = okf_bundle_path(directory)
     # Settled before the graph starts because the embedder has to be built or not built
     # up front, and an unattended run has nobody to ask later.
@@ -365,6 +384,7 @@ async def build_run(
             charter=charter,
             dry_run=options.dry_run,
             resume=options.resume is not None,
+            directory=str(directory),
         )
     finally:
         await clients.aclose()
