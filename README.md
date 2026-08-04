@@ -133,7 +133,7 @@ flowchart TB
 
     subgraph r4 ["4 · read and record"]
         direction LR
-        fulltext["<b>fulltext</b><br/>code<br/>license check,<br/>recorded verbatim"] --> extract["<b>extract</b><br/>REASONING<br/>predictors, nulls,<br/>vocab hints"] --> reconcile["<b>reconcile</b><br/>code<br/>numbers, quotes, codes<br/>re-checked in the text"]
+        fulltext["<b>fulltext</b><br/>code<br/>license check,<br/>recorded verbatim"] --> extract["<b>extract</b><br/>BALANCED<br/>predictors, nulls,<br/>vocab hints"] --> reconcile["<b>reconcile</b><br/>code<br/>numbers, quotes, codes<br/>re-checked in the text"]
         review{{"<b>review</b> · OPTIONAL<br/>only with --review<br/>a person signs<br/>the bundle off"}}
     end
 
@@ -172,8 +172,14 @@ file writing and validation are code, and behave the same way every time.
 outcome, inclusion rules, and the topics the corpus will be filed under. It governs every stage
 after it, and it is written to `charter.yaml` so you can read it, edit it, and rerun from it.
 
-Three model tiers, set in `.env`: **FAST** screens abstracts, **BALANCED** plans queries and
-curates, **REASONING** writes the charter and reads the papers.
+Three model tiers, set in `.env`: **FAST** screens abstracts, **BALANCED** plans queries, curates,
+and reads the papers, **REASONING** writes the charter.
+
+Reading the papers is the expensive part — one call each, so two hundred of them against every
+other stage's handful — which is why it sits on the middle tier rather than the top one. What keeps
+it honest is code, not model tier: every number is checked back against the paper's own text and
+every quote is sliced out of it. A number the paper does not contain is removed no matter which
+model wrote it.
 
 ---
 
@@ -238,12 +244,58 @@ okf-loremaster build "<your question>" -o my-corpus  # do it
 | `--pool-size` | 800 | candidates considered before screening |
 | `--screen-budget` | 400 | abstracts sent to the screener |
 | `--max-rounds` | 2 | search rounds; `1` disables the re-query of thin topics |
-| `--resume <id>` | — | pick a run back up |
+| `--resume <id>` | — | pick a run back up; see [Stopping and resuming](#stopping-and-resuming) |
 | `--json`, `-v` | — | machine-readable events, verbosity |
 
 `--finalize` is asked at the end rather than up front so you can see what was built before
 deciding. One caveat: the embedding pass runs during the build, so answering "OKF only" at the
 prompt discards work that already happened. Pass `--finalize okf` up front to skip it instead.
+
+### Stopping and resuming
+
+A run can be stopped at any point — Ctrl-C, a closed laptop, a declined pause — and picked back up
+later. Nothing is lost and nothing already paid for is bought twice.
+
+**Finding the run.** You need its id, which is the timestamp-shaped string like
+`20260804-111902-b537`. You do not have to have written it down:
+
+```bash
+okf-loremaster runs
+```
+
+```
+run id                started       reached      question
+20260804-111902-b537  Aug 04 11:19  fulltext     which clinical features predict …
+20260804-070845-1241  Aug 04 07:08  extract      which clinical features predict …
+20260803-164401-77c2  Aug 03 16:44  finished     which biomarkers are associated …
+
+resume with  okf-loremaster build --resume 20260804-111902-b537  (the question is read back from the run)
+```
+
+`reached` is the last stage that finished. `-n` shows more than the default ten.
+
+**Picking it back up.** The id is all you need — the question is read back out of the run, not
+retyped:
+
+```bash
+okf-loremaster build --resume 20260804-111902-b537
+```
+
+Every flag you gave the first time still applies where it still can, so pass `-o` again if you
+passed it before. A run resumes into the same output folder either way.
+
+**What it costs.** Stages that finished are not re-run at all — a run stopped after screening
+resumes at curation, and pays nothing for the search or the screening. Reading the papers is
+finer-grained than that: each paper is recorded as it comes back, so a run interrupted halfway
+through the reading resumes having kept every paper it already read. It reports what it skipped:
+`142 of 187 paper(s) were already read, and cost nothing`.
+
+The same record is what makes rerunning cheap. Ask the same question of the same papers in a brand
+new run and the reading is free; change the question, or retrieve a longer full text, and those
+papers are read again, because it is the request that is remembered rather than the PMID.
+
+Runs are kept in a local cache directory — `okf-loremaster init` prints where. It holds run state,
+not bundles: deleting it loses the ability to resume, and nothing else.
 
 ---
 

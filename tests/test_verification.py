@@ -175,6 +175,79 @@ def test_a_quote_scopes_the_check_to_one_sentence() -> None:
     assert verify_extraction(unquoted, document).effects_dropped == 0
 
 
+# --- quote locators ---------------------------------------------------------
+#
+# An extraction writes the opening words of a sentence rather than copying the whole of
+# it, and `verify_extraction` grows them back from the source before anything is checked.
+# The saving is real money — a quote is the longest field in a predictor row and there is
+# one per row — but the reason these tests exist is that the check downstream narrows its
+# scope to the quoted sentence. Expand to the wrong text and the numeric check is being
+# run against the wrong sentence, which is worse than not narrowing at all.
+
+
+def test_a_locator_grows_into_the_sentence_it_opens() -> None:
+    document = f"Methods were preregistered.\n\n{SENTENCE}\n\nTable 2 follows."
+
+    check = verify_extraction(one_row(quote="In adjusted models"), document)
+
+    assert check.extraction.predictors[0].quote == SENTENCE
+    assert check.quotes_dropped == 0
+
+
+def test_a_locator_does_not_drag_the_heading_above_it_into_the_quote() -> None:
+    """Full text is headings and captions with paragraphs between them, not prose end to
+    end. `sentences` collapses whitespace, so without a line-aware split `## RESULTS`
+    has no terminator, joins the sentence after it, and rides along on every quote taken
+    from that section."""
+    document = f"## RESULTS\n{SENTENCE}"
+
+    check = verify_extraction(one_row(quote="In adjusted models"), document)
+
+    assert check.extraction.predictors[0].quote == SENTENCE
+
+
+def test_expanding_a_quote_that_is_already_whole_returns_it_unchanged() -> None:
+    """Idempotent, so an extraction written before locators existed still verifies, and
+    so re-running the check twice cannot grow a quote a second time."""
+    check = verify_extraction(one_row(quote=SENTENCE), SENTENCE)
+
+    assert check.extraction.predictors[0].quote == SENTENCE
+    assert check.quotes_dropped == 0
+
+
+def test_a_locator_scopes_the_numeric_check_to_the_sentence_it_found() -> None:
+    """The point of the whole mechanism. Ten words have to buy the same narrow scope a
+    copied sentence used to, or the saving was paid for out of the check."""
+    document = f"{SENTENCE}\n\nTable 2 lists 3.91 kg of something else entirely."
+
+    located = one_row(effect=3.91, effect_raw="3.91", quote="In adjusted models the")
+
+    assert verify_extraction(located, document).effects_dropped == 1
+
+
+def test_a_locator_matching_nothing_leaves_the_row_where_it_was() -> None:
+    """Degrades to exactly the behavior that existed before locators did: the text is
+    kept as written and the ordinary quote check drops it."""
+    check = verify_extraction(one_row(quote="In unadjusted models"), SENTENCE)
+
+    assert check.extraction.predictors[0].quote == ""
+    assert check.quotes_dropped == 1
+
+
+def test_a_null_finding_locator_expands_too() -> None:
+    document = f"{SENTENCE}\n\nAge showed no association with the outcome (p = 0.41)."
+    extraction = Extraction(
+        null_findings=[NullFinding(predictor="age", quote="Age showed no association")]
+    )
+
+    check = verify_extraction(extraction, document)
+
+    assert check.extraction.null_findings[0].quote == (
+        "Age showed no association with the outcome (p = 0.41)."
+    )
+    assert check.quotes_dropped == 0
+
+
 def test_an_effect_that_contradicts_its_own_raw_string_is_caught_without_a_source() -> None:
     """A silent unit conversion: both numbers are in the paper and they disagree with
     each other, which `effect_raw` exists to make visible."""

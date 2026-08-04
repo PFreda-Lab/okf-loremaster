@@ -30,6 +30,7 @@ from okf_loremaster.clients import Clients
 from okf_loremaster.config import Settings
 from okf_loremaster.curation import MAX_ROUNDS
 from okf_loremaster.events import EventBus, NodeFinished, NodeStarted, Progress, WarningEvent
+from okf_loremaster.extraction_cache import ExtractionCache
 from okf_loremaster.llm.router import Router
 from okf_loremaster.ranking import DEFAULT_LAMBDA, SelectionComparison
 from okf_loremaster.schemas import (
@@ -156,6 +157,11 @@ class Deps:
     # None when vectors were declined. Injected rather than built by the node because the default
     # one downloads a model on first use, and the test suite never reaches the network.
     embedder: Embedder | None = None
+    # Papers already read, from this run or an earlier one. Injected for the same reason
+    # as the embedder: built by the node, every test would write into the user's real
+    # cache directory and start reading each other's fixtures. None means every paper is
+    # read fresh, which is correct and merely more expensive.
+    extraction_cache: ExtractionCache | None = None
 
     pool_size: int = 800
     screen_budget: int = 400

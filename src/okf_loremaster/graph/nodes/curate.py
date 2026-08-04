@@ -48,9 +48,17 @@ NODE = "curate"
 # ones, and they are all still in the reserve if the topic comes up short.
 OFFER_MULTIPLE = 3
 
-# Room for one short decision per offered paper, plus the `missing` line.
-CURATE_TOKENS_PER_PAPER = 45
-CURATE_TOKENS_FLOOR = 512
+# Room for one short decision per offered paper, plus the `missing` line. Measured
+# against the JSON the prompt asks for: an 8-digit pmid, a boolean, and a one-clause
+# rationale, with their keys and punctuation, is 45 tokens only if the rationale is
+# very short. It usually is not, and the reply is then cut off mid-object — which
+# loses the whole topic, not the last decision, because truncated JSON does not parse.
+# 80 was measured wrong too: a run of 8 topics truncated on all 8 and every one of them
+# then succeeded on the doubling, so the true figure is between 80 and 160. 160 is the
+# one observed to work. The first attempt is billed whether or not it parses, so a
+# ceiling set below what replies actually need buys nothing and costs a whole call.
+CURATE_TOKENS_PER_PAPER = 160
+CURATE_TOKENS_FLOOR = 1024
 
 # Reserve tiers, best first: papers the screener included that the topic had no room to
 # offer, then papers it excluded but rated relevant, then papers the curator saw and
@@ -325,8 +333,12 @@ async def _curate_one(
         # A topic whose call failed keeps the screener's best-ranked papers rather than
         # emptying: the screener read every one of them against this review's question,
         # and an empty topic would be reported as a search failure it is not.
+        # The message, not just the class. Six topics once failed as bare `SchemaError`
+        # and the log could not say whether the model had written nonsense or simply
+        # been cut off mid-sentence — which are opposite problems with opposite fixes.
         note = (
-            f"curation of the {topic.slug} topic failed ({type(exc).__name__}); "
+            f"curation of the {topic.slug} topic failed "
+            f"({type(exc).__name__}: {exc}); "
             "kept the screener's best-ranked papers instead"
         )
         warnings.append(note)

@@ -16,7 +16,9 @@ from okf_loremaster.okf.layout import FULL_TEXT_BASIS
 from okf_loremaster.schemas import (
     MAX_BOTTOM_LINE_SENTENCES,
     MAX_DESCRIPTION_CHARS,
+    MAX_NULL_FINDINGS,
     MAX_PREDICTOR_ROWS,
+    MAX_VOCABULARY_HINTS,
     NONE_REPORTED,
     Candidate,
     Charter,
@@ -190,6 +192,48 @@ def test_dropped_predictor_rows_are_named_in_the_warning() -> None:
     dropped_warning = next(w for w in warnings if "predictor row" in w)
     assert f"factor {MAX_PREDICTOR_ROWS}" in dropped_warning
     assert f"factor {MAX_PREDICTOR_ROWS + 1}" in dropped_warning
+
+
+def test_dropped_null_findings_are_named_in_the_warning() -> None:
+    """`null_findings` had no ceiling at all until it was found to be where a reply spent
+    the tokens it needed to finish — and a reply that runs out is a lost paper."""
+    findings = [NullFinding(predictor=f"null {i}") for i in range(MAX_NULL_FINDINGS + 2)]
+    trimmed, warnings = Extraction(null_findings=findings).enforce_budgets()
+
+    assert len(trimmed.null_findings) == MAX_NULL_FINDINGS
+    dropped_warning = next(w for w in warnings if "null finding" in w)
+    assert f"null {MAX_NULL_FINDINGS}" in dropped_warning
+    assert f"null {MAX_NULL_FINDINGS + 1}" in dropped_warning
+
+
+def test_dropped_vocabulary_hints_are_named_in_the_warning() -> None:
+    hints = [VocabularyHint(concept=f"term {i}") for i in range(MAX_VOCABULARY_HINTS + 2)]
+    trimmed, warnings = Extraction(vocabulary_hints=hints).enforce_budgets()
+
+    assert len(trimmed.vocabulary_hints) == MAX_VOCABULARY_HINTS
+    dropped_warning = next(w for w in warnings if "vocabulary hint" in w)
+    assert f"term {MAX_VOCABULARY_HINTS}" in dropped_warning
+    assert f"term {MAX_VOCABULARY_HINTS + 1}" in dropped_warning
+
+
+def test_a_generous_paper_still_fits_under_every_list_ceiling() -> None:
+    """The ceilings exist to stop a reply running out of room, not to edit papers. One
+    reporting a full slate of findings has to pass through untrimmed, or the budget is
+    costing evidence instead of tokens."""
+    extraction = Extraction(
+        predictors=[a_row(predictor=f"factor {i}") for i in range(MAX_PREDICTOR_ROWS)],
+        null_findings=[NullFinding(predictor=f"null {i}") for i in range(MAX_NULL_FINDINGS)],
+        vocabulary_hints=[
+            VocabularyHint(concept=f"term {i}") for i in range(MAX_VOCABULARY_HINTS)
+        ],
+    )
+
+    trimmed, warnings = extraction.enforce_budgets()
+
+    assert len(trimmed.predictors) == MAX_PREDICTOR_ROWS
+    assert len(trimmed.null_findings) == MAX_NULL_FINDINGS
+    assert len(trimmed.vocabulary_hints) == MAX_VOCABULARY_HINTS
+    assert not [w for w in warnings if "dropped" in w]
 
 
 def test_predictor_order_is_the_models_order_not_resorted() -> None:

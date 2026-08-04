@@ -17,9 +17,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from unittest.mock import ANY
 
 import pytest
 
+from okf_loremaster.extraction_cache import ExtractionCache, fingerprint
 from okf_loremaster.graph.nodes import extract_node, fulltext_node, reconcile_node
 from okf_loremaster.graph.state import RunState
 from okf_loremaster.schemas import (
@@ -264,7 +266,7 @@ async def test_a_reply_that_never_parses_drops_the_paper_after_exactly_one_retry
     settings_factory: Any, tmp_path: Path
 ) -> None:
     """Once, not twice. A second failure is a model that cannot satisfy the schema, and
-    a third reasoning-tier call to confirm that is the most expensive way to learn nothing."""
+    a third call to confirm that is the most expensive way to learn nothing."""
     model = scripted(failing(99))
 
     async with node_deps(settings_factory, tmp_path, scripted=model) as deps:
@@ -317,6 +319,126 @@ async def test_a_paper_already_extracted_is_not_read_again(
 
     assert len(model.extracted) == 1
     assert set(update["extractions"]) == {OPEN, CLOSED}
+
+
+# --- the extraction cache ----------------------------------------------------
+#
+# The checkpoint covers a run resumed *after* this node; the cache covers one interrupted
+# inside it, which is the likely place because it is the long node. Nothing above would
+# have noticed the difference: `extractions` only reaches a checkpoint when the node
+# returns, so an interrupt at paper a hundred and ninety used to discard all hundred and
+# ninety and `--resume` bought them again.
+
+
+async def test_a_paper_read_in_an_earlier_run_is_not_paid_for_twice(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    cache = ExtractionCache(tmp_path / "readings")
+    state = extract_state(OPEN, CLOSED)
+
+    first = scripted(supported)
+    async with node_deps(
+        settings_factory, tmp_path, scripted=first, extraction_cache=cache
+    ) as deps:
+        before = await extract_node(state, deps)
+
+    # A second run of the same node with nothing carried over in state — which is what a
+    # resume from a checkpoint written before this node looks like.
+    second = scripted(supported)
+    async with node_deps(
+        settings_factory, tmp_path, scripted=second, extraction_cache=cache
+    ) as deps:
+        after = await extract_node(state, deps)
+
+    assert second.extracted == [], "a cached run still called the model"
+    assert set(after["extractions"]) == set(before["extractions"])
+    assert after["extractions"][OPEN] == before["extractions"][OPEN]
+
+
+async def test_a_paper_whose_text_changed_is_read_again(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """The key is the request, not the PMID. A longer full text, a different topic scope,
+    or an edited prompt all mean the model was never asked this — and answering from a
+    cache would silently serve a reading of something else."""
+    cache = ExtractionCache(tmp_path / "readings")
+    state = extract_state(OPEN)
+
+    async with node_deps(
+        settings_factory, tmp_path, scripted=scripted(supported), extraction_cache=cache
+    ) as deps:
+        await extract_node(state, deps)
+
+    texts = state["texts"] or {}
+    texts[OPEN] = texts[OPEN].model_copy(update={"text": texts[OPEN].text + "\n\n## ADDENDUM"})
+
+    model = scripted(supported)
+    async with node_deps(
+        settings_factory, tmp_path, scripted=model, extraction_cache=cache
+    ) as deps:
+        await extract_node(state, deps)
+
+    assert len(model.extracted) == 1
+
+
+async def test_a_paper_that_failed_to_parse_is_not_remembered_as_read(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """Caching a failure would make one bad afternoon permanent: the paper is dropped
+    from the bundle and no later run would ever try it again."""
+    cache = ExtractionCache(tmp_path / "readings")
+    state = extract_state(OPEN)
+
+    async with node_deps(
+        settings_factory, tmp_path, scripted=scripted(failing(99)), extraction_cache=cache
+    ) as deps:
+        assert await extract_node(state, deps) == {"extractions": {}, "warnings": ANY}
+
+    model = scripted(supported)
+    async with node_deps(
+        settings_factory, tmp_path, scripted=model, extraction_cache=cache
+    ) as deps:
+        update = await extract_node(state, deps)
+
+    assert len(model.extracted) == 1
+    assert set(update["extractions"]) == {OPEN}
+
+
+async def test_a_cache_that_cannot_be_written_to_costs_money_rather_than_the_run(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """A full disk or a read-only cache directory is a saving lost, not a run lost."""
+    unwritable = tmp_path / "readings"
+    unwritable.write_text("not a directory", encoding="utf-8")
+    cache = ExtractionCache(unwritable)
+
+    async with node_deps(
+        settings_factory, tmp_path, scripted=scripted(supported), extraction_cache=cache
+    ) as deps:
+        update = await extract_node(extract_state(OPEN), deps)
+
+    assert set(update["extractions"]) == {OPEN}
+
+
+def test_a_corrupt_cache_file_is_a_miss_rather_than_a_crash(tmp_path: Path) -> None:
+    """Half-written by a killed process, or written by a version that spelled a field
+    differently. Both are "nobody has read this paper", which is a thing the run knows
+    how to handle."""
+    cache = ExtractionCache(tmp_path / "readings")
+    cache.put("123", "deadbeefdeadbeef", Extraction.model_validate(extraction()))
+    stored = next((tmp_path / "readings").rglob("*.json"))
+    stored.write_text('{"predictors": [', encoding="utf-8")
+
+    assert cache.get("123", "deadbeefdeadbeef") is None
+    # And cleared, so the next run does not re-read and re-discard the same broken file.
+    assert not stored.exists()
+
+
+def test_the_fingerprint_separates_the_parts_it_is_given() -> None:
+    """Concatenation alone would make ("ab", "c") and ("a", "bc") the same request, and
+    a system prompt ending in the words a paper begins with is not a strange thing."""
+    assert fingerprint("ab", "c") != fingerprint("a", "bc")
+    assert fingerprint("a", "b") == fingerprint("a", "b")
 
 
 # --- reconcile --------------------------------------------------------------

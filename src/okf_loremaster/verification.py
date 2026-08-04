@@ -54,6 +54,7 @@ from okf_loremaster.schemas import (
     PredictorRow,
     VocabularyHint,
 )
+from okf_loremaster.schemas.limits import sentences
 
 __all__ = [
     "ExtractionCheck",
@@ -184,7 +185,7 @@ def normalize(text: str) -> str:
 class Source:
     """One paper's text, prepared once for every check made against it."""
 
-    __slots__ = ("_bounded", "_normalized", "_quantities", "text")
+    __slots__ = ("_bounded", "_normalized", "_quantities", "_sentences", "text")
 
     def __init__(self, text: str) -> None:
         self.text = text
@@ -193,10 +194,47 @@ class Source:
         # once turns token-boundary matching into a plain substring search.
         self._bounded = f" {self._normalized} "
         self._quantities = quantities_in(text)
+        # Folded alongside the original, so `sentence_for` can match on the folded form
+        # and return the published one. Built here rather than lazily because every
+        # predictor row in the extraction asks for it.
+        #
+        # Line by line, because `sentences` collapses whitespace and a full text is not
+        # prose end to end — it is section headings and table captions with paragraphs
+        # between them. Split as one string, `## RESULTS` has no terminator, so it joins
+        # the sentence after it and rides along on the front of every quote taken from
+        # that section. A line break is a boundary here even when punctuation says
+        # nothing.
+        self._sentences = tuple(
+            (part, normalize(part))
+            for line in text.splitlines()
+            for part in sentences(line)
+        )
 
     @property
     def quantities(self) -> tuple[Quantity, ...]:
         return self._quantities
+
+    def sentence_for(self, locator: str) -> str:
+        """The source sentence a locator opens, or `""` if it opens none.
+
+        An extraction writes the opening words of the sentence its numbers came from
+        rather than the whole sentence, and this is what turns those words back into the
+        published text. The stored quote is therefore sliced out of the source, which is
+        a stronger guarantee than asking for a copy and checking it afterward: a copied
+        sentence can drift into paraphrase and still pass, while a located one cannot
+        differ from the source at all.
+
+        Empty on a miss rather than a guess. The caller keeps whatever the model wrote
+        and the ordinary quote check judges it, so a locator that finds nothing degrades
+        to exactly the behavior that existed before locators did.
+        """
+        needle = normalize(locator)
+        if not needle:
+            return ""
+        for original, folded in self._sentences:
+            if needle in folded:
+                return original
+        return ""
 
     def holds_quote(self, quote: str) -> bool:
         needle = normalize(quote)
@@ -301,6 +339,7 @@ class ExtractionCheck:
 def verify_extraction(extraction: Extraction, source_text: str) -> ExtractionCheck:
     """Strip every number the source text does not contain, and report what went."""
     source = Source(source_text)
+    extraction = _expand_quotes(extraction, source)
 
     rows: list[RowCheck] = []
     verified: list[PredictorRow] = []
@@ -329,6 +368,38 @@ def verify_extraction(extraction: Extraction, source_text: str) -> ExtractionChe
         quotes_dropped=quotes_dropped,
         codes_dropped=len(codes_missing),
         codes_missing=codes_missing,
+    )
+
+
+def _expand_quotes(extraction: Extraction, source: Source) -> Extraction:
+    """Grow each `quote` from the words the model wrote into the sentence they open.
+
+    Runs before anything is checked, so every check downstream sees a full sentence and
+    none of them had to learn that quotes arrive short. That is the whole reason this
+    lives here rather than in the extract node: the numeric check narrows its scope to
+    the quoted sentence, and a scope of ten words would be a narrower check than the one
+    documented at the top of this module.
+
+    Idempotent, and safe on extractions written before locators existed. A quote that is
+    already a whole sentence locates that same sentence and expands to itself; a quote
+    the source does not contain expands to nothing and is left exactly as written, for
+    `_verify_row` and `_verify_findings` to drop as they always have.
+    """
+
+    def grown(quote: str) -> str:
+        return source.sentence_for(quote) or quote
+
+    return extraction.model_copy(
+        update={
+            "predictors": [
+                row.model_copy(update={"quote": grown(row.quote)})
+                for row in extraction.predictors
+            ],
+            "null_findings": [
+                finding.model_copy(update={"quote": grown(finding.quote)})
+                for finding in extraction.null_findings
+            ],
+        }
     )
 
 

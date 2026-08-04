@@ -21,6 +21,8 @@ approval mean nothing.
 from __future__ import annotations
 
 import asyncio
+import re
+from collections.abc import Mapping
 from typing import Any
 
 from okf_loremaster.config import Role
@@ -91,6 +93,7 @@ async def _screen_all(
     )
     schema = response_format_for(ScreenVerdict, name="screen_verdict")
     known = set(charter.slugs)
+    folded = {_fold(slug): slug for slug in charter.slugs}
     total = len(candidates)
     failures: list[str] = []
     unknown: set[str] = set()
@@ -108,8 +111,13 @@ async def _screen_all(
             verdict = _unreadable(candidate.pmid, f"screening call failed ({type(exc).__name__})")
 
         if verdict.topic and verdict.topic not in known:
-            unknown.add(verdict.topic)
-            verdict = verdict.model_copy(update={"topic": ""})
+            recovered = _resolve(verdict.topic, folded)
+            if recovered is None:
+                # `repr`, not the bare string: what makes one of these unusable is
+                # almost always invisible in a log line. Reading these back is what
+                # showed the screener listing four topics in a one-topic field.
+                unknown.add(repr(verdict.topic))
+            verdict = verdict.model_copy(update={"topic": recovered or ""})
 
         done += 1
         deps.progress(NODE, f"screened {done} of {total}", current=done, total=total)
@@ -138,6 +146,37 @@ async def _screen_one(
         response_format=schema,
     )
     return parse_model_with(result.text, ScreenVerdict, pmid=candidate.pmid)
+
+
+def _fold(slug: str) -> str:
+    """A topic name reduced to what a model cannot get cosmetically wrong.
+
+    Only what the charter itself would treat as the same directory: letters and digits,
+    lowercased. Anything narrower would have to guess at which punctuation is meaningful.
+    """
+    return "".join(char for char in slug.lower() if char.isalnum())
+
+
+def _resolve(named: str, folded: Mapping[str, str]) -> str | None:
+    """The charter topic the screener meant, or None if it named none of them.
+
+    Two things go wrong with this field, and both are the model being helpful rather
+    than wrong. It returns a slug that differs only in case or dash style — the
+    charter plainly has that topic, and dropping the hint over typography wastes a
+    judgment already paid for. Or, for a paper that genuinely spans several topics, it
+    lists them all in a field that holds one: `"a; b; c"`. Taking the first named
+    topic the charter has is the honest reading of that — the field is advisory, the
+    curator sees every paper on a topic at once and decides, and a first choice is
+    better information than a blank.
+    """
+    whole = folded.get(_fold(named))
+    if whole is not None:
+        return whole
+    for part in re.split(r"[,;/|\n]", named):
+        match = folded.get(_fold(part))
+        if match is not None:
+            return match
+    return None
 
 
 def _unreadable(pmid: str, reason: str) -> ScreenVerdict:

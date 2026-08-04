@@ -33,6 +33,10 @@ def make(
     best_rank: int = 0,
     citation_count: int = 10,
     rcr: float | None = 1.0,
+    # Defaults to True because every other default here describes a paper iCite answered
+    # about. A helper that handed out metrics and then said they were never measured
+    # would be testing the outage path in every test that did not mean to.
+    metrics_known: bool = True,
     publication_types: list[str] | None = None,
     mesh: list[str] | None = None,
 ) -> Candidate:
@@ -46,6 +50,7 @@ def make(
         best_rank=best_rank,
         citation_count=citation_count,
         rcr=rcr,
+        metrics_known=metrics_known,
         publication_types=publication_types or ["Journal Article"],
         mesh_terms=mesh or [],
     )
@@ -75,6 +80,55 @@ def test_a_comment_scores_below_a_journal_article() -> None:
 def test_a_missing_year_is_neither_rewarded_nor_buried() -> None:
     unknown = relevance(make("1", year=None), now_year=NOW)[1]["recency"]
     assert 0.0 < unknown < 1.0
+
+
+# --- the citation signal, and its absence ------------------------------------
+#
+# These exist because adding `metrics_known` to `Candidate` broke nothing in this file.
+# Every test above passed with the field defaulting to False — that is, with the citation
+# component reading "unmeasured" for every paper — which showed that nothing here had
+# ever asserted that the component reached a score at all.
+
+
+def test_a_well_cited_paper_outranks_a_barely_cited_one() -> None:
+    strong = make("1", rcr=4.0)
+    weak = make("2", rcr=0.1)
+    assert relevance(strong, now_year=NOW)[0] > relevance(weak, now_year=NOW)[0]
+
+
+def test_citations_are_used_when_icite_gave_no_rcr() -> None:
+    """RCR is field-normalized and better, but a raw count is still a signal."""
+    many = make("1", rcr=None, citation_count=500)
+    few = make("2", rcr=None, citation_count=1)
+    assert relevance(many, now_year=NOW)[0] > relevance(few, now_year=NOW)[0]
+
+
+def test_an_unanswered_paper_is_not_read_as_an_uncited_one() -> None:
+    """`citation_count = 0` is equally "cited by nobody" and "never asked", and only
+    `metrics_known` tells those apart. Read as the former, a service outage becomes a
+    corpus of worthless papers."""
+    unknown = relevance(make("1", metrics_known=False, citation_count=0, rcr=None), now_year=NOW)
+    uncited = relevance(make("2", metrics_known=True, citation_count=0, rcr=None), now_year=NOW)
+    assert unknown[1]["citation"] > uncited[1]["citation"]
+
+
+def test_an_icite_outage_is_a_no_op_rather_than_a_second_recency_term() -> None:
+    """The regression this was written for. With iCite down, every paper's citation count
+    defaulted to zero, so the component scored 0.0 for the whole corpus except for papers
+    too new to have been cited, which scored the neutral value instead — turning an
+    unavailable signal into a bonus for being recent. Rolling-dated reference chapters
+    floated into the top twenty of the pool on it.
+
+    An unavailable signal has to be a constant across the corpus, because a constant
+    added to every score changes no ordering at all.
+    """
+    down = [
+        make("1", metrics_known=False, citation_count=0, rcr=None, year=2026),
+        make("2", metrics_known=False, citation_count=0, rcr=None, year=2015),
+        make("3", metrics_known=False, citation_count=0, rcr=None, year=None),
+    ]
+    components = {relevance(c, now_year=NOW)[1]["citation"] for c in down}
+    assert len(components) == 1, "the citation component moved without any citation data"
 
 
 def test_order_is_total_so_two_runs_agree() -> None:

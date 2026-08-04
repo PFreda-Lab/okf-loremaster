@@ -21,6 +21,9 @@ class FakeMessage:
 @dataclass(frozen=True, slots=True)
 class FakeChoice:
     message: FakeMessage
+    # "length" is how a provider says it stopped mid-sentence at `max_tokens`. The
+    # default is the ordinary case, so only a test about truncation has to mention it.
+    finish_reason: str = "stop"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,8 +74,17 @@ class FakeCompletion:
 
         messages = kwargs.get("messages") or []
         prompt_text = "".join(str(m.get("content", "")) for m in messages)
+        # A reply longer than the budget it was given is what truncation looks like
+        # from outside, so the fake reports it the way a provider would.
+        budget = kwargs.get("max_tokens")
+        cut_off = isinstance(budget, int) and _estimate_tokens(text) > budget
         return FakeResponse(
-            choices=[FakeChoice(message=FakeMessage(content=text))],
+            choices=[
+                FakeChoice(
+                    message=FakeMessage(content=text),
+                    finish_reason="length" if cut_off else "stop",
+                )
+            ],
             usage=FakeUsage(
                 prompt_tokens=_estimate_tokens(prompt_text),
                 completion_tokens=_estimate_tokens(text),

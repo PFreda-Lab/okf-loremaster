@@ -233,6 +233,124 @@ async def test_an_unrelated_bad_request_still_fails_immediately(settings_factory
     assert completion.call_count == 1
 
 
+async def test_every_call_in_flight_survives_the_first_refusal(settings_factory: Any) -> None:
+    """The refusal arrives at all of them at once, so all of them must recover.
+
+    This is the bug that killed a live run: the "have we learned it yet" flag lived on
+    the router, and the first call to handle the rejection flipped it. Every sibling
+    then found the flag already set, skipped the fallback, and re-raised a
+    `BadRequestError` that had just become fixable. Learning it once is about not
+    paying for the discovery twice — it was never a reason to let the other calls die.
+    """
+    completion = _refusing_completion()
+    router, bus = _router(settings_factory, completion=completion, concurrency_fast=8)
+    queue = bus.subscribe()
+
+    results = await asyncio.gather(
+        *(
+            router.complete(Role.FAST, MESSAGES, node="screen", response_format=SCHEMA)
+            for _ in range(8)
+        )
+    )
+
+    assert [r.text for r in results] == ["{}"] * 8, "not one of them may be lost"
+    warnings = [e for e in _events(bus, queue) if isinstance(e, WarningEvent)]
+    assert len(warnings) == 1, "announced once for the run, however many discover it"
+
+
+# --- truncation ------------------------------------------------------------
+
+
+async def test_a_reply_cut_off_by_the_budget_is_retried_with_room(
+    settings_factory: Any,
+) -> None:
+    """Truncated JSON never parses, so re-asking identically cannot help.
+
+    A run lost all six of its curation calls to this: the replies were fine, the
+    budget was a third of what they needed, and every one came back unterminated.
+    """
+    long_reply = "x" * 400  # ~100 tokens by the fake's estimate
+    completion = FakeCompletion(replies=(long_reply,))
+    router, bus = _router(settings_factory, completion=completion)
+    queue = bus.subscribe()
+
+    await router.complete(Role.BALANCED, MESSAGES, node="curate", max_tokens=64)
+
+    assert [call["max_tokens"] for call in completion.calls] == [64, 128]
+    messages = [e.message for e in _events(bus, queue) if isinstance(e, WarningEvent)]
+    assert any("cut off" in m for m in messages)
+
+
+async def test_the_tokens_of_a_discarded_truncated_reply_are_still_billed(
+    settings_factory: Any,
+) -> None:
+    """It was paid for whether or not it was usable, and this module is about honesty."""
+    completion = FakeCompletion(replies=("x" * 400,))
+    router, _ = _router(settings_factory, completion=completion)
+
+    await router.complete(Role.BALANCED, MESSAGES, node="curate", max_tokens=64)
+
+    assert router.ledger.calls == 2, "the abandoned attempt is a call that happened"
+
+
+async def test_a_reply_that_fits_is_not_retried(settings_factory: Any) -> None:
+    """The common case must not pay for the rare one."""
+    completion = FakeCompletion(replies=("{}",))
+    router, _ = _router(settings_factory, completion=completion)
+
+    await router.complete(Role.BALANCED, MESSAGES, node="curate", max_tokens=64)
+
+    assert completion.call_count == 1
+
+
+# --- backoff ---------------------------------------------------------------
+
+
+def test_a_stated_wait_is_honored_rather_than_guessed_under() -> None:
+    """A token-per-minute limit clears on the provider's clock, not on ours.
+
+    The run this comes from backed off a maximum of 8s against a provider asking for
+    19, so all four attempts fell inside one window and 56 of 252 papers were lost.
+    """
+    from okf_loremaster.llm.router import _requested_wait
+
+    exc = ValueError(
+        'AnthropicException - {"error":{"code":"RateLimitReached","message":"Rate limit '
+        'of 250000 per 60s exceeded for UserByModelByMinuteUncachedInputTokens. Please '
+        'wait 19 seconds before retrying."}}'
+    )
+
+    assert _requested_wait(exc) == 19.0
+
+
+def test_a_failure_that_names_no_wait_falls_back_to_exponential() -> None:
+    from okf_loremaster.llm.router import _requested_wait
+
+    assert _requested_wait(ConnectionError("connection reset by peer")) is None
+
+
+def test_backoff_always_waits(settings_factory: Any) -> None:
+    """Full jitter over [0, cap) retries a good share of a burst almost immediately.
+
+    Against a rate limit that is the one thing that cannot work, because the burst is
+    what tripped it. Half the delay is fixed so that every retry actually waits.
+    """
+    router, _ = _router(settings_factory)
+    exc = ConnectionError("no hint here")
+
+    delays = [router._backoff(attempt, exc) for attempt in range(1, 5) for _ in range(50)]
+
+    assert min(delays) > 0.0
+
+
+def test_a_stated_wait_is_cleared_before_retrying(settings_factory: Any) -> None:
+    """Past the named wait, not up to it: the window has to have actually rolled."""
+    router, _ = _router(settings_factory)
+    exc = ValueError("Please wait 19 seconds before retrying.")
+
+    assert all(router._backoff(1, exc) >= 19.0 for _ in range(50))
+
+
 # --- concurrency and budget ------------------------------------------------
 
 

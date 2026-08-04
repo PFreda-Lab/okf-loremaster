@@ -41,13 +41,19 @@ CHARS_PER_TOKEN = 4.0
 # `graph.nodes.screen.MAX_VERDICT_TOKENS`, so 80 is a typical answer rather than a
 # worst case; curation's is a short rationale per paper.
 SCREEN_COMPLETION_ALLOWANCE = 80
-CURATE_PER_PAPER_COMPLETION = 40
+# Measured, not guessed: a run of 8 topics was cut off at 80 tokens per paper on every
+# one of them and finished on all 8 at 160. The truth is in between.
+CURATE_PER_PAPER_COMPLETION = 120
 # Per offered paper, beyond its title: the PMID, the relevance marker and the
 # screener's one-clause reason travel with it.
 CURATE_PER_PAPER_OVERHEAD = 25
 # The one part of extraction that cannot be measured before it is written. Capped by
-# `graph.nodes.extract.MAX_EXTRACTION_TOKENS`; this is a typical full concept — twelve
-# predictor rows with quotes, null findings, and the prose fields — not a worst case.
+# `graph.nodes.extract.MAX_EXTRACTION_TOKENS`; this is a typical full concept —
+# `MAX_PREDICTOR_ROWS` rows with quote locators, null findings, and the prose fields —
+# not a worst case. 700 was off by most of a factor of three; 2000 was measured against
+# replies that pretty-printed their JSON and copied a whole sentence into every row.
+# Compact JSON, capped null findings and vocabulary hints, and locators in place of
+# copied sentences take about two thirds back off that figure.
 EXTRACT_COMPLETION_ALLOWANCE = 700
 
 # A full text runs about this many times the length of its own abstract. Extraction
@@ -55,11 +61,16 @@ EXTRACT_COMPLETION_ALLOWANCE = 700
 # expensive one.
 FULL_TEXT_MULTIPLE = 12.0
 
-# Share of papers carrying a PMC id whose full text is actually retrievable. A PMC id
-# is necessary and nowhere near sufficient: most of PMC is outside the open-access
-# subset, and BioC answers for those with a 200 and an error body. Two in five is a
-# deliberately middling assumption, stated here so it can be argued with.
-OPEN_ACCESS_RATE = 0.4
+# Share of papers carrying a PMC id whose full text is actually retrievable. A PMC id is
+# necessary and not sufficient: part of PMC is outside the open-access subset, and BioC
+# answers for those with a 200 and an error body.
+#
+# Two in five was the original guess and it was too pessimistic — one measured run
+# retrieved 121 of 141, or 86%. Three in five splits the difference rather than fitting
+# the constant to a single corpus, because that corpus was recent and recency correlates
+# with an open-access mandate. This is the largest single unknown in the projection: it
+# multiplies the length of the input to the most expensive node in the run.
+OPEN_ACCESS_RATE = 0.6
 
 
 def estimate_tokens(text: str) -> int:
@@ -323,7 +334,7 @@ def project_spend(
         )
         add(
             "extract",
-            Role.REASONING,
+            Role.BALANCED,
             calls=retained,
             prompt_tokens=retained * (prefix + per_paper),
             completion_tokens=retained * EXTRACT_COMPLETION_ALLOWANCE,

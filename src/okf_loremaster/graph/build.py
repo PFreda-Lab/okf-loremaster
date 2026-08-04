@@ -62,9 +62,12 @@ from okf_loremaster.schemas import (
     Candidate,
     Charter,
     ConceptRecord,
+    Confidence,
     CostSummary,
     CurationDecision,
     CurationResult,
+    Direction,
+    EvidenceType,
     ExecutedQuery,
     Extraction,
     NullFinding,
@@ -76,6 +79,7 @@ from okf_loremaster.schemas import (
     ScoredCandidate,
     ScreenVerdict,
     SourceRef,
+    TextBasis,
     Topic,
     TopicGap,
     TopicSummary,
@@ -126,14 +130,23 @@ class BoundNode(Protocol):
 
 # Every schema that can appear in checkpointed state. Left incomplete, deserializing a
 # resumed run warns now and fails later.
+#
+# The enums belong here as much as the models do, and are easy to forget because leaving
+# them out looks harmless: they are `StrEnum`, so a blocked value decodes to its own
+# string and pydantic revalidates it on the way back into the model. The data survives —
+# but every resume logs a page of `Blocked deserialization` at the user, and the day one
+# of these stops being a `StrEnum` the silent fallback becomes silent data loss.
 CHECKPOINTED_TYPES = (
     BundleCounts,
     Candidate,
     Charter,
     ConceptRecord,
+    Confidence,
     CostSummary,
     CurationDecision,
     CurationResult,
+    Direction,
+    EvidenceType,
     ExecutedQuery,
     Extraction,
     NullFinding,
@@ -149,6 +162,7 @@ CHECKPOINTED_TYPES = (
     TopicGap,
     TopicSummary,
     SourceRef,
+    TextBasis,
     Verification,
     VerificationSummary,
 )

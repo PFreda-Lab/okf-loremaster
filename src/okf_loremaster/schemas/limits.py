@@ -23,9 +23,12 @@ __all__ = [
     "MAX_BOTTOM_LINE_SENTENCES",
     "MAX_CAVEAT_SENTENCES",
     "MAX_DESCRIPTION_CHARS",
+    "MAX_NULL_FINDINGS",
     "MAX_PREDICTOR_ROWS",
+    "MAX_QUOTE_WORDS",
     "MAX_SOURCE_CHARS",
     "MAX_TAGS",
+    "MAX_VOCABULARY_HINTS",
     "sentences",
     "truncate_chars",
     "truncate_sentences",
@@ -38,6 +41,27 @@ MAX_PREDICTOR_ROWS = 12
 MAX_CAVEAT_SENTENCES = 3
 MAX_TAGS = 8
 MAX_BODY_WORDS = 400
+
+# The two lists that used to have no ceiling at all — not in the prompt, not here, not on
+# the model. Left open, they are what a reply spends its last tokens on, and a reply that
+# runs out of tokens is a *lost paper* rather than a long one. Both are set where a
+# generous paper still fits: a study reporting more than eight nulls is listing its whole
+# adjustment set, and one naming more than eight coded variables is printing its data
+# dictionary. Enforced the same way as every other budget here — truncate and warn.
+MAX_NULL_FINDINGS = 8
+MAX_VOCABULARY_HINTS = 8
+
+# How much of a sentence an extraction has to write for `quote`. The model emits the
+# opening words; `expand_quote` finds the sentence they open and stores that instead.
+#
+# This is the single largest saving in the node: a verbatim quote is the longest field in
+# a predictor row, there is one per row, and copying it is *transcription of text already
+# on disk* — paid for at output rates, in the one node that makes a call per paper. It
+# also makes the guarantee
+# stronger rather than weaker. A copied quote can drift into paraphrase and nothing
+# catches a plausible one; a located quote is sliced out of the source, so it is verbatim
+# by construction.
+MAX_QUOTE_WORDS = 10
 
 # The one budget here that bounds an input rather than an output: how much of a paper an
 # extraction prompt may carry. At roughly four characters a token that is about 6,000

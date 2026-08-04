@@ -14,6 +14,13 @@ to prevent.
 
 from __future__ import annotations
 
+from okf_loremaster.schemas.limits import (
+    MAX_NULL_FINDINGS,
+    MAX_PREDICTOR_ROWS,
+    MAX_QUOTE_WORDS,
+    MAX_VOCABULARY_HINTS,
+)
+
 __all__ = [
     "CHARTER_SYSTEM",
     "CURATE_SYSTEM",
@@ -161,7 +168,8 @@ Fields:
   - `include`: true if the paper reports something this review could use as evidence.
   - `relevance`: 0 unrelated, 1 tangential, 2 relevant, 3 directly on point.
   - `topic`: the slug of the topic it belongs on, copied exactly from the list below. \
-Empty string if none of them fits.
+Exactly one slug, never a list — a paper that spans several belongs on the one it says \
+most about. Empty string if none of them fits.
   - `reason`: one clause, fifteen words or fewer.
   - `confidence`: "high", "medium" or "low" — how sure you are of `include`, not how \
 strong the paper is.
@@ -282,9 +290,13 @@ def curate_user(
     return "\n".join(lines)
 
 
-EXTRACT_SYSTEM = """\
+EXTRACT_SYSTEM = f"""\
 You are reading one paper and recording what it found, so that another agent can use it \
 as evidence without opening the paper. Return a single JSON object and nothing else.
+
+Write the JSON compactly: no indentation, no line breaks between fields, no spaces after \
+`:` or `,`. It is read by a parser, never by a person. Pretty-printing the same content \
+costs about a fifth of the reply's room and buys nothing.
 
 Fields:
   - `description`: two lines at most, saying what this paper reports. An agent reads \
@@ -297,17 +309,24 @@ state one. Never estimate it.
   - `population`: who or what was studied, in one short phrase.
   - `outcome_definition`: how the outcome was defined or measured in this study \
 specifically.
-  - `predictors`: one row per relationship this paper reports. See below.
-  - `null_findings`: one row per relationship the paper looked for and did not find. \
-This is as valuable as the section above it and is almost always shorter than it should \
-be, because a result that did not hold is easy to read past. If the paper truly reports \
-none, return one row with `predictor` set to "none reported".
+  - `predictors`: one row per relationship this paper reports, and at most \
+{MAX_PREDICTOR_ROWS} of them. A paper reporting more than that is reporting a model's \
+whole coefficient table; give the rows that answer the question above and stop. Rows \
+past the limit are discarded after the fact, so writing them costs the reply the room \
+it needs to finish — and a reply that stops mid-row is not a shorter extraction, it is \
+no extraction at all. See below.
+  - `null_findings`: one row per relationship the paper looked for and did not find, \
+and at most {MAX_NULL_FINDINGS} of them. This is as valuable as the section above it and \
+is almost always shorter than it should be, because a result that did not hold is easy \
+to read past. If the paper truly reports none, return one row with `predictor` set to \
+"none reported".
   - `vocabulary_hints`: one entry per variable this paper names, so a reader can find \
-the same variable in their own data. Each entry has a `concept` — the paper's own words \
-for it — and `codes`, a list of the codes this paper gives for that same concept, each \
-with the `system` it comes from and the `code` itself. Most papers name variables and \
-never code them: leave `codes` empty rather than looking a code up or guessing one. \
-Record a code only where the paper prints it.
+the same variable in their own data, and at most {MAX_VOCABULARY_HINTS} of them. Each \
+entry has a `concept` — the paper's own words for it — and `codes`, a list of the codes \
+this paper gives for that same concept, each with the `system` it comes from and the \
+`code` itself. Most papers name variables and never code them: leave `codes` empty \
+rather than looking a code up or guessing one. Record a code only where the paper \
+prints it.
   - `caveats`: at most three sentences on what would make this evidence weaker than it \
 looks.
   - `tags`: a handful of short topic terms.
@@ -332,12 +351,18 @@ character.
 them to a number.
   - `direction`: "increases", "decreases", "none" or "unclear".
   - `confidence`: how sure you are of this row.
-  - `quote`: the sentence the numbers came from, copied verbatim from the text above.
+  - `quote`: the **first {MAX_QUOTE_WORDS} words or fewer** of the sentence the numbers \
+came from, copied exactly as the text above prints them. Not the whole sentence. Enough \
+words to pick that sentence out from every other sentence in the paper, and no more — \
+the rest of it is retrieved from the source afterward and added for you.
 
 Every number you record is checked against the text afterward, automatically. One that \
 is not there is deleted and its row is marked less reliable, so a number you can see is \
-worth more than one you can reconstruct, and the verbatim `quote` is what lets a number \
-be checked against its own sentence rather than against the whole paper.
+worth more than one you can reconstruct. The `quote` is what makes that check strict: it \
+is grown back into the full sentence and the numbers are checked against that one \
+sentence rather than against the whole paper. Opening words that match nothing lose the \
+row that narrower check, so copy them exactly — including any digits or symbols they \
+contain, and starting at the beginning of the sentence rather than in the middle of it.
 
 A relationship reported without a magnitude is still a relationship reported: leave the \
 numeric fields null and record the row anyway. Record only what this paper says. Do not \

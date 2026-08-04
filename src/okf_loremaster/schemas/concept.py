@@ -40,8 +40,10 @@ from okf_loremaster.schemas.limits import (
     MAX_BOTTOM_LINE_SENTENCES,
     MAX_CAVEAT_SENTENCES,
     MAX_DESCRIPTION_CHARS,
+    MAX_NULL_FINDINGS,
     MAX_PREDICTOR_ROWS,
     MAX_TAGS,
+    MAX_VOCABULARY_HINTS,
     truncate_chars,
     truncate_sentences,
     word_count,
@@ -271,7 +273,8 @@ class Extraction(Model):
         """Trim to the length budgets, returning the trimmed copy and what was cut.
 
         Truncate and warn rather than reject: an over-long extraction is a good one
-        that ran on, and re-asking costs a reasoning-tier call to fix a formatting problem.
+        that ran on, and re-asking pays for a whole second reading to fix a formatting
+        problem.
         Dropped predictor rows are named in the warning so nothing vanishes quietly.
         """
         trimmed = self.model_copy(deep=True)
@@ -299,6 +302,26 @@ class Extraction(Model):
             warnings.append(
                 f"dropped {len(dropped)} predictor row(s) over the limit of "
                 f"{MAX_PREDICTOR_ROWS}: {', '.join(dropped)}"
+            )
+
+        # Same rule as the predictor rows, and added for the same reason: these two were
+        # the last uncapped lists in the schema, so they were where a reply spent the
+        # tokens it needed to finish. The tail goes, because a model lists what it thinks
+        # matters first.
+        if len(trimmed.null_findings) > MAX_NULL_FINDINGS:
+            dropped = [row.predictor for row in trimmed.null_findings[MAX_NULL_FINDINGS:]]
+            trimmed.null_findings = trimmed.null_findings[:MAX_NULL_FINDINGS]
+            warnings.append(
+                f"dropped {len(dropped)} null finding(s) over the limit of "
+                f"{MAX_NULL_FINDINGS}: {', '.join(dropped)}"
+            )
+
+        if len(trimmed.vocabulary_hints) > MAX_VOCABULARY_HINTS:
+            dropped = [hint.concept for hint in trimmed.vocabulary_hints[MAX_VOCABULARY_HINTS:]]
+            trimmed.vocabulary_hints = trimmed.vocabulary_hints[:MAX_VOCABULARY_HINTS]
+            warnings.append(
+                f"dropped {len(dropped)} vocabulary hint(s) over the limit of "
+                f"{MAX_VOCABULARY_HINTS}: {', '.join(dropped)}"
             )
 
         if len(trimmed.tags) > MAX_TAGS:

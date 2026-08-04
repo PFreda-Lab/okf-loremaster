@@ -81,11 +81,23 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(f"{ENV_PREFIX}API_BASE", "ANTHROPIC_BASE_URL"),
     )
 
-    concurrency_fast: int = 8
-    concurrency_balanced: int = 4
-    concurrency_reasoning: int = 2
-    max_retries: int = 4
-    request_timeout: float = 120.0
+    # Screening submits every pooled paper at once and these semaphores are what meter
+    # it. The binding limit in practice is tokens per minute, not requests: eight
+    # abstracts in flight is a burst no backoff can smooth out, and a run once lost 56
+    # of 252 screening calls to it. Four is slower and finishes.
+    concurrency_fast: int = 4
+    # BALANCED is what sets a run's wall-clock, because extraction lives here: one call
+    # per kept paper, so a 200-paper bundle makes 200 of them against every other node's
+    # handful. At 2 that serializes into hours. Held level with, not above, the ceiling
+    # `test_concurrency_defaults_descend_with_cost` sets over the tiers.
+    concurrency_balanced: int = 3
+    concurrency_reasoning: int = 3
+    # Attempts, not retries: the warnings count up to `max_retries - 1`. Rate limits
+    # clear on a 60-second window, so a run needs enough attempts to outlast one.
+    max_retries: int = 6
+    # An extraction reads 6,000 tokens of source and writes up to
+    # `MAX_EXTRACTION_TOKENS` back. At 120s that call times out on its own success.
+    request_timeout: float = 300.0
 
     # --- Cost accounting ---------------------------------------------------
     # USD per 1M tokens. Used only when LiteLLM cannot price a model itself, which

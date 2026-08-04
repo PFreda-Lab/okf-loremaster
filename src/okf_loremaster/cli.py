@@ -60,7 +60,12 @@ def _reported() -> Iterator[None]:
         console.print(f"[red]{escape(str(exc))}[/red]")
         raise typer.Exit(code=1) from exc
     except KeyboardInterrupt as exc:
-        console.print("[yellow]interrupted[/yellow] — rerun with --resume <run-id> to continue")
+        # No id to offer: Ctrl-C can land before one is generated, and this handler
+        # cannot see it in any case. `runs` is where it can be looked up.
+        console.print(
+            "[yellow]interrupted[/yellow] — [cyan]okf-loremaster runs[/cyan] lists the "
+            "run id, then [cyan]build --resume <id>[/cyan] continues it"
+        )
         raise typer.Exit(code=130) from exc
 
 
@@ -200,7 +205,14 @@ def selftest(
 
 @app.command()
 def build(
-    prompt: Annotated[str, typer.Argument(help="What you want to know, in plain language.")],
+    # Optional only because `--resume` supplies it: a resumed run reads its question back
+    # out of the checkpoint, and asking for it again invites a retyped one that differs
+    # from the one the run was actually built on. Omitted without `--resume`, the run
+    # stops with a sentence saying so.
+    prompt: Annotated[
+        str | None,
+        typer.Argument(help="What you want to know. Not needed with --resume."),
+    ] = None,
     out: Annotated[
         Path | None,
         typer.Option("-o", "--out", help="Folder name, under the output directory."),
@@ -232,7 +244,10 @@ def build(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Plan and cost the run. Makes zero LLM calls.")
     ] = False,
-    resume: Annotated[str | None, typer.Option("--resume", help="Resume a run by id.")] = None,
+    resume: Annotated[
+        str | None,
+        typer.Option("--resume", help="Resume a run by id; `runs` lists them."),
+    ] = None,
     tui: Annotated[bool, typer.Option("--tui", help="Full-screen Textual interface.")] = False,
     json_out: Annotated[bool, typer.Option("--json", help="Emit machine-readable events.")] = False,
     verbose: Annotated[int, typer.Option("-v", "--verbose", count=True, help="Verbosity.")] = 0,
@@ -297,7 +312,7 @@ def build(
             require_textual()
 
     options = RunOptions(
-        prompt=prompt,
+        prompt=prompt or "",
         out=out,
         pool_size=pool_size,
         screen_budget=screen_budget,
@@ -336,6 +351,54 @@ def build(
     if state.get("bundle") and not state.get("validated"):
         raise typer.Exit(code=1)
 
+
+@app.command()
+def runs(
+    limit: Annotated[int, typer.Option("-n", "--limit", help="How many to show.", min=1)] = 10,
+) -> None:
+    """List recent runs and how far each one got, with the id to resume it by."""
+    from rich.table import Table
+
+    from okf_loremaster.config import load_settings
+    from okf_loremaster.run import list_runs
+
+    with _reported():
+        settings = load_settings()
+        past = asyncio.run(list_runs(settings, limit=limit))
+
+    if not past:
+        console.print(
+            f"[dim]no runs in[/dim] {settings.cache_dir}\n"
+            f"[dim]start one with[/dim]  [cyan]okf-loremaster build \"your question\"[/cyan]"
+        )
+        return
+
+    table = Table(box=None, pad_edge=False, header_style="dim")
+    table.add_column("run id")
+    table.add_column("started", style="dim")
+    table.add_column("reached")
+    # One row per run, clipped rather than wrapped: this is a list to pick an id out of,
+    # and a four-line paragraph per entry buries the ids it exists to show.
+    table.add_column("question", overflow="ellipsis", no_wrap=True, max_width=52)
+    for run in past:
+        done = run.finished
+        table.add_row(
+            f"[dim]{run.run_id}[/dim]" if done else run.run_id,
+            f"{run.started:%b %d %H:%M}" if run.started else "—",
+            "[green]finished[/green]" if done else f"[yellow]{run.reached}[/yellow]",
+            escape(run.prompt) or "[dim]—[/dim]",
+        )
+    console.print(table)
+
+    # Only the unfinished ones are worth resuming, and only the newest of those is worth
+    # spelling out — the point is to show the shape of the command, not to enumerate it.
+    unfinished = next((run for run in past if not run.finished), None)
+    if unfinished is not None:
+        console.print(
+            f"\n[dim]resume with[/dim]  "
+            f"[cyan]okf-loremaster build --resume {unfinished.run_id}[/cyan]"
+            f"  [dim](the question is read back from the run)[/dim]"
+        )
 
 if __name__ == "__main__":
     app()

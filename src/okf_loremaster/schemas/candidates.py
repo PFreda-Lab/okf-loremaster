@@ -101,6 +101,10 @@ class Candidate(Model):
     # Enrichment, all optional: a paper too new to be scored must still be rankable.
     citation_count: int = 0
     rcr: float | None = None
+    # Whether iCite actually answered for this paper. `citation_count = 0` cannot say
+    # so on its own — it is equally "cited by nobody" and "never asked", and ranking has
+    # to tell those apart or a service outage reads as a corpus of uncited papers.
+    metrics_known: bool = False
     is_research_article: bool = True
     concepts: dict[str, list[str]] = Field(default_factory=dict)
 
@@ -150,6 +154,7 @@ class Candidate(Model):
         updated.citation_count = metrics.citation_count
         updated.rcr = metrics.relative_citation_ratio
         updated.is_research_article = metrics.is_research_article
+        updated.metrics_known = True
         return updated
 
     def with_concepts(self, document: AnnotatedDocument) -> Self:

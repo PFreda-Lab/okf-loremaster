@@ -142,6 +142,24 @@ async def test_a_topic_the_charter_does_not_have_is_blanked_rather_than_carried(
     assert any("invented" in note for note in update["warnings"])
 
 
+async def test_a_topic_named_with_different_punctuation_is_recovered_not_discarded(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """The charter has this topic. Only the typography differs, and that is not a reason
+    to throw away a judgment already paid for — a run blanked 113 of 252 hints this way.
+    """
+    scripted = ScriptedLLM(
+        screen=screening(include=True, relevance=3, topic="  AA  "), curate=lambda *_: {}
+    )
+    state: RunState = {"charter": two_topics(), "pool": pool_of(2)}
+
+    async with node_deps(settings_factory, tmp_path, scripted=scripted) as deps:
+        update = await screen_node(state, deps)
+
+    assert all(v.topic == "aa" for v in update["verdicts"]), "folded back to the real slug"
+    assert not any("does not have" in note for note in update["warnings"])
+
+
 async def test_with_no_model_nothing_is_screened_and_the_run_says_so(
     settings_factory: Any, tmp_path: Path
 ) -> None:
@@ -417,3 +435,24 @@ def test_the_scripted_model_fails_loudly_if_a_prompt_stops_naming_its_subject() 
                 ]
             }
         )
+
+
+async def test_a_paper_the_screener_lists_several_topics_for_keeps_the_first(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """The field holds one topic and the screener sometimes names four.
+
+    Seen live: `'baseline-immunovirologic-status; regimen-and-pharmacology; ...'` in a
+    single-topic field. Blanking that discards a real judgment over a delimiter, and
+    the first topic named is better information for the curator than none.
+    """
+    scripted = ScriptedLLM(
+        screen=screening(include=True, relevance=3, topic="bb; aa"), curate=lambda *_: {}
+    )
+    state: RunState = {"charter": two_topics(), "pool": pool_of(2)}
+
+    async with node_deps(settings_factory, tmp_path, scripted=scripted) as deps:
+        update = await screen_node(state, deps)
+
+    assert all(v.topic == "bb" for v in update["verdicts"])
+    assert not any("does not have" in note for note in update["warnings"])

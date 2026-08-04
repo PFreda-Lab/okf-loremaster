@@ -71,6 +71,11 @@ _NON_RESEARCH_TYPES = frozenset(
     }
 )
 
+# The score for a signal that was not measured, as distinct from one measured as zero.
+# Mid-range so that neither the floor nor the ceiling is asserted about a paper nothing
+# is known about.
+_UNMEASURED = 0.5
+
 # Citation counts are meaningless for a paper this new: it is not uncited, it is
 # unread. Such a paper gets the neutral score rather than the floor.
 _TOO_NEW_YEARS = 2
@@ -131,10 +136,26 @@ def _recency(candidate: Candidate, *, now_year: int, min_year: int | None) -> fl
 
 
 def _citation(candidate: Candidate, *, now_year: int) -> float:
+    """How much this paper has been read, or `_UNMEASURED` where that is not known.
+
+    The unmeasured case is the whole reason this is not one line. iCite is a third-party
+    service and `rank` treats an outage as costing a signal rather than the run — but
+    `citation_count` defaults to 0, so an outage used to score every paper in the corpus
+    at the floor except the ones under two years old, which kept the neutral 0.5. That
+    is not a lost signal, it is an inverted one: the component silently became a second
+    recency term, and a run whose iCite call failed pooled continuously-revised reference
+    works over primary research that had been cited for a decade.
+
+    Returning the neutral value instead makes the component a constant across the corpus,
+    and a constant added to every score changes no ordering at all. An unavailable signal
+    should be a no-op, never a tiebreaker.
+    """
+    if not candidate.metrics_known:
+        return _UNMEASURED
     if candidate.rcr is not None:
         return min(1.0, max(0.0, candidate.rcr / _RCR_CEILING))
     if candidate.year is not None and now_year - candidate.year <= _TOO_NEW_YEARS:
-        return 0.5
+        return _UNMEASURED
     return min(1.0, math.log1p(candidate.citation_count) / math.log1p(_CITATION_CEILING))
 
 

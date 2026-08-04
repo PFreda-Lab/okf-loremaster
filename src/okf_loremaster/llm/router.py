@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -56,6 +57,39 @@ _SCHEMA_REFUSALS = ("structured_outputs", "structured outputs")
 def _refuses_schema(exc: BaseException) -> bool:
     """Whether this failure is the provider declining schema-constrained output."""
     return any(marker in str(exc).lower() for marker in _SCHEMA_REFUSALS)
+
+
+# Providers state the wait in the body of a 429 rather than only in a header, and the
+# number is the one fact that makes the difference between a retry that can succeed and
+# one that cannot: a token-per-minute limit clears on the provider's clock, not ours.
+_WAIT_HINT = re.compile(r"wait\s+(\d+(?:\.\d+)?)\s*second", re.IGNORECASE)
+_RETRY_AFTER = re.compile(r"retry[-_ ]?after['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)", re.IGNORECASE)
+
+# A ceiling below the provider's window makes every retry futile. Rate limits are
+# quoted per 60s, so a backoff that tops out under that can only ever fail.
+_MAX_BACKOFF = 75.0
+
+# One doubling of the token budget when a reply is cut off. Two would quadruple the
+# budget of the most expensive nodes on a model that simply will not stop talking,
+# and by then the budget is not the problem.
+_TRUNCATION_ATTEMPTS = 2
+
+
+def _requested_wait(exc: BaseException) -> float | None:
+    """The pause the provider asked for, if it named one.
+
+    Read from the exception text because that is where it reliably is: LiteLLM wraps
+    the provider's JSON body into the message, and the `retry-after` header is not
+    exposed uniformly across providers.
+    """
+    text = str(exc)
+    for pattern in (_WAIT_HINT, _RETRY_AFTER):
+        found = pattern.search(text)
+        if found:
+            # Trust it only within reason: a provider is free to name a wait longer
+            # than any run should sit idle for.
+            return min(_MAX_BACKOFF, float(found.group(1)))
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -225,20 +259,75 @@ class Router:
         response_format: dict[str, Any] | None = None,
     ) -> LLMResult:
         model = self._settings.model_for(role)
+        budget = max_tokens
         async with self._semaphores[role]:
             started = time.monotonic()
-            response = await self._call_with_retries(
-                role=role,
-                node=node,
-                model=model,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                response_format=response_format,
-            )
+            for growth in range(_TRUNCATION_ATTEMPTS):
+                response = await self._call_with_retries(
+                    role=role,
+                    node=node,
+                    model=model,
+                    messages=messages,
+                    max_tokens=budget,
+                    temperature=temperature,
+                    response_format=response_format,
+                )
+                if not _hit_token_ceiling(response):
+                    break
+                if growth + 1 == _TRUNCATION_ATTEMPTS:
+                    self._bus.emit(
+                        WarningEvent(
+                            node=node,
+                            message=(
+                                f"{role.value} reply was still cut off at {budget} tokens "
+                                f"({_shape(response)}); it will be parsed or repaired as-is"
+                            ),
+                        )
+                    )
+                    break
+                # A cut-off reply is unparseable JSON however good the model was: the
+                # bracket scanner needs the closing brace and there isn't one. Nothing
+                # about re-asking identically would help, so the budget grows. This is
+                # what took out all six curation calls in a run whose replies were fine.
+                self._record(role, node, model, response, time.monotonic() - started)
+                budget *= 2
+                self._bus.emit(
+                    WarningEvent(
+                        node=node,
+                        message=(
+                            f"{role.value} reply was cut off by the token budget; "
+                            f"retrying with {budget} ({_shape(response)})"
+                        ),
+                    )
+                )
             seconds = time.monotonic() - started
 
         text, prompt_tokens, completion_tokens = _extract(response)
+        usd = self._record(role, node, model, response, seconds)
+        self._check_budget(node)
+        return LLMResult(
+            text=text,
+            role=role,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            usd=usd,
+            seconds=seconds,
+            raw=response,
+        )
+
+    # --- internals ---------------------------------------------------------
+
+    def _record(
+        self, role: Role, node: str, model: str, response: Any, seconds: float
+    ) -> float | None:
+        """Ledger one completed call and announce it. Returns its price, if known.
+
+        Every response reaches this, including one discarded for being cut off: the
+        tokens were spent whether or not the reply was usable, and a cost report that
+        omits them is the quiet kind of wrong this module exists to prevent.
+        """
+        _, prompt_tokens, completion_tokens = _extract(response)
         usd = self._price(role, response, prompt_tokens, completion_tokens)
         self.ledger.record(
             role,
@@ -262,19 +351,7 @@ class Router:
                 unpriced_calls=self.ledger.unpriced_calls,
             )
         )
-        self._check_budget(node)
-        return LLMResult(
-            text=text,
-            role=role,
-            model=model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            usd=usd,
-            seconds=seconds,
-            raw=response,
-        )
-
-    # --- internals ---------------------------------------------------------
+        return usd
 
     async def _call_with_retries(
         self,
@@ -290,6 +367,13 @@ class Router:
         attempts = max(1, self._settings.max_retries)
         last: BaseException | None = None
         attempt = 0
+        # Per call, not per router. Every call in flight when the workspace first
+        # refuses a schema gets the same refusal, and each one has to be allowed to
+        # drop the schema and retry itself. Keyed on the router instead, only the
+        # first call to handle the error would recover: the rest would find the flag
+        # already flipped and re-raise a 400 that is now fixable. That is a race the
+        # size of the role's concurrency, and it killed runs at the first parallel node.
+        schema_retried = False
         while attempt < attempts:
             attempt += 1
             try:
@@ -301,33 +385,30 @@ class Router:
                     response_format=response_format,
                 )
             except BaseException as exc:
-                if (
-                    response_format is not None
-                    and not self._schema_refused
-                    and _refuses_schema(exc)
-                ):
+                if response_format is not None and not schema_retried and _refuses_schema(exc):
                     # The request was rejected before the model saw it, so this costs
-                    # nothing and is not the caller's retry to spend. `_schema_refused`
-                    # can only flip once, so this cannot loop.
+                    # nothing and is not the caller's retry to spend. `schema_retried`
+                    # can only flip once per call, so this cannot loop.
                     attempt -= 1
-                    self._schema_refused = True
-                    self._bus.emit(
-                        WarningEvent(
-                            node=node,
-                            message=(
-                                "this workspace does not allow schema-constrained "
-                                "output; asking for JSON in the prompt instead. "
-                                "Replies are parsed and repaired as before."
-                            ),
+                    schema_retried = True
+                    if not self._schema_refused:
+                        # Announce it once for the run, however many calls discover it.
+                        self._schema_refused = True
+                        self._bus.emit(
+                            WarningEvent(
+                                node=node,
+                                message=(
+                                    "this workspace does not allow schema-constrained "
+                                    "output; asking for JSON in the prompt instead. "
+                                    "Replies are parsed and repaired as before."
+                                ),
+                            )
                         )
-                    )
                     continue
                 if not _is_transient(exc) or attempt == attempts:
                     raise
                 last = exc
-                # Exponential backoff with full jitter, so a burst of parallel
-                # calls hitting the same rate limit does not retry in lockstep.
-                delay = min(30.0, 2.0**attempt) * random.random()
+                delay = self._backoff(attempt, exc)
                 self._bus.emit(
                     WarningEvent(
                         node=node,
@@ -339,6 +420,28 @@ class Router:
                 )
                 await asyncio.sleep(delay)
         raise AssertionError("unreachable") from last
+
+    def _backoff(self, attempt: int, exc: BaseException) -> float:
+        """How long to wait before retrying, in seconds.
+
+        Two changes from textbook exponential backoff, both learned from a run that
+        lost 56 of 252 screening calls to a token-per-minute limit:
+
+        The provider's own number wins when it gives one. A limit of N tokens per 60s
+        clears when the window rolls, and guessing shorter than that guarantees the
+        retry fails too — the run had a ceiling of 8s against a server asking for 19.
+
+        Jitter is partial, not full. `cap * random()` spreads a burst evenly across
+        [0, cap), which means a good share of a burst retries almost immediately and
+        re-triggers the same limit. Half the wait is fixed and half is jittered, so
+        every retry actually waits while the burst still fans out.
+        """
+        cap = min(_MAX_BACKOFF, 2.0**attempt)
+        floor = _requested_wait(exc)
+        if floor is not None:
+            # Past the named wait, not up to it: the window has to have rolled.
+            return floor + min(5.0, cap) * random.random()
+        return cap / 2.0 + (cap / 2.0) * random.random()
 
     async def _invoke(
         self,
@@ -443,6 +546,42 @@ def _extract(response: Any) -> tuple[str, int, int]:
     prompt_tokens = _int_attr(response, "usage", "prompt_tokens")
     completion_tokens = _int_attr(response, "usage", "completion_tokens")
     return text, prompt_tokens, completion_tokens
+
+
+def _shape(response: Any) -> str:
+    """How big a cut-off reply actually got, in the units the bill is in.
+
+    "Cut off at 6144" says the budget was reached and nothing about what reached it,
+    which is one guess per run at a fix. Characters are the honest measure here.
+    Converting them to an estimated token count is what made this misleading the first
+    time: the estimate ran about 40% under what the provider billed, the gap looked like
+    tokens spent somewhere the reply does not show, and a reasoning trace was the obvious
+    story to hang on it. There is no trace. Two probes at different reply lengths fitted
+    the gap to `50 + 0.40 x estimate`, which is an approximation being wrong by a
+    constant factor, not a model thinking. So report what was counted, not what it was
+    guessed to be worth, and read a large character count as what it is: a reply that
+    needs to be asked for more briefly.
+    """
+    text, _, completion_tokens = _extract(response)
+    return f"{completion_tokens} tokens billed, {len(text):,} chars written"
+
+
+def _hit_token_ceiling(response: Any) -> bool:
+    """Whether the model was cut off mid-reply by `max_tokens`.
+
+    Worth asking separately from "did it parse", because the two failures want
+    opposite responses. A reply the model finished and got wrong is repaired by
+    showing it the error; a reply it never finished is repaired only by room to
+    finish, and re-asking with the same budget just truncates in the same place.
+    """
+    try:
+        reason = response.choices[0].finish_reason
+    except (AttributeError, IndexError, KeyError, TypeError):
+        try:
+            reason = response["choices"][0]["finish_reason"]
+        except (IndexError, KeyError, TypeError):
+            return False
+    return str(reason) in ("length", "max_tokens")
 
 
 def _int_attr(response: Any, container: str, name: str) -> int:
