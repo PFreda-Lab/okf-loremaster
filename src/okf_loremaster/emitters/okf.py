@@ -61,9 +61,12 @@ from okf_loremaster.schemas import (
     ConceptRecord,
     Extraction,
     NullFinding,
+    PaperStrength,
     PredictorRow,
+    RowStrength,
     RunManifest,
     SourceRef,
+    StrengthGrade,
     TextBasis,
 )
 from okf_loremaster.verification import quantities_in
@@ -80,6 +83,7 @@ __all__ = [
     "frontmatter_for",
     "log_markdown",
     "root_index",
+    "strength_cell",
     "topic_index",
     "write_bundle",
 ]
@@ -91,7 +95,10 @@ MAX_AUTHORS = 6
 LOG_TYPE = "Build Log"
 
 _NULL_COLUMNS = ("#", "Predictor", "Outcome", "Detail")
-TOPIC_COLUMNS = ("pmid", "title", "design", "n", "key predictors")
+# The browse table. `strength` sits beside `design` and `n` because it is the one column
+# that reads the other two together — a reader choosing which of forty papers to open is
+# asking exactly the question it answers.
+TOPIC_COLUMNS = ("pmid", "title", "design", "n", "strength", "key predictors")
 
 # How many predictor names the topic index shows per paper. A browse table, not a
 # summary: enough to tell two papers apart, short enough that the column stays a column.
@@ -235,6 +242,13 @@ def frontmatter_for(record: ConceptRecord) -> dict[str, Any]:
         "tags": list(extraction.tags),
         "study_design": extraction.study_design,
         "n": extraction.n,
+        # Two flat keys rather than one nested block, though the block would render as
+        # legal flow style. Flow style is reserved for the three structures OKF v0.2
+        # actually nests — `generated`, `verified`, `sources` — and a downstream line
+        # parser reads anything else nested as one opaque string it has to re-parse.
+        # Grade to filter on, score to sort by; `parts` stays out, because frontmatter is
+        # for choosing a document and the audit belongs in `# Bottom line`.
+        **_strength_fields(record.strength),
         "text_basis": record.text_basis.value,
         "license": record.license,
         # A value, not a flag: `false` is written, because "we know this may not be
@@ -248,6 +262,18 @@ def frontmatter_for(record: ConceptRecord) -> dict[str, Any]:
             {"by": entry.by, "at": stamp(entry.at)} for entry in record.verified
         ]
     return fields
+
+
+def _strength_fields(strength: PaperStrength | None) -> dict[str, Any]:
+    """`strength: moderate` and `strength_score: 0.58`, or neither.
+
+    Nothing at all for an ungraded paper. A key reading `ungraded` is still a key every
+    downstream filter has to special-case, and its absence says the same thing without
+    asking anyone to.
+    """
+    if strength is None or not strength.graded:
+        return {}
+    return {"strength": strength.grade.value, "strength_score": round(strength.score, 2)}
 
 
 def _generated(record: ConceptRecord) -> dict[str, str]:
@@ -283,7 +309,7 @@ def body_for(record: ConceptRecord) -> str:
     extraction = record.extraction
     sections = (
         _bottom_line(record),
-        _predictors(extraction),
+        _predictors(record),
         _null_findings(extraction),
         _vocabulary(extraction),
         extraction.caveats.strip() or "None stated.",
@@ -311,20 +337,52 @@ def _bottom_line(record: ConceptRecord) -> str:
             "the full text" if record.text_basis is TextBasis.FULL_TEXT else "the abstract only",
         )
     )
+    pairs.append(("Evidence strength", _strength_fact(record.strength)))
     lines.append("")
     lines.extend(facts(pairs))
     return "\n".join(lines)
 
 
-def _predictors(extraction: Extraction) -> str:
+def _strength_fact(strength: PaperStrength | None) -> str:
+    """The paper's strength as a sentence, with what went unmeasured named.
+
+    Spelled out rather than left as a bare `moderate 0.58`, because the number alone
+    invites a reader to treat a score resting on one signal as if it rested on four.
+    Naming the gaps is also what makes the score arguable: a paper marked down for saying
+    nothing about adjustment can be checked against the paper.
+    """
+    if strength is None or not strength.graded:
+        return ""
+    line = f"{strength.grade.value} ({strength.score:.2f})"
+    if strength.unmeasured:
+        # Not "the paper did not say": `size` also goes unmeasured when the charter
+        # carries no scale to measure it against, and blaming the paper for that would be
+        # a claim about the paper that the score cannot support.
+        line += f" — nothing to score on {_and_list(strength.unmeasured)}"
+    return line
+
+
+def _and_list(items: Sequence[str]) -> str:
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + f" or {items[-1]}"
+
+
+def _predictors(record: ConceptRecord) -> str:
+    extraction = record.extraction
     rows = extraction.predictors
     if not rows:
         return "No predictor rows were extracted from this paper."
+    # Positionally parallel, written together in `reconcile`. Padded rather than zipped
+    # strictly: a record read back from an older bundle has no strength at all, and that
+    # is a column of dashes, not a crash.
+    scores = list(record.strength.rows) if record.strength is not None else []
     body = [
         table_row(PREDICTOR_COLUMNS),
         table_rule(len(PREDICTOR_COLUMNS)),
     ]
     for number, row in enumerate(rows, start=1):
+        strength = scores[number - 1] if number <= len(scores) else None
         body.append(
             table_row(
                 (
@@ -338,6 +396,7 @@ def _predictors(extraction: Extraction) -> str:
                     row.p_value,
                     row.direction.value,
                     row.confidence.value,
+                    strength_cell(strength),
                 )
             )
         )
@@ -367,6 +426,25 @@ def effect_cell(row: PredictorRow) -> str:
     # No numbers left to have been removed, so this is the extractor's own words about
     # a paper that reported no magnitude — not something a check took away.
     return row.effect_raw if not quantities_in(row.effect_raw) else UNVERIFIED_CELL
+
+
+def strength_cell(strength: PaperStrength | RowStrength | None) -> str:
+    """What goes in a Strength column: the grade, then the score that produced it.
+
+    Both, because they answer different questions. The grade is what a person skims and
+    is banded on purpose — the inputs do not support ranking 0.61 above 0.60. The number
+    is what a downstream agent filters on, and printing it keeps the grade honest by
+    showing where in its band a row actually sits.
+
+    An ungraded row prints the empty cell. Nothing was measured, and `limited 0.50` would
+    read as a finding about the study rather than as an absence of one.
+
+    Takes either level: a paper and a row score the same way and read the same way, and
+    the topic index shows the paper's while the predictor table shows each row's.
+    """
+    if strength is None or strength.grade is StrengthGrade.UNGRADED:
+        return NONE_CELL
+    return f"{strength.grade.value} {strength.score:.2f}"
 
 
 def _null_findings(extraction: Extraction) -> str:
@@ -466,6 +544,7 @@ def topic_index(
                     f"[{record.title}](./{record.filename})",
                     record.extraction.study_design,
                     f"{record.extraction.n:,}" if record.extraction.n is not None else NONE_CELL,
+                    strength_cell(record.strength),
                     _key_predictors(record),
                 )
             )
@@ -692,6 +771,12 @@ def catalog_row(record: ConceptRecord) -> dict[str, Any]:
         "n": record.extraction.n,
         "tags": list(record.extraction.tags),
     }
+    # Two flat keys rather than a nested one, because the catalog is what gets loaded into
+    # a dataframe or filtered with `jq`, and both are easier on `strength` than on
+    # `strength.grade`. Absent for an ungraded paper, matching the frontmatter.
+    if record.strength is not None and record.strength.graded:
+        row["strength"] = record.strength.grade.value
+        row["strength_score"] = round(record.strength.score, 2)
     return row
 
 

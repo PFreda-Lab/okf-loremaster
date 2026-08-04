@@ -29,6 +29,8 @@ from okf_loremaster.schemas.common import (
     EvidenceType,
     Model,
     Slug,
+    StrengthGrade,
+    StudyDesign,
     TextBasis,
     filename_token,
     is_export_safe,
@@ -81,6 +83,10 @@ from okf_loremaster.schemas.screening import (
     TopicCuration,
     TopicGap,
 )
+from okf_loremaster.schemas.strength import (
+    PaperStrength,
+    RowStrength,
+)
 
 __all__ = [
     "DEFAULT_FRESHNESS_DAYS",
@@ -114,16 +120,20 @@ __all__ = [
     "Extraction",
     "Model",
     "NullFinding",
+    "PaperStrength",
     "PaperText",
     "PlannedQuery",
     "PredictorRow",
     "QueryPlan",
+    "RowStrength",
     "RunManifest",
     "SchemaError",
     "ScoredCandidate",
     "ScreenVerdict",
     "Slug",
     "SourceRef",
+    "StrengthGrade",
+    "StudyDesign",
     "TextBasis",
     "Topic",
     "TopicCuration",

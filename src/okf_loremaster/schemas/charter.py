@@ -84,6 +84,17 @@ class Charter(Model):
     topic_min: int = Field(default=DEFAULT_TOPIC_MIN, ge=1)
     topic_max: int = Field(default=DEFAULT_TOPIC_MAX, ge=1)
 
+    # What counts as a small and a large study *in this literature*. Evidence strength
+    # scores sample size against these, and they are here rather than in `src/` because
+    # there is no answer that holds across literatures: a few hundred participants is a
+    # large cohort for a rare condition and a pilot for a national registry. A constant
+    # would be wrong for most projects and invisible in all of them.
+    #
+    # Both null is a legitimate state — a hand-written charter, or a model that declined
+    # to guess — and scores sample size as unmeasured rather than as poor.
+    sample_size_typical: int | None = Field(default=None, ge=1)
+    sample_size_large: int | None = Field(default=None, ge=1)
+
     generated_by: str = ""
     generated_at: datetime | None = None
 
@@ -106,6 +117,27 @@ class Charter(Model):
         if self.topic_min > self.topic_max:
             raise ValueError(
                 f"topic_min ({self.topic_min}) exceeds topic_max ({self.topic_max})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_sample_size_scale(self) -> Self:
+        """Both ends or neither, and in the right order.
+
+        Half a scale scores nothing, so a charter carrying one end is a silent no-op
+        rather than a partial answer. An inverted pair is worse than a no-op: it would
+        score every large study as small. Both are the model's or the editor's mistake
+        and both are cheap to state plainly here.
+        """
+        typical, large = self.sample_size_typical, self.sample_size_large
+        if (typical is None) != (large is None):
+            raise ValueError(
+                "sample_size_typical and sample_size_large go together — one without "
+                "the other is not a scale, and sample size would score as unmeasured"
+            )
+        if typical is not None and large is not None and large <= typical:
+            raise ValueError(
+                f"sample_size_large ({large}) must exceed sample_size_typical ({typical})"
             )
         return self
 

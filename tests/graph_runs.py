@@ -68,6 +68,12 @@ def charter_for(**overrides: Any) -> Charter:
         target_papers=TARGET,
         topic_min=TOPIC_MIN,
         topic_max=TOPIC_MAX,
+        # The scale evidence strength measures sample size against. Bracketing
+        # `fake_ncbi.sample_size`, which runs a couple of hundred either side of 200, so
+        # an end-to-end run produces papers on both sides of the midpoint rather than a
+        # corpus that all scores the same.
+        sample_size_typical=200,
+        sample_size_large=2_000,
     )
     return Charter(**{**fields, **overrides})
 

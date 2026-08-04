@@ -41,6 +41,8 @@ domain: "exercise-and-immune-markers"
 description: "Aerobic and high-intensity training raised CD4 count; other modalities did not."
 tags: ["CD4 count", "aerobic training", "meta-analysis"]
 study_design: "systematic review and meta-analysis"
+strength: "moderate"
+strength_score: "0.66"
 text_basis: "abstract"
 license: "publisher copyright"
 export_safe: "false"
@@ -53,11 +55,15 @@ sources: [{id: "pmid:33745404", resource: "https://pubmed.ncbi.nlm.nih.gov/33745
 Aerobic training and high-intensity training raised CD4 count; the other modalities and
 intensities did not.
 
+- **Design** — systematic review and meta-analysis
+- **Read from** — the abstract only
+- **Evidence strength** — moderate (0.66) — nothing to score on size or adjustment
+
 # Predictors reported
 
-| # | Predictor | Operationalization | Timing | Outcome | Type | Effect | p | Direction | Confidence |
-|---|---|---|---|---|---|---|---|---|---|
-| 1 | aerobic training | modality subgroup, pooled mean difference vs. control | measured after the training period | CD4 count | intervention | 79.91 cells/mm³ (95% CI 19.30-140.52) | ≤0.01 | increases | high |
+| # | Predictor | Operationalization | Timing | Outcome | Type | Effect | p | Direction | Confidence | Strength |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | aerobic training | modality subgroup, pooled mean difference vs. control | measured after the training period | CD4 count | intervention | 79.91 cells/mm³ (95% CI 19.30-140.52) | ≤0.01 | increases | high | moderate 0.62 |
 
 Quoted from the paper, by row:
 
@@ -80,7 +86,7 @@ Quoted from the paper, by row:
 Pooled across trials with heterogeneous protocols and durations.
 ````
 
-Four things about this document carry the design:
+Five things about this document carry the design:
 
 **The quote under the table** reproduces the sentence each effect size came from, **exactly as
 published** — the mangled `=< 0.01` included. A tidied quote cannot be checked against the source,
@@ -97,6 +103,18 @@ none of them, so a concept on its own is the normal case rather than a gap. Noth
 inferred: every code is searched for in the source text by the same deterministic pass that checks
 the numbers, and one the paper did not print is dropped. The concept stays — the paper did name
 that variable. If the code is not on the page, it is not in the bundle.
+
+**`Confidence` and `Strength` are two columns because they are two questions.** Confidence is
+whether we read the row correctly — it is what the numeric check downgrades when a figure is not in
+the source text. Strength is how much weight the study behind it can carry: design, sample size,
+whether the estimate held anything else constant, and how much of the paper we got to read, weighted
+into a score and banded into `strong` / `moderate` / `limited`. A well-read row from a forty-person
+survey is `high` and `limited`, and a reader shown only one of the two columns draws the wrong
+conclusion from either. The score is computed in code from fields the extractor recorded, never
+asked of a model — so it is reproducible, the weights can change without re-reading a paper, and
+what it had nothing to go on is named rather than averaged over. Sample size is scored against the
+scale in the charter, because a few hundred people is a large cohort in one literature and a pilot
+in another.
 
 **`text_basis` and `license` are per document.** Most of PubMed is abstract-only under publisher
 copyright and a minority is open access. Recording which is which is what stops a consumer from

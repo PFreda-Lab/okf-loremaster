@@ -117,7 +117,7 @@ _NUMBERED = re.compile(r"^(?P<number>\d+)\.\s+(?P<text>.+)$")
 # headings are spelled out and the rest read as themselves. Derived from the columns
 # rather than restated: a renamed column would otherwise stop matching in silence, and
 # the row would embed with that field missing.
-_LABELS = {"Type": "Evidence type", "p": "p-value"}
+_LABELS = {"Type": "Evidence type", "p": "p-value", "Strength": "Evidence strength"}
 _ROW_LABELS = tuple(
     (column, _LABELS.get(column, column)) for column in PREDICTOR_COLUMNS if column != "#"
 )

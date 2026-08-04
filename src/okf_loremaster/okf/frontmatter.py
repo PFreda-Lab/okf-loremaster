@@ -66,6 +66,8 @@ FIELD_ORDER = (
     "tags",
     "study_design",
     "n",
+    "strength",
+    "strength_score",
     "text_basis",
     "license",
     "export_safe",

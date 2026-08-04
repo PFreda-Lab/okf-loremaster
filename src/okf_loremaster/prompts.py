@@ -67,6 +67,14 @@ name.
    - `seed_terms`: 3-6 concepts a literature search for this topic would use. Concepts, \
 not query syntax — no field tags, no boolean operators, no quotation marks.
 
+6. `sample_size_typical` / `sample_size_large` — the analytic sample size of an ordinary \
+study in this literature, and of a large one. Whole numbers, and `sample_size_large` \
+must be the bigger of the two. These set the scale that evidence strength scores sample \
+size against, and there is no answer that holds across literatures: a few hundred \
+participants is a large cohort for a rare condition and a pilot for a national registry. \
+Judge it from the population above. If you genuinely cannot, omit both — sample size \
+then scores as unmeasured, which is honest. Never guess one without the other.
+
 Before you divide anything, list out the distinct ways the outcome could actually vary — \
 the separate mechanisms, exposures, and circumstances that researchers have proposed as \
 explaining it. Build the taxonomy from that list. If you pick the headings first and \
@@ -304,11 +312,20 @@ this before deciding whether to open the file, so lead with the finding, not wit
 topic.
   - `bottom_line`: the finding itself, in at most two sentences.
   - `study_design`: as the paper describes it.
+  - `design`: the same thing as one of "systematic_review", "randomized_trial", \
+"prospective_cohort", "retrospective_cohort", "case_control", "cross_sectional", \
+"case_series", "modeling", "narrative_review", "unclear". Go by what was actually done, \
+not by what the paper calls itself. "unclear" is a real answer and the right one when \
+the methods do not say; it is scored as unknown rather than as poor, so guessing is \
+strictly worse than admitting it.
   - `n`: the analytic sample size, as a whole number, or null if the paper does not \
 state one. Never estimate it.
   - `population`: who or what was studied, in one short phrase.
   - `outcome_definition`: how the outcome was defined or measured in this study \
 specifically.
+  - `adjusted_for`: the covariates the paper says its models adjusted for, in its own \
+words. Empty list if it does not say. Do not list the predictors themselves — only what \
+was held constant while they were estimated.
   - `predictors`: one row per relationship this paper reports, and at most \
 {MAX_PREDICTOR_ROWS} of them. A paper reporting more than that is reporting a model's \
 whole coefficient table; give the rows that answer the question above and stop. Rows \
@@ -350,7 +367,14 @@ character.
   - `p_value`: as printed, as a string. "<0.001" and "NS" are answers; do not convert \
 them to a number.
   - `direction`: "increases", "decreases", "none" or "unclear".
-  - `confidence`: how sure you are of this row.
+  - `confidence`: how sure you are that you read this row correctly — not how good the \
+study is. A crisply reported number from a small unadjusted survey is high confidence. \
+How much weight the study carries is scored separately and is not yours to judge.
+  - `adjusted`: true when *this* number came from a model holding other variables \
+constant, false when it is a crude or unadjusted estimate, null when the paper does not \
+make it clear. A paper printing both an unadjusted and an adjusted column is reporting \
+two different claims; record the one this row's number came from. Null is scored as \
+unknown, so it costs a paper nothing to be honest here.
   - `quote`: the **first {MAX_QUOTE_WORDS} words or fewer** of the sentence the numbers \
 came from, copied exactly as the text above prints them. Not the whole sentence. Enough \
 words to pick that sentence out from every other sentence in the paper, and no more — \

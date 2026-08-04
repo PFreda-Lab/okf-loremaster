@@ -21,6 +21,8 @@ __all__ = [
     "EvidenceType",
     "Model",
     "Slug",
+    "StrengthGrade",
+    "StudyDesign",
     "TextBasis",
     "filename_token",
     "is_export_safe",
@@ -75,6 +77,57 @@ class Confidence(StrEnum):
             Confidence.MEDIUM: Confidence.LOW,
             Confidence.LOW: Confidence.LOW,
         }[self]
+
+
+class StudyDesign(StrEnum):
+    """How the study was built, as one of the standard designs.
+
+    Distinct from `Extraction.study_design`, which keeps the paper's own words. This is
+    the normalized category, and it exists because the words cannot be scored: "a
+    retrospective review of prospectively collected registry data" and "chart review"
+    describe the same design and share no vocabulary.
+
+    The ordering is the conventional evidence hierarchy, which is a property of study
+    methodology rather than of any condition — the same reason MeSH and `[tiab]` belong
+    in this package while a disease name does not. `UNCLEAR` is a real answer and the
+    right one whenever a paper does not say; it scores as unmeasured rather than as bad.
+    """
+
+    SYSTEMATIC_REVIEW = "systematic_review"
+    RANDOMIZED_TRIAL = "randomized_trial"
+    PROSPECTIVE_COHORT = "prospective_cohort"
+    RETROSPECTIVE_COHORT = "retrospective_cohort"
+    CASE_CONTROL = "case_control"
+    CROSS_SECTIONAL = "cross_sectional"
+    CASE_SERIES = "case_series"
+    MODELING = "modeling"
+    NARRATIVE_REVIEW = "narrative_review"
+    UNCLEAR = "unclear"
+
+    @property
+    def label(self) -> str:
+        """Short form for a markdown table or a frontmatter line."""
+        return self.value.replace("_", " ")
+
+
+class StrengthGrade(StrEnum):
+    """A banded evidence-strength score, for reading rather than for sorting.
+
+    Deliberately not called confidence or trust, both of which are taken and mean other
+    things here. `Confidence` is whether the extraction read a row correctly; OKF derives
+    its own *trust tiers* from the `verified` block, which is about human sign-off. This
+    third thing is about the study: how much weight its design, size and analysis can
+    carry, whoever read it and whoever signed it off.
+
+    The score is the number to sort on. The grade is what a reader skims, and it is
+    banded because a bundle that ranks paper 0.61 above paper 0.60 is claiming a
+    precision the inputs do not have.
+    """
+
+    STRONG = "strong"
+    MODERATE = "moderate"
+    LIMITED = "limited"
+    UNGRADED = "ungraded"
 
 
 class EvidenceType(StrEnum):

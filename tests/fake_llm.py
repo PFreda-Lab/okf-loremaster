@@ -111,6 +111,10 @@ def extraction(
         "description": "A cohort study of one exposure and one measured outcome.",
         "bottom_line": "The exposure was associated with the outcome.",
         "study_design": "cohort study",
+        # The normalized category beside the paper's own words, so an end-to-end run
+        # scores evidence strength on a real design rather than on `unclear` — which is
+        # the one value that exercises none of the scoring.
+        "design": "retrospective_cohort",
         "n": n,
         "population": "adults",
         "outcome_definition": "the outcome as this study measured it",
@@ -147,6 +151,11 @@ def supported(source: str) -> dict[str, Any]:
             "ci_low": float(finding["low"]),
             "ci_high": float(finding["high"]),
             "p_value": finding["p"],
+            # The corpus prints "adjusted OR", so a reader that noticed would say so.
+            # Left off the no-numbers path deliberately: a row with no magnitude has
+            # nothing to have been adjusted, and claiming otherwise would mean the suite
+            # never exercised an unmeasured adjustment.
+            "adjusted": True,
             "quote": finding["quote"],
         }
     # The code is read off the page like everything else. A hint whose concept is named

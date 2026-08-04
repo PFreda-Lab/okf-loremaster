@@ -31,6 +31,7 @@ from okf_loremaster.schemas.common import (
     EvidenceType,
     Model,
     Slug,
+    StudyDesign,
     TextBasis,
     filename_token,
     is_export_safe,
@@ -48,6 +49,7 @@ from okf_loremaster.schemas.limits import (
     truncate_sentences,
     word_count,
 )
+from okf_loremaster.schemas.strength import PaperStrength
 
 __all__ = [
     "NONE_REPORTED",
@@ -99,6 +101,14 @@ class PredictorRow(Model):
     p_value: str = ""
     direction: Direction = Direction.UNCLEAR
     confidence: Confidence = Confidence.MEDIUM
+    # Whether *this estimate* came out of a model holding other variables constant. A
+    # per-row fact, not a per-paper one: papers routinely print an unadjusted and an
+    # adjusted column, and they are different claims about the same predictor.
+    #
+    # `None` means the paper did not say, which scores as unmeasured. False means it
+    # said, and the answer was no. Collapsing the two would penalize a paper for its
+    # reader's ignorance.
+    adjusted: bool | None = None
     # The sentence the numbers came from, verbatim. The basis for verification and for
     # a downstream agent to quote without re-reading the paper.
     quote: str = ""
@@ -215,11 +225,19 @@ class Extraction(Model):
     bottom_line: str = ""
 
     study_design: str = ""
+    # The same design as one of the standard categories, so it can be scored. Kept
+    # beside the free text rather than replacing it: the paper's own words are what a
+    # reader wants to see, and the category is what evidence strength needs.
+    design: StudyDesign = StudyDesign.UNCLEAR
     # Analytic sample size. None when the paper does not state one, which is common in
     # reviews and never worth inventing.
     n: int | None = None
     population: str = ""
     outcome_definition: str = ""
+    # The covariates the paper says it adjusted for, in its own words. Recorded at the
+    # paper level because that is where methods sections state it once; whether any
+    # *given* estimate was adjusted is `PredictorRow.adjusted`.
+    adjusted_for: list[str] = Field(default_factory=list)
 
     predictors: list[PredictorRow] = Field(default_factory=list)
     null_findings: list[NullFinding] = Field(default_factory=list)
@@ -378,6 +396,12 @@ class ConceptRecord(Model):
     # abstract-only record, where no license was ever served to us.
     license: str = ""
     text_basis: TextBasis = TextBasis.ABSTRACT
+
+    # Evidence strength, computed by `strength.py` after verification. On the record
+    # rather than inside `Extraction` because `Extraction` is what the extract node hands
+    # the model as its response format: a field there is a field the model is asked to
+    # fill, and a model-supplied strength score is the one thing this must never be.
+    strength: PaperStrength | None = None
 
     # --- decided by a model ---
     extraction: Extraction

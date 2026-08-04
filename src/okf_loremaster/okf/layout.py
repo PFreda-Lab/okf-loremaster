@@ -79,6 +79,11 @@ PREDICTOR_COLUMNS = (
     "p",
     "Direction",
     "Confidence",
+    # Two different questions, side by side on purpose. `Confidence` is whether the row
+    # was read correctly; `Strength` is how much weight the study behind it can carry. A
+    # well-read row from a small unadjusted survey is `high` and `limited`, and a reader
+    # who sees only one of the two columns draws the wrong conclusion from either.
+    "Strength",
 )
 
 # Introduces the numbered verbatim quotes under a table, keyed to its `#` column. Shared

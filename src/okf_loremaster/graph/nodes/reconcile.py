@@ -1,6 +1,6 @@
 """The reconcile node: turn extractions into records the emitter can write. No model call.
 
-Three deterministic steps per paper, in this order:
+Four deterministic steps per paper, in this order:
 
 1. **Length budgets** (`Extraction.enforce_budgets`) — before verification rather than
    after, so nothing is checked that a budget was about to drop, and so the verification
@@ -9,7 +9,11 @@ Three deterministic steps per paper, in this order:
    and vocabulary code looked for in the text the extractor read. What is not there is
    removed, the affected row's confidence is lowered, and the run continues. This is the
    whole reason the node exists.
-3. **Assembly** — bibliographic fields read from the PubMed record, license and text
+3. **Evidence strength** (`strength.score_extraction`) — design, sample size, adjustment
+   and reading depth, weighted into a score per paper and per row. After verification and
+   not before: a row whose interval was just deleted for not appearing in the source text
+   has lost the precision its score would otherwise have read off it.
+4. **Assembly** — bibliographic fields read from the PubMed record, license and text
    basis from the retrieval, provenance stamped here.
 
 A paper with no extraction is dropped from its topic here rather than left as a topic
@@ -27,12 +31,14 @@ from okf_loremaster.config import ConfigError, Role
 from okf_loremaster.graph.state import Deps, RunState, span
 from okf_loremaster.schemas import (
     Candidate,
+    Charter,
     ConceptRecord,
     Extraction,
     PaperText,
     TextBasis,
     VerificationSummary,
 )
+from okf_loremaster.strength import score_extraction
 from okf_loremaster.verification import verify_extraction
 
 __all__ = ["reconcile_node"]
@@ -51,6 +57,7 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
     texts = state.get("texts") or {}
     extractions = state.get("extractions") or {}
     by_pmid = {candidate.pmid: candidate for candidate in state.get("unique") or []}
+    charter = state.get("charter")
     warnings = list(state.get("warnings") or [])
 
     with span(deps, NODE) as report:
@@ -75,6 +82,7 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
                     texts.get(pmid),
                     summary,
                     stamp,
+                    charter,
                 )
                 trimmed_papers += int(was_trimmed)
                 records.append(record)
@@ -105,6 +113,7 @@ def _reconcile_one(
     source: PaperText | None,
     summary: VerificationSummary,
     stamp: str,
+    charter: Charter | None,
 ) -> tuple[ConceptRecord, bool]:
     trimmed, budget_notes = extraction.enforce_budgets()
 
@@ -124,6 +133,7 @@ def _reconcile_one(
         if len(summary.examples) < MAX_EXAMPLES:
             summary.examples.append(f"{candidate.pmid} {note}")
 
+    basis = source.basis if source is not None else TextBasis.ABSTRACT
     record = ConceptRecord(
         pmid=candidate.pmid,
         title=candidate.title,
@@ -135,7 +145,8 @@ def _reconcile_one(
         pmcid=(source.pmcid if source is not None else None) or candidate.pmcid,
         domain=slug,
         license=source.license if source is not None else "",
-        text_basis=source.basis if source is not None else TextBasis.ABSTRACT,
+        text_basis=basis,
+        strength=score_extraction(check.extraction, charter=charter, basis=basis),
         extraction=check.extraction,
         generated_by=stamp,
         generated_at=datetime.now(UTC),

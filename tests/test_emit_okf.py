@@ -30,10 +30,10 @@ from okf_loremaster.okf.layout import (
     LOG_FILENAME,
     UNVERIFIED_CELL,
 )
-from okf_loremaster.okf.reader import read_bundle
+from okf_loremaster.okf.reader import fact_list, markdown_table, read_bundle
 from okf_loremaster.okf.validate import validate_bundle
 from okf_loremaster.review import HUMAN_PREFIX, Signoff
-from okf_loremaster.schemas import ConceptRecord, VerificationSummary
+from okf_loremaster.schemas import ConceptRecord, StrengthGrade, VerificationSummary
 from test_verification import fabricating
 
 from fake_ncbi import TOPICS
@@ -250,6 +250,90 @@ async def test_an_effect_verification_removed_is_marked_rather_than_printed(
     assert validate_bundle(bundle).ok
 
 
+# --- evidence strength ------------------------------------------------------
+
+
+async def test_every_document_says_how_strong_its_study_is(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two flat keys, not one nested block. Nested would be legal flow style, but rule 7
+    reserves that for the three structures OKF v0.2 actually nests — anything else comes
+    back to a line parser as one opaque string it has to re-parse."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    for document in read_bundle(bundle).documents():
+        grade = document.fields.get("strength")
+        assert grade in {g.value for g in StrengthGrade if g is not StrengthGrade.UNGRADED}, (
+            document.filename
+        )
+        assert 0.0 <= float(document.fields["strength_score"]) <= 1.0, document.filename
+
+
+async def test_the_row_a_strength_belongs_to_is_the_row_it_is_printed_on(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pairing is positional, which is the kind of thing that renders perfectly while
+    being entirely wrong. Checked against the records, cell by cell."""
+    run, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+    by_pmid = {record.pmid: record for record in run.records}
+
+    checked = 0
+    for document in read_bundle(bundle).documents():
+        record = by_pmid[document.pmid]
+        assert record.strength is not None
+        table = markdown_table(document.section("Predictors reported") or "")
+        assert len(table) == len(record.strength.rows), document.filename
+        for cell, scored in zip(table, record.strength.rows, strict=True):
+            assert cell["Strength"] == f"{scored.grade.value} {scored.score:.2f}"
+            checked += 1
+    assert checked
+
+
+async def test_strength_and_confidence_are_two_columns_because_they_are_two_questions(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A well-read row from a weak study is `high` and `limited`, and a reader shown only
+    one of the two draws the wrong conclusion from either."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    for document in read_bundle(bundle).documents():
+        table = markdown_table(document.section("Predictors reported") or "")
+        for row in table:
+            assert row["Confidence"] and row["Strength"], document.filename
+
+
+async def test_the_bottom_line_says_what_the_score_had_nothing_to_go_on(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A score whose gaps are invisible is one nobody can argue with. The synthetic
+    corpus prints no covariate list on a paper with no numbers, so at least one document
+    has to admit an unmeasured component rather than quietly averaging over it."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    facts = [
+        fact_list(document.section("Bottom line") or "")
+        for document in read_bundle(bundle).documents()
+    ]
+    stated = [entry["Evidence strength"] for entry in facts if "Evidence strength" in entry]
+
+    assert len(stated) == TARGET
+    assert any("nothing to score on" in line for line in stated)
+
+
+async def test_the_topic_index_lets_a_reader_choose_a_paper_by_strength(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The browse table is where the choice of which file to open is actually made."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    for topic in read_bundle(bundle).topics:
+        assert topic.index is not None
+        rows = markdown_table(topic.index.body)
+        assert rows, topic.slug
+        for row in rows:
+            assert row["strength"], f"{topic.slug} {row['pmid']}"
+
+
 # --- the catalog ------------------------------------------------------------
 
 
@@ -268,7 +352,17 @@ async def test_the_catalog_names_every_document_and_nothing_else(
     for row in rows:
         assert (bundle / row["file"]).is_file()
         assert row["domain"] == Path(row["file"]).parent.name
-        for key in ("pmid", "title", "domain", "description", "design", "n", "tags"):
+        for key in (
+            "pmid",
+            "title",
+            "domain",
+            "description",
+            "design",
+            "n",
+            "tags",
+            "strength",
+            "strength_score",
+        ):
             assert key in row, key
 
 
