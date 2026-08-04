@@ -41,7 +41,7 @@ __all__ = [
 # be read end to end by an agent, and past a few hundred documents that stops being
 # possible. The per-topic floor matters just as much — a topic of three papers is a
 # heading pretending to be a topic.
-DEFAULT_TARGET_PAPERS = 180
+DEFAULT_TARGET_PAPERS = 200
 DEFAULT_TOPIC_MIN = 8
 DEFAULT_TOPIC_MAX = 40
 MAX_TOPICS = 12

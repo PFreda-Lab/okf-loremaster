@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import typer.main
 from typer.testing import CliRunner
 
 from okf_loremaster.cli import app
@@ -82,3 +83,29 @@ def test_review_is_allowed_on_an_autonomous_run() -> None:
 
     assert result.exit_code == 0
     assert "--review cannot be combined with" not in result.output
+
+
+@pytest.mark.parametrize("command", ["build", "charter"])
+def test_cli_defaults_match_the_constants(command: str) -> None:
+    """The flags spell out numbers the schema also declares. This is the tie.
+
+    `cli.py` writes them as literals so that `--help` does not have to import pydantic,
+    which means nothing but this test stops the two from drifting. A CLI default that
+    disagrees with `DEFAULT_TARGET_PAPERS` is not a cosmetic mismatch: the charter node
+    overwrites whatever the model drafted with the flag's value, so the constant would
+    quietly stop being the default of anything.
+    """
+    from okf_loremaster.schemas.charter import (
+        DEFAULT_TARGET_PAPERS,
+        DEFAULT_TOPIC_MAX,
+        DEFAULT_TOPIC_MIN,
+    )
+
+    group = typer.main.get_command(app)
+    params = {
+        param.name: param.default
+        for param in group.commands[command].params  # type: ignore[attr-defined]
+    }
+    assert params["target_papers"] == DEFAULT_TARGET_PAPERS
+    assert params["topic_min"] == DEFAULT_TOPIC_MIN
+    assert params["topic_max"] == DEFAULT_TOPIC_MAX

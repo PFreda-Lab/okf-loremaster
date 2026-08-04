@@ -188,7 +188,9 @@ def charter(
     vocab: Annotated[
         str | None, typer.Option("--vocab", help="Comma-separated vocabularies; overrides charter.")
     ] = None,
-    target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 180,
+    # Literals rather than the constants they mirror: importing them would pull pydantic
+    # into `--help`. `test_cli_defaults` fails if the two ever drift apart.
+    target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 200,
     topic_min: Annotated[int, typer.Option(help="Minimum papers per topic.")] = 8,
     topic_max: Annotated[int, typer.Option(help="Maximum papers per topic.")] = 40,
     verbose: Annotated[int, typer.Option("-v", "--verbose", count=True, help="Verbosity.")] = 0,
@@ -229,10 +231,15 @@ def build(
     charter_file: Annotated[
         Path | None, typer.Option("--charter", help="Build from an existing charter.yaml.")
     ] = None,
-    out: Annotated[Path | None, typer.Option("-o", "--out", help="Bundle output path.")] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option("-o", "--out", help="Bundle name, under the output directory."),
+    ] = None,
     pool_size: Annotated[int, typer.Option(help="Candidate pool before screening.")] = 800,
     screen_budget: Annotated[int, typer.Option(help="Max abstracts sent to the screener.")] = 400,
-    target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 180,
+    # See the note on `charter`: literals, guarded by a test, to keep pydantic out of
+    # `--help`.
+    target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 200,
     topic_min: Annotated[int, typer.Option(help="Minimum papers per topic.")] = 8,
     topic_max: Annotated[int, typer.Option(help="Maximum papers per topic.")] = 40,
     max_rounds: Annotated[
@@ -445,7 +452,9 @@ def validate(
 @app.command()
 def export(
     bundle: Annotated[Path, typer.Argument(help="Bundle directory to export.")],
-    out: Annotated[Path, typer.Option("-o", "--out", help="Destination directory.")],
+    out: Annotated[
+        Path, typer.Option("-o", "--out", help="Copy name, under the output directory.")
+    ],
     permissive_only: Annotated[
         bool, typer.Option("--permissive-only", help="Only redistributable-licensed documents.")
     ] = False,
@@ -453,14 +462,18 @@ def export(
     """Copy a bundle out, optionally filtered to redistributable documents.
 
     The copy is a bundle in its own right — its own indexes, catalog and descriptor id —
-    so it validates and attaches on its own. The vector index is not copied: it embeds
-    every document in the source, including any the filter just removed. Rebuild it with
+    so it validates and attaches on its own. `-o` is resolved the same way `build`
+    resolves it: a name lands under the output directory, an absolute path lands where
+    it says. The vector index is not copied: it embeds every document in the source,
+    including any the filter just removed. Rebuild it with
     `okf-loremaster index <the copy>`.
     """
+    from okf_loremaster.config import load_settings
     from okf_loremaster.emitters.export import export_bundle
 
     with _reported():
-        result = export_bundle(bundle, out, permissive_only=permissive_only)
+        destination = load_settings().resolve_output(out)
+        result = export_bundle(bundle, destination, permissive_only=permissive_only)
 
     for note in result.warnings:
         console.print(f"[yellow]![/yellow]  {escape(note)}")

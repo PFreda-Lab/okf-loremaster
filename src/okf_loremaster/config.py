@@ -201,6 +201,26 @@ class Settings(BaseSettings):
         """Roles with no local price override, which may end up unpriced."""
         return [role for role in Role if self.price_for(role) == (None, None)]
 
+    def resolve_output(self, out: Path) -> Path:
+        """Place a `-o` value inside the configured output directory.
+
+        Everything this tool writes belongs under one folder, so `-o my-bundle` should
+        not need `bundles/` typed in front of it every time. A relative name is placed
+        under `output_dir`; an absolute path is the deliberate way out and is used as
+        given.
+
+        A relative path that already starts with `output_dir` is taken as read rather
+        than nested inside itself, so `-o bundles/my-bundle` and `-o my-bundle` name one
+        place. That only applies when `output_dir` is itself relative — once it is
+        absolute, a relative `-o` cannot be naming it.
+        """
+        if out.is_absolute():
+            return out
+        base = self.output_dir
+        if not base.is_absolute() and out.parts[: len(base.parts)] == base.parts:
+            return out
+        return base / out
+
     def hf_home_warning(self) -> str | None:
         """Flag a model cache sitting in a sync folder.
 

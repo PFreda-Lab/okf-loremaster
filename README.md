@@ -417,9 +417,9 @@ result, then build from it.
 
 | Flag | Default | |
 |---|---|---|
-| `-o, --out <path>` | `charter.yaml` | Where to write it |
+| `-o, --out <path>` | `charter.yaml` | Where to write it — a plain path, since a charter is an input you edit |
 | `--vocab <a,b,c>` | from the charter | Comma-separated coding vocabularies |
-| `--target-papers <int>` | `180` | Target retained paper count |
+| `--target-papers <int>` | `200` | Target retained paper count |
 | `--topic-min <int>` / `--topic-max <int>` | `8` / `40` | Papers per topic |
 | `-v, --verbose <int>` | `0` | Verbosity |
 
@@ -430,10 +430,10 @@ Build a bundle end to end. Pass a task, or `--charter` a drafted one.
 | Flag | Default | |
 |---|---|---|
 | `--charter <path>` | — | Build from an existing `charter.yaml` (then the prompt is optional) |
-| `-o, --out <path>` | from config | Bundle output path |
+| `-o, --out <name>` | the run id | Bundle name, under the output directory |
 | `--pool-size <int>` | `800` | Candidate pool before screening |
 | `--screen-budget <int>` | `400` | Maximum abstracts sent to the screener |
-| `--target-papers <int>` | `180` | Target retained paper count |
+| `--target-papers <int>` | `200` | Target retained paper count |
 | `--topic-min <int>` / `--topic-max <int>` | `8` / `40` | Papers per topic |
 | `--max-rounds <int>` | `2` | Search rounds including the first; `1` disables the follow-up round |
 | `--vocab <a,b,c>` | from the charter | Overrides the charter's vocabularies |
@@ -450,6 +450,13 @@ Build a bundle end to end. Pass a task, or `--charter` a drafted one.
 the bundle, and signing anyway would record a person's name against something they never saw. It
 does work on a normal autonomous run, though — signing off on a finished bundle and steering the
 search that produced it are separate decisions.
+
+**`-o` takes a name, not a path.** Everything the tool writes goes under one output directory —
+`bundles/` unless `OKF_LOREMASTER_OUTPUT_DIR` says otherwise — so `-o hf-readmission` writes
+`bundles/hf-readmission`. Typing the folder anyway (`-o bundles/hf-readmission`) names the same
+place rather than nesting a second copy inside it. An absolute path is the way out, and is used
+exactly as given. Without `-o` the run id names the folder: unique and sortable, but not something
+you will recognize a week later. `export -o` follows the same rule.
 
 ### `index <bundle>`
 
@@ -580,7 +587,8 @@ okf-loremaster charter "predictors of 30-day readmission after heart failure hos
 okf-loremaster build --charter hf-readmission.yaml --dry-run
 
 # 3. Build it, with the vector index, full screen. Runs unattended.
-okf-loremaster build --charter hf-readmission.yaml --index --tui -o bundles/hf-readmission
+#    -o is a name: this writes bundles/hf-readmission.
+okf-loremaster build --charter hf-readmission.yaml --index --tui -o hf-readmission
 
 # 4. Check and summarize.
 okf-loremaster validate bundles/hf-readmission
@@ -606,7 +614,7 @@ the two. Neither package imports anything from the other.
 To share the corpus outside your institution, filter it to what may be redistributed first:
 
 ```bash
-okf-loremaster export bundles/hf-readmission -o bundles/hf-readmission-public --permissive-only
+okf-loremaster export bundles/hf-readmission -o hf-readmission-public --permissive-only
 okf-loremaster index  bundles/hf-readmission-public       # the store is not copied — rebuild it
 okf-loremaster validate bundles/hf-readmission-public
 ```

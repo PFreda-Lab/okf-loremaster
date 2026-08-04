@@ -33,6 +33,10 @@ bundles/
 /CLAUDE.md
 /Build_Progress.md
 
+# Agent tooling state: local permissions, session files, transcripts. Machine- and
+# operator-specific, and none of it describes the package.
+.claude/
+
 .DS_Store
 .vscode/
 .idea/

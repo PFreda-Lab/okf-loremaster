@@ -84,6 +84,33 @@ def test_hf_home_outside_sync_folder_is_quiet(settings_factory: Any) -> None:
     assert settings_factory().hf_home_warning() is None
 
 
+def test_relative_output_lands_under_the_output_dir(settings_factory: Any) -> None:
+    """The point of the flag: a name, not a path. `-o hiv` writes `bundles/hiv`."""
+    settings = settings_factory()
+    assert settings.output_dir == Path("bundles")
+    assert settings.resolve_output(Path("hiv-suppression")) == Path("bundles/hiv-suppression")
+    assert settings.resolve_output(Path("a/b")) == Path("bundles/a/b")
+
+
+def test_output_dir_is_not_nested_inside_itself(settings_factory: Any) -> None:
+    """`-o bundles/hiv` is what a person types before reading the help. Same place."""
+    settings = settings_factory()
+    assert settings.resolve_output(Path("bundles/hiv")) == Path("bundles/hiv")
+    # Only a prefix match counts. A topic that merely starts with the same letters is
+    # still a name to be placed inside.
+    assert settings.resolve_output(Path("bundlesearch")) == Path("bundles/bundlesearch")
+
+
+def test_absolute_output_is_used_as_given(settings_factory: Any) -> None:
+    """The way out. An absolute path is never rewritten, whatever OUTPUT_DIR says."""
+    settings = settings_factory(output_dir=Path("/srv/okf"))
+    assert settings.resolve_output(Path("/tmp/elsewhere")) == Path("/tmp/elsewhere")
+    # An absolute output dir still collects relative names, and cannot be prefix-matched
+    # by one: `-o srv/okf/x` under `/srv/okf` is a different place, not the same one.
+    assert settings.resolve_output(Path("hiv")) == Path("/srv/okf/hiv")
+    assert settings.resolve_output(Path("srv/okf/hiv")) == Path("/srv/okf/srv/okf/hiv")
+
+
 def test_env_file_search_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """Project .env must outrank the user-level one, and an explicit path must win."""
     candidates = env_file_candidates()

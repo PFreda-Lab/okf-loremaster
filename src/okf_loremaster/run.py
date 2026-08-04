@@ -126,7 +126,15 @@ def parse_vocab(raw: str | None) -> list[str]:
 
 
 def run_directory(options: RunOptions, settings: Settings, run_id: str) -> Path:
-    return options.out if options.out is not None else settings.output_dir / run_id
+    """Where this run's bundle goes.
+
+    Without `-o` the run id names the folder, which is unique and sortable but not
+    memorable. With `-o` the name is the user's, resolved under the same output
+    directory — see `Settings.resolve_output`, which is also what `export` uses.
+    """
+    if options.out is None:
+        return settings.output_dir / run_id
+    return settings.resolve_output(options.out)
 
 
 # --- the build command ------------------------------------------------------
