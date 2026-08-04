@@ -1,0 +1,342 @@
+"""Checking an extraction's numbers against the text it was taken from. No model call.
+
+Deterministic post-processing, not a prompt instruction. A model told to copy numbers
+exactly does so almost always, and the almost is what makes this necessary: an invented
+effect size reads exactly like a real one, and it lands in a bundle another agent will
+treat as evidence. So every number is looked for in the source text afterward, by code,
+and one that is not there is removed.
+
+Removed, not rejected. `PredictorRow.downgraded()` keeps the predictor, its
+operationalization and its timing — all of which the paper did report — and drops only
+the magnitude, lowering the row's confidence. Discarding the row would throw away good
+evidence to punish one bad field; discarding the paper would let one unsupported number
+cost a run everything else that paper said. The run continues either way.
+
+**The scope of the check is the text the extractor actually read.** That is why
+`fulltext` applies its length budget before `extract` sees anything, and why
+`PaperText.text` is the whole prompt block rather than a pointer to it. Checking against
+text the model was never shown would report correct extractions as fabricated, which is
+the one failure that would make this worse than having no check at all.
+
+Two limits, stated rather than hidden:
+
+- A full text contains hundreds of numbers, so an invented one can coincide with a page
+  number or a sample size. That is why a row carrying a verbatim `quote` is checked
+  against **the quote alone**, whenever the quote itself is found in the source: a scope
+  of one sentence makes a coincidence unlikely rather than merely uncommon.
+- A claim is matched at **its own** precision, so a source reading `1.84` supports a
+  claim of `1.8`. That is a rounding, not a fabrication, and flagging it would fill the
+  log with noise until nobody read it. The asymmetry is deliberate: a claim may be less
+  precise than the source and never more. Matching at the coarser of the two instead
+  would let any bare integer in the text — a year, a count, a table number — support a
+  claimed effect of `4.44`, which is most of the numbers in a paper and no check at all.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+from okf_loremaster.schemas import Extraction, NullFinding, PredictorRow
+
+__all__ = [
+    "ExtractionCheck",
+    "Quantity",
+    "RowCheck",
+    "Source",
+    "is_supported",
+    "normalize",
+    "quantities_in",
+    "verify_extraction",
+]
+
+# The characters the literature prints where a keyboard would print ASCII. The middle
+# dot is a decimal point in several journals' house styles; the true minus and the en
+# dash arrive wherever text was converted from typeset copy. Written as named escapes
+# rather than as glyphs: a hyphen, a minus and an en dash are indistinguishable in a
+# diff, and this is the one module where the difference is the subject.
+MINUS = "\N{MINUS SIGN}"
+EN_DASH = "\N{EN DASH}"
+MIDDLE_DOT = "\N{MIDDLE DOT}"
+
+# `-` leads the class so it stays a literal rather than opening a range.
+_DASHES = "-" + MINUS + EN_DASH
+_NUMBER = re.compile(rf"[{_DASHES}]?\d[\d,]*(?:[.{MIDDLE_DOT}]\d+)?")
+_DECIMALS = re.compile(rf"[.{MIDDLE_DOT}](\d+)$")
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+@dataclass(frozen=True, slots=True)
+class Quantity:
+    """A number, with how precisely it was written.
+
+    The precision travels with the value because it decides what counts as agreement:
+    a source that prints three decimals cannot contradict a claim that prints one.
+    """
+
+    value: float
+    decimals: int
+
+    @classmethod
+    def parse(cls, literal: str) -> Quantity | None:
+        normalized = literal.replace(",", "").replace(MIDDLE_DOT, ".")
+        for dash in (MINUS, EN_DASH):
+            normalized = normalized.replace(dash, "-")
+        try:
+            value = float(normalized)
+        except ValueError:
+            return None
+        found = _DECIMALS.search(literal)
+        return cls(value=value, decimals=len(found.group(1)) if found else 0)
+
+    @classmethod
+    def of(cls, value: float) -> Quantity:
+        """A claimed number, at the precision it carries.
+
+        Rendered fixed-point rather than through `repr`, which switches to exponent
+        notation for small values and would report a precision of zero for them —
+        turning the check on a tiny effect into no check at all.
+        """
+        text = f"{float(value):.10f}".rstrip("0")
+        _, _, fraction = text.partition(".")
+        return cls(value=float(value), decimals=len(fraction))
+
+
+def quantities_in(text: str) -> tuple[Quantity, ...]:
+    """Every number in a passage, in order."""
+    found: list[Quantity] = []
+    for match in _NUMBER.finditer(text):
+        literal = match.group(0)
+        if literal[0] in _DASHES and not _is_sign(text, match.start()):
+            literal = literal[1:]
+        quantity = Quantity.parse(literal)
+        if quantity is not None:
+            found.append(quantity)
+    return tuple(found)
+
+
+def _is_sign(text: str, start: int) -> bool:
+    """Whether the dash at `start` negates the number after it.
+
+    Three cases, and getting any of them wrong corrupts every number after it:
+
+    - Attached to a digit or a letter, it is not a sign. `1.21-2.74` is an interval and
+      `follow-up` is a word, so a reported interval does not silently acquire a negative
+      lower bound nobody wrote.
+    - Spaced away from a digit, it is still not a sign: `1.21 - 2.74` is the same
+      interval typeset differently.
+    - Anywhere else — after a word, a bracket, an equals sign, or the start of the text
+      — it is a sign, which is what keeps the minus on `beta -0.44`.
+    """
+    index = start - 1
+    if index < 0:
+        return True
+    if text[index].isdigit() or text[index].isalpha():
+        return False
+    spaced = index
+    while spaced >= 0 and text[spaced] in " \t":
+        spaced -= 1
+    return not (spaced < index and spaced >= 0 and text[spaced].isdigit())
+
+
+def is_supported(claim: Quantity, found: Sequence[Quantity]) -> bool:
+    """Whether any number in `found` supports `claim` at the claim's own precision."""
+    return any(_supports(claim, other) for other in found)
+
+
+def _supports(claim: Quantity, found: Quantity) -> bool:
+    """Whether `found`, rounded to how precisely `claim` was written, is `claim`.
+
+    Asymmetric on purpose. Rounding the source down to the claim's precision forgives a
+    paper printing `1.84` where the extraction says `1.8`; rounding the claim down to
+    the source's would forgive an extraction saying `4.44` because some table somewhere
+    printed a `4`.
+    """
+    return round(found.value, claim.decimals) == round(claim.value, claim.decimals)
+
+
+def normalize(text: str) -> str:
+    """Fold text for quote matching: case, punctuation and whitespace all collapse.
+
+    Aggressive on purpose. A quote is a provenance claim, not the numeric check, and
+    the cost of a false negative — a genuine quote dropped from the bundle — is higher
+    than the cost of matching a sentence whose citation markers were reflowed.
+    """
+    return _NON_ALNUM.sub(" ", text.casefold()).strip()
+
+
+class Source:
+    """One paper's text, prepared once for every check made against it."""
+
+    __slots__ = ("_normalized", "_quantities", "text")
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self._normalized = normalize(text)
+        self._quantities = quantities_in(text)
+
+    @property
+    def quantities(self) -> tuple[Quantity, ...]:
+        return self._quantities
+
+    def holds_quote(self, quote: str) -> bool:
+        needle = normalize(quote)
+        return bool(needle) and needle in self._normalized
+
+    def holds(self, value: float) -> bool:
+        return is_supported(Quantity.of(value), self._quantities)
+
+    def scope(self, quote: str) -> tuple[tuple[Quantity, ...], bool]:
+        """The numbers a row is checked against, and whether its quote was found.
+
+        A row that quoted its source verbatim is checked against that one sentence. A
+        row with no quote, or with one the text does not contain, falls back to the
+        whole document — a weaker check, and the only alternative to none.
+        """
+        if quote.strip() and self.holds_quote(quote):
+            return quantities_in(quote), True
+        return self._quantities, False
+
+
+@dataclass(frozen=True, slots=True)
+class RowCheck:
+    """What checking one predictor row found."""
+
+    index: int
+    predictor: str
+    # The magnitude as the model claimed it, for a warning a person can act on.
+    claimed: str = ""
+    quote_missing: bool = False
+    effect_missing: bool = False
+    interval_missing: bool = False
+
+    @property
+    def clean(self) -> bool:
+        return not (self.quote_missing or self.effect_missing or self.interval_missing)
+
+    def note(self) -> str:
+        if self.effect_missing:
+            return f"{self.predictor!r}: {self.claimed} is not in the source text"
+        if self.interval_missing:
+            return (
+                f"{self.predictor!r}: the interval around {self.claimed} "
+                "is not in the source text"
+            )
+        return f"{self.predictor!r}: the quoted sentence is not in the source text"
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionCheck:
+    """An extraction with its unsupported numbers stripped, and what was stripped."""
+
+    extraction: Extraction
+    rows: tuple[RowCheck, ...] = ()
+    sample_size_missing: bool = False
+    quotes_dropped: int = 0
+
+    @property
+    def effects_dropped(self) -> int:
+        return sum(1 for row in self.rows if row.effect_missing)
+
+    @property
+    def intervals_dropped(self) -> int:
+        return sum(1 for row in self.rows if row.interval_missing)
+
+    @property
+    def clean(self) -> bool:
+        return not self.quotes_dropped and not self.sample_size_missing and all(
+            row.clean for row in self.rows
+        )
+
+    def notes(self) -> tuple[str, ...]:
+        return tuple(row.note() for row in self.rows if not row.clean)
+
+
+def verify_extraction(extraction: Extraction, source_text: str) -> ExtractionCheck:
+    """Strip every number the source text does not contain, and report what went."""
+    source = Source(source_text)
+
+    rows: list[RowCheck] = []
+    verified: list[PredictorRow] = []
+    for index, row in enumerate(extraction.predictors):
+        checked, outcome = _verify_row(index, row, source)
+        verified.append(checked)
+        rows.append(outcome)
+
+    findings, quotes_dropped = _verify_findings(extraction.null_findings, source)
+    quotes_dropped += sum(1 for outcome in rows if outcome.quote_missing)
+
+    sample_size_missing = extraction.n is not None and not source.holds(float(extraction.n))
+    updated = extraction.model_copy(
+        update={
+            "predictors": verified,
+            "null_findings": findings,
+            "n": None if sample_size_missing else extraction.n,
+        }
+    )
+    return ExtractionCheck(
+        extraction=updated,
+        rows=tuple(rows),
+        sample_size_missing=sample_size_missing,
+        quotes_dropped=quotes_dropped,
+    )
+
+
+def _verify_row(index: int, row: PredictorRow, source: Source) -> tuple[PredictorRow, RowCheck]:
+    scope, quote_found = source.scope(row.quote)
+    quote_missing = bool(row.quote.strip()) and not quote_found
+
+    def supported(value: float | None) -> bool:
+        return value is None or is_supported(Quantity.of(value), scope)
+
+    effect_ok = supported(row.effect) and _matches_raw(row)
+    interval_ok = supported(row.ci_low) and supported(row.ci_high)
+
+    updated = row.model_copy(update={"quote": ""}) if quote_missing else row
+    if not effect_ok:
+        updated = updated.downgraded()
+    elif not interval_ok:
+        updated = updated.without_interval()
+
+    return updated, RowCheck(
+        index=index,
+        predictor=row.predictor,
+        claimed=row.effect_raw or (f"{row.effect:g}" if row.effect is not None else "the effect"),
+        quote_missing=quote_missing,
+        effect_missing=not effect_ok,
+        interval_missing=effect_ok and not interval_ok,
+    )
+
+
+def _matches_raw(row: PredictorRow) -> bool:
+    """Whether the parsed effect is one of the numbers in the verbatim string.
+
+    An internal check, needing no source: a row claiming `effect: 3.91` beside
+    `effect_raw: "1.82 (95% CI 1.21-2.74)"` contradicts itself, and one of the two is
+    wrong regardless of what the paper said. It also catches a silent unit conversion,
+    which `effect_raw` exists specifically to make impossible.
+    """
+    if row.effect is None or not row.effect_raw.strip():
+        return True
+    return is_supported(Quantity.of(row.effect), quantities_in(row.effect_raw))
+
+
+def _verify_findings(
+    findings: Sequence[NullFinding], source: Source
+) -> tuple[list[NullFinding], int]:
+    """Drop quotes the source does not contain. The findings themselves stay.
+
+    A null finding carries no magnitude to remove — its whole claim is that there was
+    none — so an unsupported quote is the only thing here that can be checked, and the
+    finding survives without it.
+    """
+    kept: list[NullFinding] = []
+    dropped = 0
+    for finding in findings:
+        if finding.quote.strip() and not source.holds_quote(finding.quote):
+            dropped += 1
+            kept.append(finding.model_copy(update={"quote": ""}))
+        else:
+            kept.append(finding)
+    return kept, dropped

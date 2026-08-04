@@ -1,0 +1,315 @@
+"""The build step 9 gate: `--tui` works and `q` checkpoints gracefully.
+
+Driven with Textual's `run_test()` against the same fake NCBI corpus the dry-run tests
+use, so what is exercised is a real graph run answered through the real modal, not a
+mock of one. Two claims are worth stating because they are the ones a refactor breaks:
+
+**The TUI is a renderer.** It is handed to `build_run` as three arguments and changes
+nothing else, so a run through the app reaches the same state a run through the console
+does. `test_a_run_through_the_app_reaches_the_same_state` is that claim.
+
+**`q` stops rather than kills.** The run task is cancelled, `run_build`'s checkpointer
+closes on the way out, and the run id the app reports is the one `--resume` wants.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from pathlib import Path
+from typing import Any
+
+import pytest
+from typer.testing import CliRunner
+
+from okf_loremaster.cli import app as cli
+from okf_loremaster.graph.build import NODES, build_graph
+from okf_loremaster.graph.state import Deps
+from okf_loremaster.run import RunInterrupted, RunOptions
+
+pytest.importorskip("textual")
+
+from okf_loremaster.ui.tui import (
+    DONE,
+    PENDING,
+    ConfirmScreen,
+    LoremasterApp,
+    build_run_tui,
+)
+from test_dry_run import POOL_SIZE, PROMPT, charter_for
+
+from fake_ncbi import FakeNCBI
+
+runner = CliRunner()
+
+# How long a pilot waits for the app to reach a state. Generous because the graph does
+# real parsing behind the modal; a stuck test fails in seconds either way.
+TIMEOUT = 20.0
+
+
+def tui_run(
+    settings_factory: Any, tmp_path: Path, **overrides: Any
+) -> tuple[LoremasterApp, Any]:
+    """An app wired to the fake corpus, and the settings it will use."""
+    charter_path = tmp_path / "given.yaml"
+    charter_path.write_text(charter_for().to_yaml(), encoding="utf-8")
+    options = RunOptions(
+        prompt=PROMPT,
+        charter_path=charter_path,
+        out=tmp_path / "run",
+        pool_size=POOL_SIZE,
+        target_papers=120,
+        dry_run=True,
+        tui=True,
+        **overrides,
+    )
+    settings = settings_factory(
+        ncbi_email="test@example.org",
+        http_cache_enabled=False,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "out",
+    )
+    app = LoremasterApp(options, settings=settings, transport=FakeNCBI().transport())
+    return app, settings
+
+
+async def settle(pilot: Any, until: Any) -> None:
+    """Wait for `until()` to hold, pumping the app in between."""
+    deadline = asyncio.get_running_loop().time() + TIMEOUT
+    while asyncio.get_running_loop().time() < deadline:
+        await pilot.pause()
+        if until():
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("the app never reached the expected state")
+
+
+def asking(app: LoremasterApp) -> bool:
+    return isinstance(app.screen, ConfirmScreen)
+
+
+def log_text(app: LoremasterApp) -> str:
+    from textual.widgets import RichLog
+
+    lines = app.query_one("#log", RichLog).lines
+    return "\n".join(segment.text for line in lines for segment in line)
+
+
+# --- the panel matches the graph --------------------------------------------
+
+
+def test_the_node_panel_cannot_drift_from_the_pipeline(settings_factory: Any) -> None:
+    """`NODES` is what the TUI draws; the graph is what actually runs.
+
+    Two lists that must agree, so the one place they can disagree is asserted rather
+    than trusted. A node added to the graph and not to `NODES` would simply never appear
+    on screen, which is the kind of omission nobody notices.
+    """
+    from okf_loremaster.events import EventBus
+
+    deps = Deps(settings=settings_factory(), bus=EventBus(), clients=None)  # type: ignore[arg-type]
+    assert tuple(build_graph(deps).nodes) == NODES
+
+
+# --- a run through the app ---------------------------------------------------
+
+
+async def test_a_run_through_the_app_reaches_the_same_state(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Approve both pauses from the modal and the dry run completes as it always does."""
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a dry run constructed a Router — that is a model call waiting")
+
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", refuse)
+    app, _ = tui_run(settings_factory, tmp_path)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: asking(app))  # charter
+        await pilot.press("y")
+        await settle(pilot, lambda: asking(app))  # retrieve
+        await pilot.press("y")
+        await settle(pilot, lambda: app.outcome is not None)
+        # Read inside the context: the widgets are gone once the app has shut down.
+        log = log_text(app)
+        await pilot.press("q")
+
+    assert app.error is None
+    assert app.outcome is not None
+    state, directory = app.outcome
+    assert len(state["pool"]) == POOL_SIZE
+    assert (directory / "charter.yaml").exists()
+
+    # The panel and the log are driven off the same events the console renderer reads.
+    assert app._status["rank"] == DONE
+    assert app._status["screen"] == PENDING  # a dry run stops after ranking
+    assert app.run_id in log
+    assert "rank" in log
+
+
+async def test_declining_the_charter_stops_the_run_without_failing_it(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`n` at the first pause is the intended way to go and edit charter.yaml.
+
+    Escape rather than the `n` key, so the third way out of the modal is exercised too.
+    """
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: asking(app))
+        await pilot.press("escape")
+        await settle(pilot, lambda: app.outcome is not None)
+        await pilot.press("q")
+
+    assert app.error is None
+    assert app.outcome is not None
+    state, directory = app.outcome
+    assert not state.get("pool")
+    # The charter is on disk, which is the whole reason declining here is useful.
+    assert (directory / "charter.yaml").exists()
+
+
+async def test_q_stops_the_run_and_leaves_a_checkpoint_to_resume_from(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate. `q` cancels the run task; it does not kill the process.
+
+    The checkpoint database is what makes the id it reports worth anything — without one
+    `--resume <id>` would name a run nothing could be resumed from.
+    """
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, settings = tui_run(settings_factory, tmp_path)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: asking(app))
+        await pilot.press("q")
+        await settle(pilot, lambda: app.interrupted)
+
+    assert app.interrupted is True
+    assert app.outcome is None
+    assert app.error is None
+    assert app.run_id  # taken off RunStarted, and it is what --resume wants
+    assert (settings.cache_dir / "checkpoints.sqlite").exists()
+
+
+# --- what the caller gets back -----------------------------------------------
+
+
+async def test_a_stopped_run_is_reported_as_resumable_not_as_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def stopped(self: LoremasterApp, *args: Any, **kwargs: Any) -> None:
+        self.interrupted = True
+        self.run_id = "20260803-101010-abcd"
+
+    monkeypatch.setattr(LoremasterApp, "run_async", stopped)
+
+    with pytest.raises(RunInterrupted) as caught:
+        await build_run_tui(RunOptions(prompt="anything"))
+
+    assert caught.value.run_id == "20260803-101010-abcd"
+
+
+async def test_a_failed_run_raises_what_it_failed_with(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The app catches so it can show; the caller still gets the real exception."""
+
+    async def failed(self: LoremasterApp, *args: Any, **kwargs: Any) -> None:
+        self.error = ValueError("no prompt: pass one as an argument or use --charter")
+
+    monkeypatch.setattr(LoremasterApp, "run_async", failed)
+
+    with pytest.raises(ValueError, match="no prompt"):
+        await build_run_tui(RunOptions())
+
+
+# --- the flag ----------------------------------------------------------------
+
+
+def test_tui_and_json_are_refused_rather_than_ranked() -> None:
+    result = runner.invoke(cli, ["build", "a prompt", "--tui", "--json"])
+
+    assert result.exit_code == 1, result.output
+    assert "--tui cannot be combined with --json" in result.output
+
+
+def _intercept(monkeypatch: pytest.MonkeyPatch, target: str) -> list[RunOptions]:
+    """Replace a runner with one that records its options and stops the command."""
+    seen: list[RunOptions] = []
+
+    async def stop(options: RunOptions, **kwargs: Any) -> Any:
+        seen.append(options)
+        raise ValueError("reached the runner")
+
+    monkeypatch.setattr(target, stop)
+    return seen
+
+
+def test_a_dry_run_keeps_its_printed_plan_instead_of_taking_the_screen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _intercept(monkeypatch, "okf_loremaster.run.build_run")
+
+    result = runner.invoke(cli, ["build", "a prompt", "--tui", "--dry-run"])
+
+    assert "--dry-run prints its plan" in result.output
+    assert result.exit_code == 1  # the intercept, not the flag
+    assert seen and seen[0].tui is False
+
+
+def test_no_terminal_falls_back_to_the_console_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("okf_loremaster.ui.plain.rich_enabled", lambda *a, **k: False)
+    seen = _intercept(monkeypatch, "okf_loremaster.run.build_run")
+
+    result = runner.invoke(cli, ["build", "a prompt", "--tui"])
+
+    assert "no terminal to drive" in result.output
+    assert seen and seen[0].tui is False
+
+
+def test_a_terminal_gets_the_full_screen_interface(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("okf_loremaster.ui.plain.rich_enabled", lambda *a, **k: True)
+    seen = _intercept(monkeypatch, "okf_loremaster.ui.tui.build_run_tui")
+
+    result = runner.invoke(cli, ["build", "a prompt", "--tui"])
+
+    assert "falling back" not in result.output
+    assert seen and seen[0].tui is True
+
+
+def test_a_missing_extra_is_named_before_the_screen_is_cleared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """And the name survives being printed.
+
+    The fix is `pip install 'okf-loremaster[tui]'`, and Rich reads `[tui]` as a markup
+    tag — so the one word the user has to type was being swallowed. The same was true of
+    the `[vectors]` hint, which is why the escaping lives in the shared error handler.
+    """
+    import importlib.util
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr("okf_loremaster.ui.plain.rich_enabled", lambda *a, **k: True)
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *a, **k: None if name == "textual" else real(name, *a, **k),
+    )
+
+    result = runner.invoke(cli, ["build", "a prompt", "--tui"])
+
+    assert result.exit_code == 1, result.output
+    assert "okf-loremaster[tui]" in _uncolored(result.output)
+
+
+def _uncolored(output: str) -> str:
+    """CliRunner keeps the color codes; the assertions are about the words."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", output)

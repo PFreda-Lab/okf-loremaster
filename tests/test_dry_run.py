@@ -1,0 +1,410 @@
+"""The whole of `charter -> search -> dedupe -> rank`, offline, with no model.
+
+This is the build step 4 gate as an executable test. `--dry-run` has to plan real
+queries, report real hit counts, project spend, print both confirmation surfaces, and
+make exactly zero model calls — and the last one is the claim easiest to break by
+accident and hardest to notice, since a run that quietly spent would look identical
+except on an invoice.
+
+So it is enforced twice. `Router` is replaced with something that raises on
+construction, and the event stream is checked afterward for `LLMCall`. The first says
+nothing tried; the second says nothing succeeded by another route.
+
+The corpus is `fake_ncbi`: real E-utilities JSON and real PubMed XML over a mock
+transport, so every client parser runs, with a shape chosen to make the effect of MMR
+and the per-shelf quota measurable rather than merely present.
+"""
+
+from __future__ import annotations
+
+import io
+from pathlib import Path
+from typing import Any
+
+import pytest
+from rich.console import Console
+
+from okf_loremaster.events import Event, EventBus, LLMCall
+from okf_loremaster.graph.state import RunState
+from okf_loremaster.ranking import shelf_affinity
+from okf_loremaster.run import RunOptions, build_run
+from okf_loremaster.schemas import Charter, Shelf
+from okf_loremaster.ui.pauses import TOP_TITLES, ConsolePause
+
+from fake_ncbi import TOPICS, FakeNCBI, all_pmids
+
+PROMPT = "identify predictors of a measured outcome after a procedure in adults"
+
+# Small enough that the quota has to choose. The corpus is 160 papers across four
+# shelves; at the default 800 every paper is retained either way and there is nothing
+# to compare.
+POOL_SIZE = 40
+
+
+def charter_for(topics: tuple[str, ...] = TOPICS) -> Charter:
+    """A charter whose shelves map one-to-one onto the fake corpus's topics.
+
+    Supplied rather than drafted, because a dry run with no charter gets the skeleton —
+    no taxonomy, so no shelf affinity, so nothing for the quota to do. `--charter` is
+    how a dry run gets a real plan, and the charter node warns when it has to fall back.
+    """
+    return Charter(
+        prompt=PROMPT,
+        task=PROMPT,
+        population="adults",
+        outcome="measured outcome",
+        shelf_taxonomy=[
+            Shelf(slug=topic, title=topic.title(), scope=f"the {topic} facet", seed_terms=[topic])
+            for topic in topics
+        ],
+        vocabularies=["icd10"],
+    )
+
+
+class Harness:
+    """One dry run, plus everything a test needs to look at afterward."""
+
+    def __init__(self, state: RunState, directory: Path, output: str, events: list[Event]) -> None:
+        self.state = state
+        self.directory = directory
+        self.output = output
+        self.events = events
+
+    @property
+    def comparison(self) -> Any:
+        return self.state.get("comparison")
+
+    def charter_yaml(self) -> Charter:
+        return Charter.from_yaml((self.directory / "charter.yaml").read_text(encoding="utf-8"))
+
+
+async def dry_run(
+    settings_factory: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    charter: Charter | None = None,
+    fake: FakeNCBI | None = None,
+    settings_overrides: dict[str, Any] | None = None,
+    **overrides: Any,
+) -> Harness:
+    """Run the graph against the fake corpus and capture what a user would have seen."""
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a dry run constructed a Router — that is a model call waiting")
+
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", refuse)
+
+    # Every event, alongside whatever the renderer made of them. Subscribing before the
+    # run starts is the only way to see RunStarted.
+    seen: list[Event] = []
+    original = EventBus.emit
+
+    def record(self: EventBus, event: Event) -> None:
+        seen.append(event)
+        original(self, event)
+
+    monkeypatch.setattr(EventBus, "emit", record)
+
+    charter_path: Path | None = None
+    if charter is not None:
+        charter_path = tmp_path / "given.yaml"
+        charter_path.write_text(charter.to_yaml(), encoding="utf-8")
+
+    buffer = io.StringIO()
+    # A fixed width, because the retrieve pause's tables are what several assertions
+    # read and a terminal-dependent wrap would make them terminal-dependent too.
+    console = Console(file=buffer, width=160, force_terminal=False, no_color=True)
+
+    options = RunOptions(
+        prompt=PROMPT,
+        charter_path=charter_path,
+        out=tmp_path / "run",
+        pool_size=POOL_SIZE,
+        target_papers=120,
+        dry_run=True,
+        **overrides,
+    )
+    settings = settings_factory(
+        ncbi_email="test@example.org",
+        http_cache_enabled=False,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "out",
+        **(settings_overrides or {}),
+    )
+    state, directory = await build_run(
+        options,
+        console=console,
+        settings=settings,
+        transport=(fake or FakeNCBI()).transport(),
+    )
+    return Harness(state, directory, buffer.getvalue(), seen)
+
+
+# --- zero LLM calls ---------------------------------------------------------
+
+
+async def test_a_dry_run_makes_no_model_calls(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+    assert not [event for event in run.events if isinstance(event, LLMCall)]
+    assert run.state["pool"]  # and it still produced a pool
+
+
+async def test_a_dry_run_needs_no_model_configured(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`require_llm()` is skipped, so an unconfigured machine can still plan a run."""
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+    assert run.state["charter"] is not None
+
+
+async def test_without_a_charter_a_dry_run_says_what_it_cannot_do(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The skeleton path: real queries from the prompt alone, and a warning saying so."""
+    run = await dry_run(settings_factory, tmp_path, monkeypatch)
+    charter = run.state["charter"]
+    assert charter is not None
+    assert charter.shelf_taxonomy == []
+    assert any("no shelf taxonomy" in warning for warning in run.state["warnings"])
+    assert run.state["executed"]  # it searched anyway
+
+
+# --- the queries ------------------------------------------------------------
+
+
+async def test_the_plan_covers_every_shelf_and_reports_hit_counts(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeNCBI()
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for(), fake=fake)
+
+    plan = run.state["plan"]
+    assert plan is not None
+    assert {q.shelf for q in plan.queries} == {"", *TOPICS}
+    assert len(fake.esearch_terms) == len(plan.queries)
+
+    executed = run.state["executed"]
+    assert [q.count for q in executed] == [len(all_pmids()), 40, 40, 40, 40]
+    assert not any(q.suspect for q in executed)
+
+
+async def test_one_efetch_covers_the_whole_plan(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A paper found by four queries is fetched once, carrying all four provenances."""
+    fake = FakeNCBI()
+    await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for(), fake=fake)
+
+    assert len(fake.efetch_batches) == 1
+    assert sorted(fake.efetch_batches[0]) == sorted(all_pmids())
+    assert len(fake.icite_batches) == 1
+
+
+# --- dedupe -----------------------------------------------------------------
+
+
+async def test_dedupe_counts_every_kind_of_drop(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+
+    assert run.state["dropped"] == {"retracted": 1, "no abstract": 2, "duplicate title": 1}
+    assert len(run.state["unique"]) == len(run.state["candidates"]) - 4
+
+
+# --- MMR and the quota ------------------------------------------------------
+
+
+async def test_mmr_and_the_quota_change_the_retained_set(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The step 4 gate's last clause, as a measurement.
+
+    The fake corpus is stacked by citation impact, so pure relevance rank leaves the
+    pool lopsided across the four shelves. The quota levels it, and the shelves it helps
+    are exactly the ones pure rank left short of their share.
+    """
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+    comparison = run.comparison
+    assert comparison is not None
+
+    quota = POOL_SIZE // len(TOPICS)
+    pure = comparison.pure_by_shelf
+    assert max(pure.values()) >= 3 * min(pure.values())  # lopsided before
+    assert set(comparison.diversified_by_shelf.values()) == {quota}  # level after
+    assert comparison.changed > 0
+    assert comparison.shelves_helped == sorted(s for s, n in pure.items() if n < quota)
+
+
+async def test_the_pool_is_capped_and_shelf_affinity_is_total(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+
+    pool = run.state["pool"]
+    assert len(pool) == POOL_SIZE
+    query_shelf = run.state["query_shelf"]
+    # Every paper was found by a shelf-targeted query as well as the base one, so none
+    # of them falls into the unassigned group.
+    assert all(shelf_affinity(item.candidate, query_shelf) for item in pool)
+
+
+async def test_the_run_is_reproducible(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same corpus, same charter, same pool — in the same order."""
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+    first = await dry_run(settings_factory, tmp_path / "a", monkeypatch, charter=charter_for())
+    second = await dry_run(settings_factory, tmp_path / "b", monkeypatch, charter=charter_for())
+    assert [i.pmid for i in first.state["pool"]] == [i.pmid for i in second.state["pool"]]
+
+
+# --- what the pauses print --------------------------------------------------
+
+
+async def test_the_charter_pause_prints_the_taxonomy_and_the_vocabularies(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+
+    assert "shelf_taxonomy" in run.output
+    assert "vocabularies" in run.output
+    assert "--vocab" in run.output  # the override is advertised where it is needed
+    for topic in TOPICS:
+        assert topic in run.output
+
+
+async def test_the_retrieve_pause_prints_the_totals_and_the_top_titles(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+
+    unique = len(run.state["unique"])
+    assert f"{unique:,}" in run.output
+    assert f"top {TOP_TITLES} of the pool" in run.output
+    # The titles themselves, not just a count of them.
+    printed = [item for item in run.state["pool"][:TOP_TITLES] if item.pmid in run.output]
+    assert len(printed) == TOP_TITLES
+
+
+async def test_the_retrieve_pause_prints_the_diversification_comparison(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+
+    assert "pool by shelf affinity" in run.output
+    assert "MMR + quota" in run.output
+    assert "only because of MMR and the per-shelf quota" in run.output
+
+
+async def test_a_dry_run_projects_spend_from_the_real_pool(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+
+    assert "projected spend" in run.output
+    # Screening is projected from the abstracts actually retrieved, which is what makes
+    # this a measurement rather than a guess.
+    assert "measured from the retrieved pool" in run.output
+    # A supplied charter costs nothing, and the projection says so instead of billing
+    # for a call that will not happen.
+    assert "charter supplied" in run.output
+
+
+async def test_an_unpriced_projection_says_so_rather_than_reporting_nothing_to_pay(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No model bound to a role means no price for it — which is not the same as free."""
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+
+    assert "cost unavailable" in run.output
+    assert "unpriced (tokens only)" in run.output
+    assert "OKF_LOREMASTER_PRICE_" in run.output
+
+
+async def test_a_price_override_turns_the_projection_into_a_figure(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The escape hatch the unpriced note points at, exercised end to end."""
+    run = await dry_run(
+        settings_factory,
+        tmp_path,
+        monkeypatch,
+        charter=charter_for(),
+        settings_overrides={
+            "price_fast_in": 0.8,
+            "price_fast_out": 4.0,
+            "price_mid_in": 3.0,
+            "price_mid_out": 15.0,
+            "price_deep_in": 15.0,
+            "price_deep_out": 75.0,
+        },
+    )
+
+    assert "cost unavailable" not in run.output
+    assert "unpriced (tokens only)" not in run.output
+    assert "$" in run.output
+
+
+# --- the pauses themselves --------------------------------------------------
+
+
+def test_yes_and_dry_run_print_everything_and_ask_nothing() -> None:
+    """`--yes` bypasses the question, not the information."""
+    for options in (RunOptions(yes=True), RunOptions(dry_run=True)):
+        from okf_loremaster.run import _pause
+
+        pause = _pause(options, None)
+        assert isinstance(pause, ConsolePause)
+        assert pause._interactive is False
+
+
+async def test_json_output_never_asks_and_never_prints_a_table() -> None:
+    from okf_loremaster.run import _pause
+
+    pause = _pause(RunOptions(json_out=True), None)
+    assert not isinstance(pause, ConsolePause)
+    assert (await pause.charter(charter_for())).proceed
+
+
+async def test_the_pauses_are_not_asked_on_a_dry_run(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+    assert run.output.count("not asking") == 2  # charter, then retrieve
+
+
+# --- --vocab ----------------------------------------------------------------
+
+
+async def test_vocab_overrides_the_charter_and_lands_on_disk(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The escape hatch for the one charter field that fails silently."""
+    run = await dry_run(
+        settings_factory,
+        tmp_path,
+        monkeypatch,
+        charter=charter_for(),  # says icd10
+        vocab=["ICD10", "atc", "loinc"],
+    )
+
+    assert run.state["charter"].vocabularies == ["icd10", "atc", "loinc"]
+    # Written where the user was told to edit it, normalized on the way.
+    assert run.charter_yaml().vocabularies == ["icd10", "atc", "loinc"]
+    assert "atc" in run.output and "loinc" in run.output
+
+
+async def test_the_settled_charter_is_written_even_though_one_was_supplied(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run directory records what the run actually used, not what it was handed."""
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
+
+    written = run.charter_yaml()
+    assert written.target_papers == 120  # from the flag, not the supplied file
+    assert written.generated_by == "okf-loremaster/charter/none"

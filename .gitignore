@@ -1,0 +1,33 @@
+.env
+*.env
+!.env.example
+
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+
+# Build outputs: bundles are regenerable and large.
+bundles/
+*.chroma/
+.okf-loremaster-cache/
+
+# Run artifacts. Checkpoints normally live under the cache directory, outside the
+# repo — these catch a cache dir pointed back inside it.
+*.sqlite
+*.sqlite-journal
+
+# A charter is one run's input, not the package's. Anchored to the root so a
+# fixture or example charter under tests/ still ships.
+/charter.yaml
+/*.charter.yaml
+
+.DS_Store
+.vscode/
+.idea/
