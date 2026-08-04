@@ -374,22 +374,54 @@ async def test_the_transcript_ends_with_what_the_run_cost(
     assert "tok" in last.rsplit("\n", 1)[-1]
 
 
-def test_copying_a_selection_is_in_the_footer_where_it_can_be_found() -> None:
-    """Textual has selected on drag and copied on ctrl+c since 7.0, bound with
-    `show=False`. Undiscoverable is the same as missing when the reason the log pane
-    exists is that a warning can be quoted somewhere else."""
+def test_copying_the_log_is_in_the_footer_where_it_can_be_found() -> None:
+    """A full-screen app captures the mouse, so the terminal's own drag-select is gone and
+    the log pane's whole purpose — quoting a warning somewhere else — goes with it unless
+    a key says otherwise. Undiscoverable is the same as missing."""
     copies = [b for b in LoremasterApp.BINDINGS if getattr(b, "action", "") == "copy"]
 
-    assert copies, "nothing in the footer says a selection can be copied"
+    assert copies, "nothing in the footer says the log can be copied"
     assert all(b.show for b in copies)
 
 
-async def test_pressing_copy_with_nothing_selected_says_so_instead_of_nothing(
+async def test_a_drag_over_the_log_selects_nothing_that_can_be_read_back() -> None:
+    """The premise the copy binding used to rest on, pinned as a fact about Textual.
+
+    `RichLog` sets `ALLOW_SELECT = True` and Textual records the drag, so this looks like
+    it works right up until the text is asked for: a `ScrollView` paints through
+    `render_line` rather than from a `Visual`, and `Widget.get_selection` has no `Text` to
+    slice. If a Textual upgrade ever makes this pass, `action_copy` can offer a selection
+    again — until then, "drag over the log first" is an instruction nobody can follow.
+    """
+    from textual.app import App, ComposeResult
+    from textual.geometry import Offset
+    from textual.widgets import RichLog
+
+    class OneLog(App[None]):
+        def compose(self) -> ComposeResult:
+            yield RichLog(id="log", wrap=True, markup=False, highlight=False)
+
+    app: App[None] = OneLog()
+    async with app.run_test(size=(80, 24)) as pilot:
+        log = app.query_one("#log", RichLog)
+        for index in range(10):
+            log.write(f"line {index} — a warning worth pasting into a bug report")
+        await pilot.pause()
+        await pilot.mouse_down("#log", offset=Offset(2, 1))
+        await pilot.hover("#log", offset=Offset(40, 4))
+        await pilot.mouse_up("#log", offset=Offset(40, 4))
+        await pilot.pause()
+
+        assert app.screen.selections, "Textual stopped recording the drag entirely"
+        assert app.screen.get_selected_text() == ""
+
+
+async def test_pressing_copy_takes_the_whole_log_and_says_where_it_also_lives(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Textual's `screen.copy_text` raises `SkipAction` on an empty selection, so the key
-    advertised in the footer did nothing at all and the app looked broken. It is a missing
-    drag, and the message that says so also names the file that needs no drag."""
+    """`c` copies everything, including the lines the pane has scrolled past, and names
+    the file — because OSC 52 is discarded by some terminals and "beside the bundle" is
+    not an answer when the bundle may not exist."""
     from okf_loremaster.run import TRANSCRIPT_FILENAME
 
     monkeypatch.setattr(
@@ -397,15 +429,18 @@ async def test_pressing_copy_with_nothing_selected_says_so_instead_of_nothing(
     )
     app, _ = tui_run(settings_factory, tmp_path, interactive=False)
     said: list[str] = []
+    copied: list[str] = []
 
     async with app.run_test() as pilot:
         await settle(pilot, lambda: app.outcome is not None)
         monkeypatch.setattr(app, "notify", lambda message, **kw: said.append(message))
+        monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
         await pilot.press("c")
         await pilot.press("q")
 
-    assert said, "pressing c with no selection said nothing"
-    assert "nothing selected" in said[0]
+    assert copied, "pressing c copied nothing"
+    assert copied[0].strip(), "the clipboard got an empty log"
+    assert said, "pressing c said nothing"
     assert TRANSCRIPT_FILENAME in said[0]
 
 

@@ -229,14 +229,14 @@ class LoremasterApp(App[None]):
     #dialog-keys { height: auto; text-align: center; }
     """
 
-    # Selection is not added here, it is *advertised* here. Textual has selected text on
-    # drag and copied it on ctrl+c / cmd+c since 7.0, but it binds that with `show=False`,
-    # so a full-screen app looks like a screenshot of a log rather than a log. The whole
-    # point of the log pane is that a warning can be pasted into a bug report. A second,
-    # visible binding on the same action puts it in the footer where it can be found.
+    # The whole point of the log pane is that a warning can be pasted into a bug report,
+    # and a full-screen app captures the mouse, so the terminal's own drag-select is gone.
+    # This used to advertise "copy selection" on the assumption that Textual's drag-select
+    # filled the gap. It does not, on this widget — see `action_copy`. Copying the whole
+    # log is what the key was wanted for anyway.
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "stop", "quit"),
-        Binding("c", "copy", "copy selection"),
+        Binding("c", "copy", "copy log"),
     ]
 
     def __init__(
@@ -327,15 +327,19 @@ class LoremasterApp(App[None]):
             )
         except asyncio.CancelledError:
             # The checkpoint is already flushed by `run_build`'s context manager; there
-            # is nothing left to wait for and nothing to show.
+            # is nothing left to wait for and nothing to show. The log is still worth
+            # keeping — `--resume` picks the run back up, and what it was doing when it
+            # was stopped is on screen and nowhere else.
             self.interrupted = True
+            self._save_transcript(self._fallback_dir())
             self.exit()
             raise
         except Exception as exc:
             self.error = exc
             self._write(Text.from_markup(f"[red]FATAL[/red] {type(exc).__name__}: {exc}"))
-        if self.outcome is not None:
-            self._save_transcript(self.outcome[1])
+        self._save_transcript(
+            self.outcome[1] if self.outcome is not None else self._fallback_dir()
+        )
         self._done = True
         self._refresh_meter()
 
@@ -386,30 +390,58 @@ class LoremasterApp(App[None]):
     # --- getting text out --------------------------------------------------
 
     def action_copy(self) -> None:
-        """`c`. Textual's own copy, plus a sentence about what just happened.
+        """`c`. The whole log to the clipboard, because a selection cannot be had.
 
-        Its `screen.copy_text` does nothing visible in both of the cases that actually
-        occur: with no selection it raises `SkipAction`, and with one it writes an OSC 52
-        escape that — per Textual's own docstring — macOS Terminal discards. Pressing a
-        key advertised in the footer and getting silence reads as a broken app, when the
-        first case is a missing drag and the second is the terminal. Both have an answer,
-        and `run.log` is the answer that never depends on either.
+        `screen.get_selected_text()` returns `""` on this screen whatever the mouse did.
+        `RichLog` is a `ScrollView`, which paints itself through `render_line` rather than
+        from a `Visual`, so `Widget.get_selection` finds no `Text` to slice and returns
+        `None` — `ALLOW_SELECT` is `True` and Textual does record the drag, which is what
+        made the old "drag over the log first" advice read as a technique problem rather
+        than an impossible instruction.
+
+        So: copy everything. That is what the key was wanted for anyway, since a warning
+        goes into a bug report with the lines around it or not at all — including the ones
+        the pane has already scrolled past, which no selection would have reached.
         """
-        selection = self.screen.get_selected_text()
-        if not selection:
-            self.notify(
-                "nothing selected — drag over the log first. The whole run is saved to "
-                f"{TRANSCRIPT_FILENAME} beside the bundle either way.",
-                title="copy",
-                severity="warning",
-            )
+        text = self._transcript_text()
+        if not text.strip():
+            self.notify("nothing logged yet.", title="copy", severity="warning")
             return
-        self.copy_to_clipboard(selection)
+        self.copy_to_clipboard(text)
         self.notify(
-            f"{len(selection):,} characters sent to the clipboard. macOS Terminal ignores "
-            f"this; iTerm2 and Ghostty do not, and {TRANSCRIPT_FILENAME} always works.",
+            f"the whole log — {len(self._transcript):,} lines, {len(text):,} characters — "
+            "sent to the clipboard. macOS Terminal discards OSC 52 where iTerm2 and Ghostty "
+            f"honor it, so if nothing pastes, read {self._log_destination()}.",
             title="copy",
         )
+
+    def _log_destination(self) -> Path:
+        """Where `run.log` is, or is going to be. Named, because "beside the bundle" is
+        not an answer when the bundle does not exist yet."""
+        directory = self.outcome[1] if self.outcome is not None else self._fallback_dir()
+        return directory / TRANSCRIPT_FILENAME
+
+    def _fallback_dir(self) -> Path:
+        """Where the log goes when there is no finished bundle to sit beside.
+
+        `emit_okf` creates the bundle directory, so every run that failed before it —
+        the runs whose logs are worth the most — had nowhere to write. This is the
+        folder `-o` asked for, which is where someone will look for it.
+
+        A settings failure is swallowed rather than raised. Config failures are loud
+        everywhere else in this package; here, loud would replace the error the user is
+        trying to read with a different one.
+        """
+        from okf_loremaster.config import load_settings
+
+        settings = self._settings
+        if settings is None:
+            with suppress(Exception):
+                settings = load_settings()
+        if settings is None:
+            return Path(self._options.out or ".")
+        out = self._options.out
+        return settings.resolve_output(out) if out is not None else settings.output_dir
 
     # --- quitting ----------------------------------------------------------
 
@@ -523,21 +555,25 @@ class LoremasterApp(App[None]):
         # already scrolled past.
         self._transcript.append(line)
 
-    def _save_transcript(self, directory: Path) -> None:
-        """The log pane, as plain text, beside the bundle it describes.
-
-        No color and no markup: this is written to be pasted somewhere else.
-        """
+    def _transcript_text(self) -> str:
+        """The log pane as plain text. No color and no markup: this gets pasted."""
         buffer = io.StringIO()
         Console(file=buffer, width=100, no_color=True, force_terminal=False).print(
             *self._transcript,
             Text.from_markup(self._meter()),
             sep="\n",
         )
+        return buffer.getvalue()
+
+    def _save_transcript(self, directory: Path) -> None:
+        """The log pane, as plain text, beside the bundle it describes."""
         # A run whose output is on disk is not a failure because its transcript could not
         # be. The lines are still on screen either way.
         with suppress(OSError):
-            (directory / TRANSCRIPT_FILENAME).write_text(buffer.getvalue(), encoding="utf-8")
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / TRANSCRIPT_FILENAME).write_text(
+                self._transcript_text(), encoding="utf-8"
+            )
 
     def _refresh_nodes(self) -> None:
         table = Table.grid(padding=(0, 1))
