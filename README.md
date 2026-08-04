@@ -111,6 +111,24 @@ weighing an abstract-derived claim like a full-text one.
 
 Every stage below is a step inside `build`. There is nothing to run by hand.
 
+Stages that need a model reach for one of three tiers, marked in the diagram in capitals. The tiers
+are named for the job, not for a vendor: you bind each to whatever model you like in `.env`, and
+nothing in the code names a provider.
+
+- **FAST** — screening, and nothing else. One call per pooled paper makes this the highest-volume
+  tier by a wide margin, so it wants the cheapest model that can follow a rubric. The judgment is
+  deliberately narrow — keep or drop this abstract, and which topic it belongs to — and a wrong
+  call is recoverable, because curation sees the whole kept set afterward.
+- **BALANCED** — planning the queries, curating, and reading the papers. Reading is where a run's
+  money goes: one call per kept paper, so two hundred of them against every other stage's handful.
+  It sits on the middle tier rather than the top one because what keeps an extraction honest is
+  code, not model size — every number is checked back against the paper's own text and every quote
+  is sliced out of it, so a number the paper does not contain is stripped no matter which model
+  wrote it.
+- **REASONING** — the charter, once. Every later stage inherits it, so a wrong population or a
+  badly drawn set of topics costs the whole run, and no downstream check will catch either. It is
+  a single call, which makes the most capable model you have also the cheapest place to spend.
+
 **Yellow is a decision made by a language model. Gray is ordinary code. Dashed blue only runs when
 you ask for it** — the two pauses need `--interactive`, the sign-off needs `--review`. The green
 cylinder is the extraction cache: a run you resume, or repeat, pays nothing for a paper it has
@@ -185,15 +203,6 @@ after it, and it is written to `charter.yaml` so you can read it, edit it, and r
 query no earlier round has already run, the search repeats for that topic alone. Both conditions
 matter: without the second, a topic that is thin because the literature is thin would re-run the
 same searches, arrive at the same shortfall, and have paid twice for it.
-
-Three model tiers, set in `.env`: **FAST** screens abstracts, **BALANCED** plans queries, curates,
-and reads the papers, **REASONING** writes the charter.
-
-Reading the papers is the expensive part — one call each, so two hundred of them against every
-other stage's handful — which is why it sits on the middle tier rather than the top one. What keeps
-it honest is code, not model tier: every number is checked back against the paper's own text and
-every quote is sliced out of it. A number the paper does not contain is removed no matter which
-model wrote it.
 
 ---
 
