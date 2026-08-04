@@ -3,7 +3,7 @@
 One reasoning-tier call, and the most consequential one in the graph — everything downstream is
 scoped by what it decides. Three paths reach the same place:
 
-- `--charter charter.yaml` supplies one, and no model is called at all.
+- a caller-supplied charter short-circuits it, and no model is called at all.
 - A dry run without a charter builds a skeleton from the prompt alone, so that
   `--dry-run` can still plan real queries against real hit counts without spending
   anything. The skeleton has no taxonomy, and says so.
@@ -35,7 +35,6 @@ NODE = "charter"
 
 async def charter_node(state: RunState, deps: Deps) -> dict[str, Any]:
     prompt = state.get("prompt", "")
-    override = list(state.get("vocab_override") or [])
     warnings = list(state.get("warnings") or [])
 
     with span(deps, NODE) as report:
@@ -48,24 +47,21 @@ async def charter_node(state: RunState, deps: Deps) -> dict[str, Any]:
             source = "skeleton"
             note = (
                 "no charter and no model calls allowed, so this run has no topic taxonomy; "
-                "pass --charter charter.yaml to plan the real queries"
+                "run without --dry-run to plan the real queries"
             )
             warnings.append(note)
             deps.warn(NODE, note)
         else:
-            charter = await _draft(deps, prompt, override)
+            charter = await _draft(deps, prompt)
             source = "drafted"
 
-        charter = _apply_overrides(charter, prompt=prompt, override=override, deps=deps)
+        charter = _apply_overrides(charter, prompt=prompt, deps=deps)
 
         for problem in charter.problems():
             warnings.append(problem)
             deps.warn(NODE, problem)
 
-        report["summary"] = (
-            f"{source}: {len(charter.topic_taxonomy)} topics, "
-            f"{len(charter.vocabularies)} vocabularies"
-        )
+        report["summary"] = f"{source}: {len(charter.topic_taxonomy)} topics"
 
     return {"charter": charter, "warnings": warnings}
 
@@ -83,7 +79,7 @@ def _skeleton(prompt: str) -> Charter:
     return Charter(prompt=prompt, task=prompt)
 
 
-async def _draft(deps: Deps, prompt: str, override: list[str]) -> Charter:
+async def _draft(deps: Deps, prompt: str) -> Charter:
     """One reasoning-tier call, plus at most one repair attempt.
 
     The repair exists because a charter is expensive to lose: the reply is long, and a
@@ -93,7 +89,7 @@ async def _draft(deps: Deps, prompt: str, override: list[str]) -> Charter:
     assert deps.router is not None  # guarded by the caller; a dry run never gets here
     messages = [
         {"role": "system", "content": CHARTER_SYSTEM},
-        {"role": "user", "content": charter_user(prompt, vocab_override=override)},
+        {"role": "user", "content": charter_user(prompt)},
     ]
     result = await deps.router.complete(
         Role.REASONING,
@@ -132,19 +128,10 @@ def _parse(text: str, *, prompt: str) -> Charter:
 # --- overrides that apply on every path -------------------------------------
 
 
-def _apply_overrides(
-    charter: Charter, *, prompt: str, override: list[str], deps: Deps
-) -> Charter:
-    """Settle the fields the user, not the model, has the last word on.
-
-    `--vocab` wins outright. It is the escape hatch for the one charter field that
-    fails silently, so it has to beat a model that ignored the instruction as surely as
-    one that was never given it.
-    """
+def _apply_overrides(charter: Charter, *, prompt: str, deps: Deps) -> Charter:
+    """Settle the fields config, not the model, has the last word on."""
     updated = charter.model_copy(deep=True)
     updated.prompt = prompt or updated.prompt
-    if override:
-        updated.vocabularies = list(override)
     updated.target_papers = deps.target_papers
     updated.topic_min = deps.topic_min
     updated.topic_max = deps.topic_max
@@ -152,8 +139,7 @@ def _apply_overrides(
         updated.generated_by = _generated_by(deps)
     if updated.generated_at is None:
         updated.generated_at = datetime.now(UTC)
-    # Revalidate: the assignments above bypass field validators, and `vocabularies`
-    # needs its lowercasing and deduplication applied to whatever `--vocab` passed.
+    # Revalidate: the assignments above bypass field validators.
     return Charter.model_validate(updated.model_dump(mode="json"))
 
 

@@ -1,19 +1,16 @@
 """The charter: everything the run derives from the user's prompt, before any search.
 
-This is the only place a run learns what it is about. The topic taxonomy, the
-vocabularies, the population and the outcome are all decided here by one reasoning-tier call and
-then govern every later node — so the charter is written to disk as YAML, shown to the
-user at a confirmation pause, and editable by hand before the build proceeds.
+This is the only place a run learns what it is about. The topic taxonomy, the population
+and the outcome are all decided here by one reasoning-tier call and then govern every
+later node — so the charter is written to disk as YAML, shown to the user at a
+confirmation pause, and editable by hand before the build proceeds.
 
-`vocabularies` is the field that fails silently. It gates what every extraction is
-allowed to record, it is chosen before a single paper has been read, and a key that is
-missing here produces files that are merely thinner rather than obviously wrong. Three
-things guard it: it is printed at the charter pause, `--vocab` overrides it, and
-whatever an extraction wanted to record under an unlisted key survives in
-`unmapped_vocab` for `validate` to report.
+There is deliberately no list of coding systems here. An extraction records whatever
+vocabulary the paper itself used, so nothing has to be guessed in advance — see
+`schemas/concept.VocabularyHint`.
 
-Nothing in this module names a condition, a specialty, or a coding system. Every such
-value arrives at runtime from the model that read the prompt.
+Nothing in this module names a condition, a specialty, or a cohort. Every such value
+arrives at runtime from the model that read the prompt.
 """
 
 from __future__ import annotations
@@ -78,9 +75,6 @@ class Charter(Model):
     exclusion: list[str] = Field(default_factory=list)
 
     topic_taxonomy: list[Topic] = Field(default_factory=list)
-    # Runtime-keyed. Whatever coding systems the charter judges relevant, lowercased;
-    # never a list this package chose.
-    vocabularies: list[str] = Field(default_factory=list)
 
     # PubMed language codes. A filter, not a judgment about what is worth reading.
     languages: list[str] = Field(default_factory=lambda: ["eng"])
@@ -94,21 +88,6 @@ class Charter(Model):
     generated_at: datetime | None = None
 
     # --- validation --------------------------------------------------------
-
-    @field_validator("vocabularies", mode="after")
-    @classmethod
-    def _normalize_vocabularies(cls, value: list[str]) -> list[str]:
-        """Lowercase, strip, drop blanks, dedupe — order preserved.
-
-        Keys are matched against extraction output, so `ICD10` and `icd10` arriving as
-        two different vocabularies would split one column in half.
-        """
-        seen: dict[str, None] = {}
-        for raw in value:
-            key = raw.strip().lower()
-            if key:
-                seen.setdefault(key, None)
-        return list(seen)
 
     @field_validator("languages", mode="after")
     @classmethod
@@ -157,11 +136,6 @@ class Charter(Model):
         if len(self.topic_taxonomy) > MAX_TOPICS:
             issues.append(
                 f"{len(self.topic_taxonomy)} topics exceeds the browsable maximum of {MAX_TOPICS}"
-            )
-        if not self.vocabularies:
-            issues.append(
-                "no vocabularies — extractions will record no coding hints at all; "
-                "pass --vocab to set them explicitly"
             )
         floor, ceiling = self.capacity()
         if self.topic_taxonomy and self.target_papers > ceiling:

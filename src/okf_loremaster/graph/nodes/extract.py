@@ -94,7 +94,6 @@ async def _extract_all(
             outcome=charter.outcome,
             topic=slug,
             scope=_scope(charter, slug),
-            vocabularies=list(charter.vocabularies),
         )
         for slug in {slug for slug, _ in todo}
     }

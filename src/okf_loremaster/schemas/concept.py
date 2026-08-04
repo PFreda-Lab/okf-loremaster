@@ -12,10 +12,10 @@ prompt instruction that is ignored produces a file that looks fine:
 - **`null_findings` is never empty.** A validator inserts a `none reported` row. A
   missing section and a section reporting nothing are different claims, and the second
   one is evidence.
-- **Vocabulary keys are whatever the charter said they are.** `partition_vocabulary`
-  splits an extraction's hints against the charter's list; anything else lands in
-  `unmapped_vocab`, which never reaches frontmatter and is instead aggregated by
-  `validate`, where a systematically missing key becomes visible.
+- **A code is never recorded on its own.** A `VocabularyHint` is a concept the paper
+  named, and the codes it gave for that same concept hang off it. A bare code with no
+  concept beside it is unusable to a reader that thinks in English, so the model
+  cannot produce one.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from okf_loremaster.schemas.common import (
     Confidence,
@@ -49,13 +49,14 @@ from okf_loremaster.schemas.limits import (
 
 __all__ = [
     "NONE_REPORTED",
+    "CodedAs",
     "ConceptRecord",
     "Extraction",
     "NullFinding",
     "PredictorRow",
     "SourceRef",
     "Verification",
-    "partition_vocabulary",
+    "VocabularyHint",
 ]
 
 # The sentinel that makes "nothing null was reported" a statement rather than a gap.
@@ -151,6 +152,57 @@ class NullFinding(Model):
         return self.predictor.strip().lower() == NONE_REPORTED
 
 
+class CodedAs(Model):
+    """One code a paper gave, and the system it belongs to.
+
+    `system` is lowercased and stripped of punctuation so `ICD-10`, `icd 10` and
+    `icd10` are one system rather than three — a model naming the same standard three
+    ways would otherwise split one column of a downstream match into thirds.
+
+    Nothing here restricts which systems are sayable. Whatever the paper used is what
+    gets written down; this package does not hold a list of approved standards.
+    """
+
+    system: str = Field(min_length=1)
+    code: str = Field(min_length=1)
+
+    @field_validator("system", mode="after")
+    @classmethod
+    def _canonical_system(cls, value: str) -> str:
+        return "".join(ch for ch in value.lower() if ch.isalnum())
+
+    @field_validator("code", mode="after")
+    @classmethod
+    def _tidy_code(cls, value: str) -> str:
+        return value.strip()
+
+
+class VocabularyHint(Model):
+    """A variable the paper names, plus any codes it gave for that same variable.
+
+    The concept leads because a reader thinks in English by preference and in codes by
+    capability. Codes are optional and usually absent: most papers name a variable and
+    never code it, and `codes: []` is the honest record of that, not a gap.
+    """
+
+    # The paper's own words for the variable.
+    concept: str = Field(min_length=1)
+    codes: list[CodedAs] = Field(default_factory=list)
+
+    @field_validator("concept", mode="after")
+    @classmethod
+    def _tidy_concept(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("codes", mode="after")
+    @classmethod
+    def _dedupe_codes(cls, value: list[CodedAs]) -> list[CodedAs]:
+        seen: dict[tuple[str, str], CodedAs] = {}
+        for entry in value:
+            seen.setdefault((entry.system, entry.code), entry)
+        return list(seen.values())
+
+
 class Extraction(Model):
     """Everything a model decided about one paper. No bibliographic data."""
 
@@ -170,8 +222,9 @@ class Extraction(Model):
     predictors: list[PredictorRow] = Field(default_factory=list)
     null_findings: list[NullFinding] = Field(default_factory=list)
 
-    # Keys are charter-supplied at runtime. Never a fixed set in this package.
-    vocabulary_hints: dict[str, list[str]] = Field(default_factory=dict)
+    # What the paper calls its variables, and whatever codes it gave for them. Free
+    # text and free systems — nothing in this package decides which are allowed.
+    vocabulary_hints: list[VocabularyHint] = Field(default_factory=list)
 
     caveats: str = ""
     tags: list[str] = Field(default_factory=list)
@@ -262,35 +315,6 @@ class Extraction(Model):
         return trimmed, warnings
 
 
-def partition_vocabulary(
-    hints: dict[str, list[str]], allowed: list[str] | tuple[str, ...]
-) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-    """Split extraction hints into (recognized, unmapped) against the charter's keys.
-
-    Keys are matched case-insensitively after stripping, because a model asked for
-    `icd10` will sometimes answer `ICD-10`. Values are deduped with order preserved.
-
-    An unmapped key is not an error. It is the signal that the charter's vocabulary
-    list was incomplete — one call made before any paper was read — and `validate`
-    turns a key that keeps recurring into a concrete rerun command.
-    """
-    permitted = {key.strip().lower(): key.strip().lower() for key in allowed}
-    recognized: dict[str, list[str]] = {}
-    unmapped: dict[str, list[str]] = {}
-
-    for raw_key, values in hints.items():
-        key = raw_key.strip().lower().replace("-", "")
-        canonical = permitted.get(raw_key.strip().lower()) or permitted.get(key)
-        target = recognized if canonical else unmapped
-        name = canonical or raw_key.strip().lower()
-        bucket = target.setdefault(name, [])
-        for value in values:
-            cleaned = value.strip()
-            if cleaned and cleaned not in bucket:
-                bucket.append(cleaned)
-    return recognized, unmapped
-
-
 class SourceRef(Model):
     """An OKF `sources` entry — where this document's content came from."""
 
@@ -334,9 +358,6 @@ class ConceptRecord(Model):
 
     # --- decided by a model ---
     extraction: Extraction
-
-    # Recorded but never written to frontmatter; `validate` aggregates it.
-    unmapped_vocab: dict[str, list[str]] = Field(default_factory=dict)
 
     # --- provenance ---
     generated_by: str = ""

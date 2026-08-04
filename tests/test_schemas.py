@@ -20,6 +20,7 @@ from okf_loremaster.schemas import (
     NONE_REPORTED,
     Candidate,
     Charter,
+    CodedAs,
     ConceptRecord,
     Confidence,
     CostSummary,
@@ -36,8 +37,8 @@ from okf_loremaster.schemas import (
     TextBasis,
     Topic,
     TopicGap,
+    VocabularyHint,
     is_export_safe,
-    partition_vocabulary,
     slugify,
 )
 from okf_loremaster.schemas.limits import sentences, truncate_chars
@@ -52,7 +53,6 @@ def a_charter(**overrides: object) -> Charter:
     base: dict[str, object] = {
         "prompt": "build a bundle",
         "topic_taxonomy": [a_topic(), a_topic("outcome-definition")],
-        "vocabularies": ["vocab-a", "vocab-b"],
     }
     base.update(overrides)
     return Charter.model_validate(base)
@@ -108,38 +108,57 @@ def test_real_null_findings_are_kept_and_recognized() -> None:
     assert not extraction.null_findings[0].is_sentinel
 
 
-# --- vocabulary: runtime-keyed, with an escape hatch -----------------------
+# --- vocabulary hints: a concept, and whatever the paper coded it as -------
 
 
-def test_vocabulary_keys_are_matched_against_the_charter_not_a_fixed_list() -> None:
-    recognized, unmapped = partition_vocabulary(
-        {"vocab-a": ["one", "two"], "somethingelse": ["three"]},
-        ["vocab-a", "vocab-b"],
-    )
-    assert recognized == {"vocab-a": ["one", "two"]}
-    assert unmapped == {"somethingelse": ["three"]}
+def test_a_hint_keeps_its_codes_attached_to_the_concept_they_belong_to() -> None:
+    """The whole point of the shape.
 
-
-def test_vocabulary_keys_tolerate_case_and_hyphens_from_the_model() -> None:
-    """A model asked for `vocaba` answers `Vocab-A` often enough to matter."""
-    recognized, unmapped = partition_vocabulary({"Vocab-A": ["x"]}, ["vocaba"])
-    assert recognized == {"vocaba": ["x"]}
-    assert unmapped == {}
-
-
-def test_vocabulary_values_are_deduped_with_order_preserved() -> None:
-    recognized, _ = partition_vocabulary({"k": ["b", "a", " b ", ""]}, ["k"])
-    assert recognized == {"k": ["b", "a"]}
-
-
-def test_an_unmapped_key_is_kept_rather_than_dropped() -> None:
-    """The escape hatch: `validate` reports these, and a recurring one names a gap.
-
-    Dropping them would hide the only evidence that the charter's one pre-search
-    vocabulary call missed something.
+    Parallel lists of concepts and codes would leave a reader guessing which code went
+    with which variable; here the association is the data structure.
     """
-    _, unmapped = partition_vocabulary({"unlisted": ["value"]}, [])
-    assert unmapped == {"unlisted": ["value"]}
+    hint = VocabularyHint(
+        concept="type 2 diabetes",
+        codes=[CodedAs(system="icd10", code="E11.9"), CodedAs(system="snomed", code="44054006")],
+    )
+    assert hint.concept == "type 2 diabetes"
+    assert [(c.system, c.code) for c in hint.codes] == [
+        ("icd10", "E11.9"),
+        ("snomed", "44054006"),
+    ]
+
+
+def test_a_concept_with_no_codes_is_normal_rather_than_invalid() -> None:
+    """Most papers name their variables and code none of them."""
+    assert VocabularyHint(concept="frailty").codes == []
+
+
+def test_a_system_name_is_canonical_however_the_model_spelled_it() -> None:
+    """`ICD-10`, `icd 10` and `icd10` are one system, not three."""
+    spellings = ["ICD-10", "icd 10", "icd10", "ICD10"]
+    assert {CodedAs(system=s, code="E11.9").system for s in spellings} == {"icd10"}
+
+
+def test_a_code_repeated_under_one_concept_is_recorded_once() -> None:
+    hint = VocabularyHint(
+        concept="hba1c",
+        codes=[
+            CodedAs(system="loinc", code="4548-4"),
+            CodedAs(system="LOINC", code="4548-4"),
+            CodedAs(system="loinc", code="17856-6"),
+        ],
+    )
+    assert [c.code for c in hint.codes] == ["4548-4", "17856-6"]
+
+
+def test_a_code_cannot_be_recorded_without_a_concept_beside_it() -> None:
+    """A bare code is unusable to a reader that thinks in English.
+
+    Enforced by the schema rather than asked for in a prompt, because an extraction
+    that answered with codes alone would otherwise produce a file that looks complete.
+    """
+    with pytest.raises(ValidationError):
+        VocabularyHint(concept="", codes=[CodedAs(system="icd10", code="E11.9")])
 
 
 # --- length budgets: truncate and warn --------------------------------------
@@ -365,9 +384,8 @@ def test_extraction_and_provenance_stay_separable() -> None:
 # --- charter ---------------------------------------------------------------
 
 
-def test_vocabularies_are_lowercased_and_deduped() -> None:
-    charter = a_charter(vocabularies=["Vocab-A", " vocab-a ", "VOCAB-B", ""])
-    assert charter.vocabularies == ["vocab-a", "vocab-b"]
+def test_languages_are_lowercased_and_stripped() -> None:
+    assert a_charter(languages=[" ENG ", "fre", ""]).languages == ["eng", "fre"]
 
 
 def test_duplicate_topic_slugs_are_rejected() -> None:
@@ -393,7 +411,7 @@ def test_a_charter_round_trips_through_yaml() -> None:
 def test_charter_yaml_keeps_declaration_order() -> None:
     lines = a_charter().to_yaml().splitlines()
     keys = [line.split(":")[0] for line in lines if line and not line.startswith((" ", "-"))]
-    assert keys.index("prompt") < keys.index("topic_taxonomy") < keys.index("vocabularies")
+    assert keys.index("prompt") < keys.index("topic_taxonomy") < keys.index("languages")
     assert keys.index("topic_min") < keys.index("topic_max")
 
 
@@ -404,13 +422,6 @@ def test_the_charter_digest_ignores_when_it_was_generated() -> None:
     assert first.digest() == second.digest()
 
     assert a_charter(target_papers=42).digest() != first.digest()
-
-
-def test_a_charter_with_no_vocabularies_says_so_at_the_pause() -> None:
-    """The field that fails silently, made loud at the one moment a human is looking."""
-    problems = a_charter(vocabularies=[]).problems()
-    assert any("vocabular" in p for p in problems)
-    assert any("--vocab" in p for p in problems)
 
 
 def test_a_target_the_taxonomy_cannot_hold_is_reported() -> None:
@@ -632,7 +643,7 @@ def test_a_nested_extraction_reply_parses_end_to_end() -> None:
          "confidence": "high"}
       ],
       "null_findings": [],
-      "vocabulary_hints": {"vocab-a": ["code"]}
+      "vocabulary_hints": [{"concept": "a variable", "codes": []}]
     }
     ```"""
     extraction = parse_model(reply, Extraction)

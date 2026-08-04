@@ -2,7 +2,7 @@
 
 The index is built by **walking the bundle on disk**, never by extracting a second time
 and never from the run state. That is what makes `okf-loremaster index <bundle>` a year
-later produce the same store as `build --index` did on the day, and it means there is
+later produce the same store as the run did on the day, and it means there is
 exactly one description of a paper in existence rather than two that can disagree.
 
 Five choices here are load-bearing:

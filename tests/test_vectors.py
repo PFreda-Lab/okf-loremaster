@@ -16,7 +16,6 @@ reach the network — which is also the reason `Embedder` is a protocol injected
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -36,7 +35,13 @@ from okf_loremaster.emitters.vectors import (
     chunks_for,
     index_descriptor,
 )
-from okf_loremaster.okf.layout import DESCRIPTOR_FILENAME, vector_store_path
+from okf_loremaster.finalize import Finalize
+from okf_loremaster.okf.layout import (
+    DESCRIPTOR_FILENAME,
+    OKF_DIRNAME,
+    VECTORS_DIRNAME,
+    vector_store_path,
+)
 from okf_loremaster.okf.reader import markdown_table, read_bundle
 from okf_loremaster.okf.validate import Severity, validate_bundle
 
@@ -322,11 +327,17 @@ async def test_the_store_is_a_sibling_of_the_bundle_and_not_a_topic_inside_it(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`read_bundle` treats every directory at the root as a topic. An index inside would
-    validate as a topic holding no papers, forever."""
+    validate as a topic holding no papers, forever.
+
+    Sibling rather than nested also makes the run folder the unit that moves: `okf/`
+    and `vectors/` travel together under one `cp -r`, and either can be attached
+    downstream on its own.
+    """
     bundle, _, result = await indexed(settings_factory, tmp_path, monkeypatch)
 
     assert result.path.parent == bundle.parent
-    assert result.path.name == f"{bundle.name}.chroma"
+    assert result.path.name == VECTORS_DIRNAME
+    assert bundle.name == OKF_DIRNAME
     assert bundle not in result.path.parents
     assert result.path.name not in {topic.slug for topic in read_bundle(bundle).topics}
 
@@ -447,7 +458,7 @@ async def test_a_run_with_index_records_the_resolved_model_in_its_manifest(
     stub = StubEmbedder()
     monkeypatch.setattr("okf_loremaster.run.embedder", lambda settings: stub)
 
-    run = await full_run(settings_factory, tmp_path, monkeypatch, index=True)
+    run = await full_run(settings_factory, tmp_path, monkeypatch, finalize=Finalize.BOTH)
     bundle = Path(run.state["bundle"])
 
     assert run.state["vector_index"] == str(vector_store_path(bundle))
@@ -476,45 +487,12 @@ async def test_a_run_without_index_writes_no_store_and_says_nothing_about_one(
 # --- the command ------------------------------------------------------------
 
 
-def test_index_builds_a_store_from_a_bundle_that_already_exists(
-    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The route for a bundle somebody else built, or one edited by hand afterward.
-
-    Synchronous on purpose: the command calls `asyncio.run`, which raises inside a loop
-    that is already running — so the run that produces the bundle gets its own.
-    """
-    pytest.importorskip("chromadb")
-    bundle = asyncio.run(golden(settings_factory, tmp_path, monkeypatch))
-    monkeypatch.setattr("okf_loremaster.run.embedder", lambda settings: StubEmbedder())
-
-    result = runner.invoke(app, ["index", str(bundle)])
-
-    assert result.exit_code == 0, result.output
-    assert vector_store_path(bundle).is_dir()
-    assert DISTANCE in result.output
-    # The caveat a metadata filter has to know about is printed where it will be read.
-    assert "chunk_level" in result.output
-
-
-def test_index_says_a_bundle_is_missing_rather_than_writing_an_empty_store(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("okf_loremaster.run.embedder", lambda settings: StubEmbedder())
-
-    result = runner.invoke(app, ["index", str(tmp_path / "not-a-bundle")])
-
-    assert result.exit_code == 1
-    assert "not-a-bundle" in result.output
-    assert not (tmp_path / "not-a-bundle.chroma").exists()
-
-
 def test_the_missing_extra_is_named_before_a_run_starts_rather_than_after_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`--index` is checked at assembly, not at the last node. Otherwise a run that took
-    an hour would reach the end and only then discover it cannot do the thing it was
-    asked for."""
+    """The missing extra is named at assembly, not at the last node. Otherwise a run
+    that took an hour would reach the end and only then discover it cannot do the thing
+    it was asked for."""
     from okf_loremaster.config import ConfigError
     from okf_loremaster.run import embedder
 
@@ -524,9 +502,11 @@ def test_the_missing_extra_is_named_before_a_run_starts_rather_than_after_it(
         embedder(object())  # type: ignore[arg-type]
 
 
-def test_index_is_refused_on_a_dry_run_rather_than_ignored(tmp_path: Path) -> None:
-    """A dry run writes no bundle, and the index is built by reading one back."""
-    result = runner.invoke(app, ["build", "a prompt", "--index", "--dry-run"])
+def test_choosing_what_to_keep_is_refused_on_a_dry_run_rather_than_ignored(
+    tmp_path: Path,
+) -> None:
+    """A dry run writes nothing, so there is nothing for `--finalize` to keep."""
+    result = runner.invoke(app, ["build", "a prompt", "--finalize", "both", "--dry-run"])
 
     assert result.exit_code == 1
-    assert "--index cannot be combined with --dry-run" in result.output
+    assert "--finalize cannot be combined with --dry-run" in result.output

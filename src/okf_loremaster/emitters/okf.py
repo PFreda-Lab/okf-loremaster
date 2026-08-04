@@ -396,13 +396,26 @@ def _null_quotes(findings: Sequence[NullFinding]) -> list[tuple[int, str]]:
 
 
 def _vocabulary(extraction: Extraction) -> str:
-    hints = {key: values for key, values in extraction.vocabulary_hints.items() if values}
+    """`# Vocabulary hints` — each variable the paper named, then how it coded it.
+
+    The concept leads and the codes follow on the same line, because the two belong to
+    one variable: a reader matching on English finds it at the front, and one that can
+    match on a code finds the code attached to the name rather than in a separate list
+    it would have to re-associate by guessing.
+
+    A concept with no codes is written plainly, with nothing after it. Most papers name
+    their variables without ever coding them, and a trailing empty marker would make
+    the common case look like a failure.
+    """
+    hints = [hint for hint in extraction.vocabulary_hints if hint.concept]
     if not hints:
         return "None recorded."
-    return "\n".join(
-        f"- **{key}** — {', '.join(inline(value) for value in values)}"
-        for key, values in hints.items()
-    )
+    lines = []
+    for hint in hints:
+        codes = ", ".join(f"{code.system} `{code.code}`" for code in hint.codes)
+        rendered = f"- **{inline(hint.concept)}**"
+        lines.append(f"{rendered} — {codes}" if codes else rendered)
+    return "\n".join(lines)
 
 
 # --- indexes ----------------------------------------------------------------
@@ -507,7 +520,6 @@ def root_index(
         [
             ("Population", charter.population),
             ("Outcome", charter.outcome),
-            ("Vocabularies", ", ".join(charter.vocabularies) or "none"),
             ("Languages", ", ".join(charter.languages) or "any"),
             ("Target", f"{charter.target_papers} papers, {charter.topic_min}"
                        f"-{charter.topic_max} per topic"),
@@ -669,12 +681,7 @@ def descriptor(
 
 
 def catalog_row(record: ConceptRecord) -> dict[str, Any]:
-    """One `_catalog.jsonl` line.
-
-    `unmapped_vocab` rides along because it is the only place it survives — it is
-    deliberately never in frontmatter — and because `validate` reads the catalog rather
-    than the run state, so a bundle can be checked long after the run that made it.
-    """
+    """One `_catalog.jsonl` line."""
     row: dict[str, Any] = {
         "pmid": record.pmid,
         "title": record.title,
@@ -685,9 +692,6 @@ def catalog_row(record: ConceptRecord) -> dict[str, Any]:
         "n": record.extraction.n,
         "tags": list(record.extraction.tags),
     }
-    if record.unmapped_vocab:
-        row["unmapped_vocab"] = {key: list(values)
-                                 for key, values in record.unmapped_vocab.items()}
     return row
 
 

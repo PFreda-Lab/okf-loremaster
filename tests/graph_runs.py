@@ -65,7 +65,6 @@ def charter_for(**overrides: Any) -> Charter:
             Topic(slug=topic, title=topic.title(), scope=f"the {topic} facet", seed_terms=[topic])
             for topic in TOPICS
         ],
-        vocabularies=["icd10"],
         target_papers=TARGET,
         topic_min=TOPIC_MIN,
         topic_max=TOPIC_MAX,

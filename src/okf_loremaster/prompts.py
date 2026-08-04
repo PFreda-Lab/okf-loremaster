@@ -59,8 +59,6 @@ name.
    - `scope`: one line saying what belongs here and what does not.
    - `seed_terms`: 3-6 concepts a literature search for this topic would use. Concepts, \
 not query syntax — no field tags, no boolean operators, no quotation marks.
-6. `vocabularies` — the coding or classification systems in which findings from this \
-literature would be recorded, lowercased, as bare keys.
 
 Before you divide anything, list out the distinct ways the outcome could actually vary — \
 the separate mechanisms, exposures, and circumstances that researchers have proposed as \
@@ -82,28 +80,13 @@ On the taxonomy: divide by the kind of evidence a reader would go looking for, n
 publication type or study design. A topic that would hold two papers is not a topic; a \
 topic that would hold half the corpus is two topics.
 
-On `vocabularies`: this list is the one thing here that fails silently. It is chosen \
-before any paper has been read and it decides what every later extraction is permitted \
-to record, so a system you leave out produces files that look complete and are merely \
-thinner. Include any system the findings could plausibly be coded in, including ones \
-only some papers would use. Being wrong by including one costs an unused column. Being \
-wrong by omitting one costs data that is never recovered.
-
 Do not invent a scope the request did not ask for, and do not narrow one it did.\
 """
 
 
-def charter_user(prompt: str, *, vocab_override: list[str] | None = None) -> str:
-    """The charter request. `vocab_override` comes from `--vocab`, when given."""
-    lines = ["Request:", "", prompt.strip()]
-    if vocab_override:
-        lines += [
-            "",
-            "The vocabularies have already been decided and are not yours to change. "
-            "Use exactly this list, verbatim, in `vocabularies`:",
-            ", ".join(vocab_override),
-        ]
-    return "\n".join(lines)
+def charter_user(prompt: str) -> str:
+    """The charter request: the user's words, unedited."""
+    return "\n".join(["Request:", "", prompt.strip()])
 
 
 QUERY_PLAN_SYSTEM = """\
@@ -319,9 +302,12 @@ specifically.
 This is as valuable as the section above it and is almost always shorter than it should \
 be, because a result that did not hold is easy to read past. If the paper truly reports \
 none, return one row with `predictor` set to "none reported".
-  - `vocabulary_hints`: an object whose keys are exactly the vocabulary keys listed \
-below, and whose values are codes or terms this paper uses that belong under each key. \
-Omit a key rather than inventing a value for it.
+  - `vocabulary_hints`: one entry per variable this paper names, so a reader can find \
+the same variable in their own data. Each entry has a `concept` — the paper's own words \
+for it — and `codes`, a list of the codes this paper gives for that same concept, each \
+with the `system` it comes from and the `code` itself. Most papers name variables and \
+never code them: leave `codes` empty rather than looking a code up or guessing one. \
+Record a code only where the paper prints it.
   - `caveats`: at most three sentences on what would make this evidence weaker than it \
 looks.
   - `tags`: a handful of short topic terms.
@@ -366,7 +352,6 @@ def extract_context(
     outcome: str,
     topic: str,
     scope: str,
-    vocabularies: list[str],
 ) -> str:
     """The review's terms, prefixed to every extraction call on one topic.
 
@@ -374,9 +359,8 @@ def extract_context(
     `screen_context`: papers on a topic are extracted back to back, so a byte-identical
     prefix across them is the shape a provider's prompt cache can charge once for.
 
-    `vocabularies` is the charter's list and nothing else. It is the only place this
-    package says what a vocabulary key may be, which is what keeps the extractor from
-    inventing a taxonomy per paper.
+    Nothing here names a coding system. An extraction records whatever vocabulary its
+    paper used, so there is no list to agree on and none to get wrong in advance.
     """
     lines = [f"Review question: {task}"]
     if outcome:
@@ -387,10 +371,6 @@ def extract_context(
         f"Scope: {scope or 'no scope given'}",
         "",
     ]
-    if vocabularies:
-        lines.append(f"Vocabulary keys for `vocabulary_hints`: {', '.join(vocabularies)}")
-    else:
-        lines.append("No vocabulary keys were requested — return `vocabulary_hints` empty.")
     return "\n".join(lines)
 
 

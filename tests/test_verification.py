@@ -1,4 +1,4 @@
-"""Numbers checked against the text they were taken from.
+"""Literals checked against the text they were taken from — numbers, quotes and codes.
 
 The step 6 gate is the pair at the bottom: the same corpus read twice, once by an
 extractor that copies its numbers out of the paper and once by one that invents a single
@@ -20,7 +20,14 @@ from typing import Any
 
 import pytest
 
-from okf_loremaster.schemas import Confidence, Extraction, NullFinding, PredictorRow
+from okf_loremaster.schemas import (
+    CodedAs,
+    Confidence,
+    Extraction,
+    NullFinding,
+    PredictorRow,
+    VocabularyHint,
+)
 from okf_loremaster.verification import (
     EN_DASH,
     MIDDLE_DOT,
@@ -33,13 +40,24 @@ from okf_loremaster.verification import (
 )
 
 from fake_llm import supported
-from fake_ncbi import REFERENCE_ONLY, TOPICS, effect_for, finding_sentence, has_full_text
+from fake_ncbi import (
+    REFERENCE_ONLY,
+    TOPICS,
+    code_for,
+    effect_for,
+    finding_sentence,
+    has_full_text,
+)
 from graph_runs import TARGET, full_run, scripted_run
 
 # The number the fabricating extractor reports. Not in any paper, and far enough from
 # every real effect that no rounding tolerance could reach it.
 FABRICATED = 4.44
 FABRICATED_RAW = "4.44 (95% CI 3.10-6.02)"
+
+# A well-formed ICD-10 code that no paper in the corpus prints. `code_for` never produces
+# a `Z` prefix, so this cannot collide with a real one however the fixture grows.
+INVENTED_CODE = "Z99.9"
 
 
 # --- reading numbers out of prose -------------------------------------------
@@ -208,6 +226,82 @@ def test_an_extraction_with_no_source_at_all_fails_loudly_rather_than_passing() 
     assert check.effects_dropped == 1
 
 
+# --- vocabulary codes --------------------------------------------------------
+# A model asked for a condition's ICD-10 code will supply a plausible one from its own
+# memory whether or not the paper printed it, and a fabricated code is worse than a
+# fabricated effect size: it is short, well-formed, and indistinguishable from a real one.
+
+CODED = "Cases were identified by ICD-10 E11.9 and the SNOMED CT concept 44054006."
+
+
+def hint(concept: str, *codes: tuple[str, str]) -> Extraction:
+    return Extraction(
+        vocabulary_hints=[
+            VocabularyHint(
+                concept=concept,
+                codes=[CodedAs(system=system, code=code) for system, code in codes],
+            )
+        ]
+    )
+
+
+def test_a_code_the_paper_printed_survives() -> None:
+    check = verify_extraction(
+        hint("type 2 diabetes", ("ICD-10", "E11.9"), ("SNOMED", "44054006")), CODED
+    )
+
+    assert check.codes_dropped == 0
+    assert [(c.system, c.code) for c in check.extraction.vocabulary_hints[0].codes] == [
+        ("icd10", "E11.9"),
+        ("snomed", "44054006"),
+    ]
+
+
+def test_a_code_the_paper_never_printed_is_dropped_and_its_concept_kept() -> None:
+    """The concept is the part a reader was going to read. Only the code was invented."""
+    check = verify_extraction(hint("type 2 diabetes", ("ICD-10", "E10.9")), CODED)
+
+    assert check.codes_dropped == 1
+    assert check.codes_missing == (("type 2 diabetes", "icd10", "E10.9"),)
+    assert [h.concept for h in check.extraction.vocabulary_hints] == ["type 2 diabetes"]
+    assert check.extraction.vocabulary_hints[0].codes == []
+    assert not check.clean
+    assert any("E10.9 is not in the source text" in note for note in check.notes())
+
+
+def test_one_invented_code_does_not_take_a_real_one_with_it() -> None:
+    check = verify_extraction(
+        hint("type 2 diabetes", ("ICD-10", "E11.9"), ("SNOMED", "73211009")), CODED
+    )
+
+    assert check.codes_dropped == 1
+    assert [c.code for c in check.extraction.vocabulary_hints[0].codes] == ["E11.9"]
+
+
+def test_a_code_is_matched_through_the_punctuation_a_typesetter_reflows() -> None:
+    """`E11.9`, `E11·9` and `E11 9` are one code; the dot is typography, not identity."""
+    for printed in ("code E11.9 was", f"code E11{MIDDLE_DOT}9 was", "code E11 9 was"):
+        assert Source(printed).holds_code("E11.9"), printed
+
+
+def test_a_short_numeric_code_is_not_found_inside_a_longer_number() -> None:
+    """`250` is a real ICD-9 code, and an unbounded search finds it in every page range.
+
+    This is the difference between the code check and the quote check: matching a code
+    the way quotes are matched would accept almost any short code ever invented.
+    """
+    assert not Source("A cohort of 1250 adults, pages 2500-2507.").holds_code("250")
+    assert Source("classified under 250 in the registry.").holds_code("250")
+
+
+def test_a_concept_with_no_codes_passes_untouched() -> None:
+    """The normal case: most papers name a variable and never code it."""
+    check = verify_extraction(hint("clinical frailty scale score"), CODED)
+
+    assert check.codes_dropped == 0
+    assert check.clean
+
+
 # --- the step 6 gate, end to end --------------------------------------------
 
 
@@ -246,6 +340,48 @@ async def test_a_faithful_reading_survives_verification_untouched(
         row = record.extraction.predictors[0]
         assert row.effect == effect_for(record.pmid)
         assert row.quote == finding_sentence(record.pmid)
+        # The code the paper printed survives, so a check that dropped every code would
+        # fail here rather than only in the fabricating run below.
+        codes = record.extraction.vocabulary_hints[0].codes
+        assert [c.code for c in codes] == [code_for(record.pmid)]
+
+
+async def test_a_looked_up_code_the_paper_never_printed_is_caught(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same gate as the fabricated odds ratio, for the field that invites it more.
+
+    Asked for a condition's ICD-10 code, a model will supply a plausible one from memory
+    whether or not the paper printed it — and unlike a wrong number, a wrong code is
+    well-formed and unremarkable to everything downstream. The concept has to survive,
+    because the paper did name that variable.
+    """
+
+    def looking_it_up(source: str) -> dict[str, Any]:
+        reading = supported(source)
+        reading["vocabulary_hints"] = [
+            {"concept": "the exposure", "codes": [{"system": "icd10", "code": INVENTED_CODE}]}
+        ]
+        return reading
+
+    run = await full_run(
+        settings_factory, tmp_path, monkeypatch, scripted=scripted_run(extract=looking_it_up)
+    )
+
+    assert len(run.records) == TARGET
+    for record in run.records:
+        hint = record.extraction.vocabulary_hints[0]
+        assert hint.concept == "the exposure"
+        assert hint.codes == []
+
+    summary = run.state["verification"]
+    assert summary is not None
+    assert summary.codes_dropped == TARGET
+    assert summary.effects_dropped == 0  # nothing else was touched
+
+    dropped = [note for note in run.warnings if "vocabulary code" in note]
+    assert len(dropped) == 1
+    assert "concepts they were attached to were kept" in dropped[0]
 
 
 async def test_a_fabricated_odds_ratio_is_caught_and_the_run_continues(

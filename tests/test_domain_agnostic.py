@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from okf_loremaster.schemas import Charter, partition_vocabulary
+from okf_loremaster.schemas import Charter, CodedAs, VocabularyHint
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -237,18 +237,19 @@ def test_whole_token_matching_does_not_fire_on_substrings() -> None:
 # --- the invariant behind the scan ------------------------------------------
 
 
-def test_the_charter_ships_no_default_vocabularies() -> None:
-    """The one field where a helpful default would be the whole bug.
-
-    A baked-in list would work on the project it was written for and silently gate
-    every extraction on the next one.
-    """
-    assert Charter(prompt="anything").vocabularies == []
+def test_the_charter_decides_no_taxonomy_in_advance() -> None:
+    """A baked-in default would work on the project it was written for and no other."""
     assert Charter(prompt="anything").topic_taxonomy == []
 
 
-def test_vocabulary_partitioning_has_no_implicit_allowlist() -> None:
-    """With an empty charter list, everything is unmapped — nothing is known a priori."""
-    recognized, unmapped = partition_vocabulary({"icd10": ["x"], "atc": ["y"]}, [])
-    assert recognized == {}
-    assert set(unmapped) == {"icd10", "atc"}
+def test_any_coding_system_a_paper_used_can_be_recorded() -> None:
+    """There is no allowlist to be absent from.
+
+    The package holds no list of approved standards, so a hint records whatever the
+    paper printed — including a registry-specific system nobody anticipated.
+    """
+    hint = VocabularyHint(
+        concept="whatever the paper called it",
+        codes=[CodedAs(system="some-local-registry-v3", code="X-1")],
+    )
+    assert hint.codes[0].system == "somelocalregistryv3"

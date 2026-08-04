@@ -69,9 +69,6 @@ class RunState(TypedDict, total=False):
 
     # charter
     charter: Charter | None
-    # From `--vocab`. Kept in state so a resumed run applies the same override rather
-    # than whatever the environment happens to hold on the second invocation.
-    vocab_override: list[str]
 
     # search — accumulated across rounds, not replaced. The conditional re-query edge
     # comes back here, and a second round is meant to add to the corpus rather than
@@ -156,7 +153,7 @@ class Deps:
     # None unless `--review`. The review node treats that as "nobody was asked", which
     # is not the same as a decline.
     reviewer: Reviewer | None = None
-    # None unless `--index`. Injected rather than built by the node because the default
+    # None when vectors were declined. Injected rather than built by the node because the default
     # one downloads a model on first use, and the test suite never reaches the network.
     embedder: Embedder | None = None
 
@@ -193,7 +190,6 @@ def initial_state(
     *,
     dry_run: bool = False,
     charter: Charter | None = None,
-    vocab_override: list[str] | None = None,
 ) -> RunState:
     return RunState(
         run_id=run_id,
@@ -201,7 +197,6 @@ def initial_state(
         dry_run=dry_run,
         started_at=datetime.now(UTC),
         charter=charter,
-        vocab_override=list(vocab_override or []),
         warnings=[],
     )
 

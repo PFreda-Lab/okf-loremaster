@@ -38,7 +38,6 @@ def charter(**overrides: object) -> Charter:
             Topic(slug="first", title="First", scope="s", seed_terms=["alpha", "alpha timing"]),
             Topic(slug="second", title="Second", scope="s", seed_terms=["beta"]),
         ],
-        "vocabularies": ["icd10"],
     }
     return Charter.model_validate(base | overrides)
 

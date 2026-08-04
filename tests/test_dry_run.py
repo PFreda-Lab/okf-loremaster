@@ -57,7 +57,6 @@ def charter_for(topics: tuple[str, ...] = TOPICS) -> Charter:
             Topic(slug=topic, title=topic.title(), scope=f"the {topic} facet", seed_terms=[topic])
             for topic in topics
         ],
-        vocabularies=["icd10"],
     )
 
 
@@ -266,14 +265,15 @@ async def test_the_run_is_reproducible(
 # --- what the pauses print --------------------------------------------------
 
 
-async def test_the_charter_pause_prints_the_taxonomy_and_the_vocabularies(
+async def test_the_charter_pause_prints_the_taxonomy(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The taxonomy is what the pause exists for: it is decided before any paper is
+    read, it governs every later node, and it is cheap to fix here and expensive
+    afterward."""
     run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
 
     assert "topic_taxonomy" in run.output
-    assert "vocabularies" in run.output
-    assert "--vocab" in run.output  # the override is advertised where it is needed
     for topic in TOPICS:
         assert topic in run.output
 
@@ -393,26 +393,6 @@ async def test_the_pauses_are_not_asked_on_a_dry_run(
 
 
 # --- --vocab ----------------------------------------------------------------
-
-
-async def test_vocab_overrides_the_charter_and_lands_on_disk(
-    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The escape hatch for the one charter field that fails silently."""
-    run = await dry_run(
-        settings_factory,
-        tmp_path,
-        monkeypatch,
-        charter=charter_for(),  # says icd10
-        vocab=["ICD10", "atc", "loinc"],
-    )
-
-    assert run.state["charter"].vocabularies == ["icd10", "atc", "loinc"]
-    # Written where the user was told to edit it, normalized on the way.
-    assert run.charter_yaml().vocabularies == ["icd10", "atc", "loinc"]
-    assert "atc" in run.output and "loinc" in run.output
-
-
 async def test_the_settled_charter_is_written_even_though_one_was_supplied(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

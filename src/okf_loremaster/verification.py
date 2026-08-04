@@ -1,16 +1,25 @@
-"""Checking an extraction's numbers against the text it was taken from. No model call.
+"""Checking an extraction's literals against the text it was taken from. No model call.
 
-Deterministic post-processing, not a prompt instruction. A model told to copy numbers
-exactly does so almost always, and the almost is what makes this necessary: an invented
-effect size reads exactly like a real one, and it lands in a bundle another agent will
-treat as evidence. So every number is looked for in the source text afterward, by code,
-and one that is not there is removed.
+Deterministic post-processing, not a prompt instruction. A model told to copy exactly
+does so almost always, and the almost is what makes this necessary: an invented effect
+size reads exactly like a real one, and it lands in a bundle another agent will treat as
+evidence. So everything the extraction claims to have copied — numbers, quoted sentences
+and vocabulary codes — is looked for in the source text afterward, by code, and what is
+not there is removed.
 
 Removed, not rejected. `PredictorRow.downgraded()` keeps the predictor, its
 operationalization and its timing — all of which the paper did report — and drops only
 the magnitude, lowering the row's confidence. Discarding the row would throw away good
 evidence to punish one bad field; discarding the paper would let one unsupported number
-cost a run everything else that paper said. The run continues either way.
+cost a run everything else that paper said. The run continues either way. Quotes and
+codes follow the same rule: the claim survives without the part that failed.
+
+**A code is checked the same way a number is, and for a sharper reason.** Asked for the
+ICD-10 code of a condition a paper is about, a model will supply a plausible one from its
+own memory whether or not the paper printed it — and a fabricated code is worse than a
+fabricated effect size, because it is short, well-formed, and indistinguishable from a
+real one to anything downstream. `codes: []` is documented as the normal case precisely so
+that dropping an unsupported code costs nothing.
 
 **The scope of the check is the text the extractor actually read.** That is why
 `fulltext` applies its length budget before `extract` sees anything, and why
@@ -38,7 +47,13 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from okf_loremaster.schemas import Extraction, NullFinding, PredictorRow
+from okf_loremaster.schemas import (
+    CodedAs,
+    Extraction,
+    NullFinding,
+    PredictorRow,
+    VocabularyHint,
+)
 
 __all__ = [
     "ExtractionCheck",
@@ -169,11 +184,14 @@ def normalize(text: str) -> str:
 class Source:
     """One paper's text, prepared once for every check made against it."""
 
-    __slots__ = ("_normalized", "_quantities", "text")
+    __slots__ = ("_bounded", "_normalized", "_quantities", "text")
 
     def __init__(self, text: str) -> None:
         self.text = text
         self._normalized = normalize(text)
+        # `normalize` leaves space-separated alnum tokens, so padding the whole document
+        # once turns token-boundary matching into a plain substring search.
+        self._bounded = f" {self._normalized} "
         self._quantities = quantities_in(text)
 
     @property
@@ -183,6 +201,21 @@ class Source:
     def holds_quote(self, quote: str) -> bool:
         needle = normalize(quote)
         return bool(needle) and needle in self._normalized
+
+    def holds_code(self, code: str) -> bool:
+        """Whether the source prints `code`, matched on token boundaries.
+
+        Bounded, unlike `holds_quote`, because a code is short and often all digits.
+        `250` is a real ICD-9 code, and an unbounded search finds it inside `1250`, inside
+        `2500`, and inside most page ranges in the paper — which would accept every short
+        code ever invented. A quote is long enough that the same risk does not arise.
+
+        The normalized form is what is searched, so `E11.9`, `E11·9` and `E11 9` are one
+        code. That is the same folding applied to quotes, and it matters more here: a
+        code's punctuation is exactly what a typesetter reflows.
+        """
+        needle = normalize(code)
+        return bool(needle) and f" {needle} " in self._bounded
 
     def holds(self, value: float) -> bool:
         return is_supported(Quantity.of(value), self._quantities)
@@ -234,6 +267,10 @@ class ExtractionCheck:
     rows: tuple[RowCheck, ...] = ()
     sample_size_missing: bool = False
     quotes_dropped: int = 0
+    codes_dropped: int = 0
+    # `(concept, system, code)` for each code the source did not print, so a warning can
+    # name what was invented rather than only count it.
+    codes_missing: tuple[tuple[str, str, str], ...] = ()
 
     @property
     def effects_dropped(self) -> int:
@@ -245,12 +282,20 @@ class ExtractionCheck:
 
     @property
     def clean(self) -> bool:
-        return not self.quotes_dropped and not self.sample_size_missing and all(
-            row.clean for row in self.rows
+        return (
+            not self.quotes_dropped
+            and not self.codes_dropped
+            and not self.sample_size_missing
+            and all(row.clean for row in self.rows)
         )
 
     def notes(self) -> tuple[str, ...]:
-        return tuple(row.note() for row in self.rows if not row.clean)
+        rows = tuple(row.note() for row in self.rows if not row.clean)
+        codes = tuple(
+            f"{concept!r}: {system} {code} is not in the source text"
+            for concept, system, code in self.codes_missing
+        )
+        return rows + codes
 
 
 def verify_extraction(extraction: Extraction, source_text: str) -> ExtractionCheck:
@@ -266,12 +311,14 @@ def verify_extraction(extraction: Extraction, source_text: str) -> ExtractionChe
 
     findings, quotes_dropped = _verify_findings(extraction.null_findings, source)
     quotes_dropped += sum(1 for outcome in rows if outcome.quote_missing)
+    hints, codes_missing = _verify_vocabulary(extraction.vocabulary_hints, source)
 
     sample_size_missing = extraction.n is not None and not source.holds(float(extraction.n))
     updated = extraction.model_copy(
         update={
             "predictors": verified,
             "null_findings": findings,
+            "vocabulary_hints": hints,
             "n": None if sample_size_missing else extraction.n,
         }
     )
@@ -280,6 +327,8 @@ def verify_extraction(extraction: Extraction, source_text: str) -> ExtractionChe
         rows=tuple(rows),
         sample_size_missing=sample_size_missing,
         quotes_dropped=quotes_dropped,
+        codes_dropped=len(codes_missing),
+        codes_missing=codes_missing,
     )
 
 
@@ -340,3 +389,34 @@ def _verify_findings(
         else:
             kept.append(finding)
     return kept, dropped
+
+
+def _verify_vocabulary(
+    hints: Sequence[VocabularyHint], source: Source
+) -> tuple[list[VocabularyHint], tuple[tuple[str, str, str], ...]]:
+    """Drop codes the source does not print. The concepts themselves stay.
+
+    The same shape as `_verify_findings`, and for the same reason: a concept is the
+    paper's own words for a variable, and a paraphrase of them is still evidence, while a
+    code is a literal string that either appears on the page or came from somewhere else.
+
+    A hint left with no codes is the normal case rather than a loss, which is what makes
+    dropping the safe move here. The concept is never dropped with the code: the paper did
+    name that variable, and losing it would cost a reader the one part they were going to
+    read anyway.
+    """
+    kept: list[VocabularyHint] = []
+    missing: list[tuple[str, str, str]] = []
+    for hint in hints:
+        supported: list[CodedAs] = []
+        for entry in hint.codes:
+            if source.holds_code(entry.code):
+                supported.append(entry)
+            else:
+                missing.append((hint.concept, entry.system, entry.code))
+        kept.append(
+            hint
+            if len(supported) == len(hint.codes)
+            else hint.model_copy(update={"codes": supported})
+        )
+    return kept, tuple(missing)

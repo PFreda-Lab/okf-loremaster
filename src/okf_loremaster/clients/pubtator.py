@@ -4,8 +4,8 @@ Supplies normalized biomedical entities — genes, diseases, chemicals, species 
 stable identifiers (MeSH, NCBI Gene). Used as a deterministic vocabulary signal so the
 extraction agent is not the only source of controlled terms.
 
-Note this is a *hint* source. What ends up in `vocabulary_hints` is decided against the
-charter's vocabulary keys, not by whatever PubTator happened to tag.
+Note this is a *hint* source. What ends up in `vocabulary_hints` is what the extractor
+read in the paper, not whatever PubTator happened to tag.
 """
 
 from __future__ import annotations

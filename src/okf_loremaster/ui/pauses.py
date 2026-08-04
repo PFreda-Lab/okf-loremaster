@@ -3,7 +3,7 @@
 The graph stops after `charter` and after `rank` because those are the last moments a
 person can act cheaply. Everything before the charter pause is one model call;
 everything after the retrieve pause is thousands. A charter with a wrong topic taxonomy
-or a missing vocabulary is fixable in ten seconds at the first pause and expensive to
+or a wrong population is fixable in ten seconds at the first pause and expensive to
 notice at the last.
 
 **A run is autonomous unless `--interactive` asks otherwise**, so both moments are
@@ -124,20 +124,6 @@ def charter_view(charter: Charter) -> list[RenderableType]:
 
     view.append(_topic_table(charter))
 
-    # Directly under the taxonomy, deliberately: this is the field that gates every
-    # later extraction and it is the one a reader skims past.
-    if charter.vocabularies:
-        view.append(
-            Text.from_markup("[bold]vocabularies[/bold]  " + ", ".join(charter.vocabularies))
-        )
-    else:
-        view.append(Text.from_markup("[yellow]vocabularies  none[/yellow]"))
-    view.append(
-        Text.from_markup(
-            "[dim]  these gate what every extraction may record. Override with "
-            "--vocab a,b,c, or edit `vocabularies` in charter.yaml.[/dim]"
-        )
-    )
 
     view.extend(Text.from_markup(f"[yellow]![/yellow]  {p}") for p in charter.problems())
     return view

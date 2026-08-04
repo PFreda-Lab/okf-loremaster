@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from okf_loremaster import DISPLAY_NAME, __version__
+from okf_loremaster.finalize import Finalize
 
 console = Console(stderr=True)
 
@@ -61,6 +62,24 @@ def _reported() -> Iterator[None]:
     except KeyboardInterrupt as exc:
         console.print("[yellow]interrupted[/yellow] — rerun with --resume <run-id> to continue")
         raise typer.Exit(code=130) from exc
+
+
+def _report_outputs(directory: Path) -> None:
+    """Say where the deliverable is, and that moving it is one copy.
+
+    Printed rather than left to the reader because the whole point of the one-folder
+    layout is that it can be handed to a consumer without instructions, and a path that
+    is never shown is a path nobody knows to copy.
+    """
+    from okf_loremaster.okf.layout import okf_bundle_path, vector_store_path
+
+    corpus = okf_bundle_path(directory)
+    store = vector_store_path(corpus)
+    console.print(f"\n[bold]output[/bold]  {directory}")
+    for label, path in (("okf", corpus), ("vectors", store)):
+        mark = "[green]+[/green]" if path.exists() else "[dim]-[/dim]"
+        console.print(f"  {mark} {label}/{'' if path.exists() else '  [dim]not kept[/dim]'}")
+    console.print(f"[dim]move it with[/dim]  [cyan]cp -r {directory} <somewhere>[/cyan]")
 
 
 def _version_callback(value: bool) -> None:
@@ -180,77 +199,29 @@ def selftest(
 
 
 @app.command()
-def charter(
-    prompt: Annotated[str, typer.Argument(help="Plain-language description of the task.")],
-    out: Annotated[
-        Path, typer.Option("-o", "--out", help="Where to write the charter.")
-    ] = Path("charter.yaml"),
-    vocab: Annotated[
-        str | None, typer.Option("--vocab", help="Comma-separated vocabularies; overrides charter.")
-    ] = None,
-    # Literals rather than the constants they mirror: importing them would pull pydantic
-    # into `--help`. `test_cli_defaults` fails if the two ever drift apart.
-    target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 200,
-    topic_min: Annotated[int, typer.Option(help="Minimum papers per topic.")] = 8,
-    topic_max: Annotated[int, typer.Option(help="Maximum papers per topic.")] = 40,
-    verbose: Annotated[int, typer.Option("-v", "--verbose", count=True, help="Verbosity.")] = 0,
-) -> None:
-    """Draft a charter — topic taxonomy, vocabularies, query plan — without building."""
-    from okf_loremaster.run import draft_charter, parse_vocab
-    from okf_loremaster.ui.pauses import render_charter
-
-    with _reported():
-        drafted = asyncio.run(
-            draft_charter(
-                prompt,
-                out=out,
-                vocab=parse_vocab(vocab),
-                target_papers=target_papers,
-                topic_min=topic_min,
-                topic_max=topic_max,
-                console=console,
-                verbose=verbose,
-            )
-        )
-
-    # The same surface the build pauses on, so what is reviewed here is what is
-    # reviewed there — minus the question, because there is nothing here to approve.
-    render_charter(console, drafted)
-    console.print(f"[green]wrote[/green] {out}")
-    console.print(
-        "[dim]Edit it — especially [bold]vocabularies[/bold] — then run "
-        f"[cyan]okf-loremaster build --charter {out}[/cyan].[/dim]"
-    )
-
-
-@app.command()
 def build(
-    prompt: Annotated[
-        str | None, typer.Argument(help="Task description. Omit when using --charter.")
-    ] = None,
-    charter_file: Annotated[
-        Path | None, typer.Option("--charter", help="Build from an existing charter.yaml.")
-    ] = None,
+    prompt: Annotated[str, typer.Argument(help="What you want to know, in plain language.")],
     out: Annotated[
         Path | None,
-        typer.Option("-o", "--out", help="Bundle name, under the output directory."),
+        typer.Option("-o", "--out", help="Folder name, under the output directory."),
     ] = None,
     pool_size: Annotated[int, typer.Option(help="Candidate pool before screening.")] = 800,
     screen_budget: Annotated[int, typer.Option(help="Max abstracts sent to the screener.")] = 400,
-    # See the note on `charter`: literals, guarded by a test, to keep pydantic out of
-    # `--help`.
+    # Literals rather than the constants they mirror: importing them would pull pydantic
+    # into `--help`. `test_cli_defaults` fails if the two ever drift apart.
     target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 200,
     topic_min: Annotated[int, typer.Option(help="Minimum papers per topic.")] = 8,
     topic_max: Annotated[int, typer.Option(help="Maximum papers per topic.")] = 40,
     max_rounds: Annotated[
         int, typer.Option(help="Search rounds, including the first. 1 disables re-query.", min=1)
     ] = 2,
-    vocab: Annotated[
-        str | None, typer.Option("--vocab", help="Comma-separated vocabularies; overrides charter.")
+    finalize: Annotated[
+        Finalize | None,
+        typer.Option(
+            "--finalize",
+            help="What to keep. Asked at the end if not given. `okf` skips embedding.",
+        ),
     ] = None,
-    index: Annotated[
-        bool, typer.Option("--index/--no-index", help="Build the vector index.")
-    ] = False,
     review: Annotated[bool, typer.Option("--review", help="Human sign-off before emit.")] = False,
     interactive: Annotated[
         bool,
@@ -266,9 +237,9 @@ def build(
     json_out: Annotated[bool, typer.Option("--json", help="Emit machine-readable events.")] = False,
     verbose: Annotated[int, typer.Option("-v", "--verbose", count=True, help="Verbosity.")] = 0,
 ) -> None:
-    """Build a bundle end to end."""
+    """Build a knowledge bundle from PubMed. This is the whole system."""
     from okf_loremaster.curation import MAX_ROUNDS
-    from okf_loremaster.run import RunOptions, build_run, parse_vocab, require_textual
+    from okf_loremaster.run import RunOptions, build_run, require_textual
     from okf_loremaster.ui.plain import rich_enabled
     from okf_loremaster.ui.summary import render_bundle, render_extraction, render_topics
 
@@ -280,10 +251,12 @@ def build(
             "the other feeds a program."
         )
         raise typer.Exit(code=1)
-    if index and dry_run:
-        # A dry run writes no bundle, and the index is built by reading one back.
-        console.print("[red]--index cannot be combined with --dry-run[/red] — a dry run "
-                      "writes no bundle to index.")
+    if finalize is not None and dry_run:
+        # A dry run writes nothing, so there is nothing to keep or discard.
+        console.print(
+            "[red]--finalize cannot be combined with --dry-run[/red] — a dry run "
+            "writes no bundle."
+        )
         raise typer.Exit(code=1)
     if review and (dry_run or json_out):
         # Not a usability nicety. `--json` has nobody to ask and a dry run writes no
@@ -324,8 +297,7 @@ def build(
             require_textual()
 
     options = RunOptions(
-        prompt=prompt or "",
-        charter_path=charter_file,
+        prompt=prompt,
         out=out,
         pool_size=pool_size,
         screen_budget=screen_budget,
@@ -333,10 +305,9 @@ def build(
         topic_min=topic_min,
         topic_max=topic_max,
         max_rounds=max_rounds,
-        vocab=parse_vocab(vocab),
         interactive=interactive,
         review=review,
-        index=index,
+        finalize=finalize,
         dry_run=dry_run,
         resume=resume,
         tui=full_screen,
@@ -357,154 +328,12 @@ def build(
     render_topics(console, state)
     render_extraction(console, state)
     render_bundle(console, state)
-    console.print(f"[dim]run directory[/dim]  {directory}")
+    _report_outputs(directory)
     if not state.get("pool"):
         raise typer.Exit(code=1)
     # A bundle that failed the gate is still on disk and still worth reading; the exit
     # code is what says so to whatever ran us.
     if state.get("bundle") and not state.get("validated"):
-        raise typer.Exit(code=1)
-
-
-@app.command()
-def index(
-    bundle: Annotated[Path, typer.Argument(help="Bundle directory to index.")],
-) -> None:
-    """Build the vector index from an existing bundle.
-
-    The store is written to `<bundle>.chroma`, beside the bundle rather than inside it,
-    and an existing collection there is replaced. Re-running this is how a bundle edited
-    by hand gets an index that matches it.
-    """
-    from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
-
-    from okf_loremaster.config import load_settings
-    from okf_loremaster.emitters.vectors import build_index
-    from okf_loremaster.run import embedder
-
-    with _reported():
-        settings = load_settings()
-        warning = settings.hf_home_warning()
-        if warning:
-            console.print(f"[yellow]![/yellow]  {warning}")
-        model = embedder(settings)
-        revision = settings.embed_revision or "unpinned"
-        console.print(f"[dim]embedding with[/dim] {settings.embed_model} @ {revision}")
-
-        with Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("{task.completed}/{task.total}"),
-            TimeElapsedColumn(),
-            console=console,
-            transient=True,
-        ) as progress:
-            # Total is unknown until the bundle has been walked, which happens inside
-            # `build_index`; the first progress call supplies it.
-            task = progress.add_task("embedding", total=None)
-
-            def advance(done: int, total: int) -> None:
-                progress.update(task, completed=done, total=total)
-
-            result = asyncio.run(build_index(bundle, embedder=model, on_progress=advance))
-
-    for note in result.warnings:
-        console.print(f"[yellow]![/yellow]  {note}")
-    if not result.chunks:
-        raise typer.Exit(code=1)
-
-    verb = "rebuilt" if result.replaced else "wrote"
-    console.print(f"[green]{verb}[/green] {result.path}  [dim]{result.summary()}[/dim]")
-    console.print(
-        f"[dim]collection[/dim] {result.collection}  [dim]distance[/dim] {result.distance}  "
-        f"[dim]dimensions[/dim] {result.dimensions}"
-    )
-    console.print(
-        "[dim]The three per-row keys — timing, confidence, evidence_type — are empty on a "
-        'concept chunk. Filter on them with chunk_level == "predictor".[/dim]'
-    )
-
-
-@app.command()
-def validate(
-    bundle: Annotated[Path, typer.Argument(help="Bundle directory to check.")],
-) -> None:
-    """Check a bundle against the OKF contract."""
-    from okf_loremaster.config import load_settings
-    from okf_loremaster.okf.validate import Severity, validate_bundle
-
-    with _reported():
-        settings = load_settings()
-        report = validate_bundle(bundle, embed_model=settings.embed_model)
-
-    for finding in report.findings:
-        color = "red" if finding.severity is Severity.ERROR else "yellow"
-        console.print(
-            f"[{color}]{finding.severity.value}[/{color}]  "
-            f"{finding.line(relative_to=bundle)}"
-        )
-
-    console.print(report.summary())
-    if not report.ok:
-        raise typer.Exit(code=1)
-
-
-@app.command()
-def export(
-    bundle: Annotated[Path, typer.Argument(help="Bundle directory to export.")],
-    out: Annotated[
-        Path, typer.Option("-o", "--out", help="Copy name, under the output directory.")
-    ],
-    permissive_only: Annotated[
-        bool, typer.Option("--permissive-only", help="Only redistributable-licensed documents.")
-    ] = False,
-) -> None:
-    """Copy a bundle out, optionally filtered to redistributable documents.
-
-    The copy is a bundle in its own right — its own indexes, catalog and descriptor id —
-    so it validates and attaches on its own. `-o` is resolved the same way `build`
-    resolves it: a name lands under the output directory, an absolute path lands where
-    it says. The vector index is not copied: it embeds every document in the source,
-    including any the filter just removed. Rebuild it with
-    `okf-loremaster index <the copy>`.
-    """
-    from okf_loremaster.config import load_settings
-    from okf_loremaster.emitters.export import export_bundle
-
-    with _reported():
-        destination = load_settings().resolve_output(out)
-        result = export_bundle(bundle, destination, permissive_only=permissive_only)
-
-    for note in result.warnings:
-        console.print(f"[yellow]![/yellow]  {escape(note)}")
-
-    console.print(
-        f"[green]wrote[/green] {result.path}  [dim]{result.documents} document(s) across "
-        f"{result.topics} topic/topics[/dim]"
-    )
-    if result.permissive_only:
-        console.print(
-            f"[dim]left behind[/dim]  {result.omitted_count} document(s) under a license "
-            f"that does not permit redistribution"
-        )
-    console.print(
-        f"[dim]check it with[/dim] [cyan]okf-loremaster validate {result.path}[/cyan]"
-    )
-
-
-@app.command()
-def inspect(
-    bundle: Annotated[Path, typer.Argument(help="Bundle directory to summarize.")],
-) -> None:
-    """Summarize a bundle: topic sizes, designs, coverage, cost."""
-    from okf_loremaster.okf.overview import read_overview
-    from okf_loremaster.ui.overview import render_overview
-
-    with _reported():
-        overview = read_overview(bundle)
-
-    render_overview(console, overview)
-    if not overview.documents:
         raise typer.Exit(code=1)
 
 

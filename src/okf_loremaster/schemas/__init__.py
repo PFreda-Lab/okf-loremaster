@@ -1,7 +1,7 @@
 """Every typed object that moves between graph nodes.
 
 Nothing in this package names a disease, a specialty, a drug, a lab, a registry, a
-topic, or a vocabulary key. Topic slugs and vocabulary keys are strings decided by the
+topic, or a coding system. Topic slugs and coding systems are strings decided by the
 charter at runtime, which is what makes the same code serve any cohort.
 `tests/test_domain_agnostic.py` scans `src/` and fails if that stops being true.
 """
@@ -36,13 +36,14 @@ from okf_loremaster.schemas.common import (
 )
 from okf_loremaster.schemas.concept import (
     NONE_REPORTED,
+    CodedAs,
     ConceptRecord,
     Extraction,
     NullFinding,
     PredictorRow,
     SourceRef,
     Verification,
-    partition_vocabulary,
+    VocabularyHint,
 )
 from okf_loremaster.schemas.evidence import (
     PaperText,
@@ -95,6 +96,7 @@ __all__ = [
     "BundleCounts",
     "Candidate",
     "Charter",
+    "CodedAs",
     "ConceptRecord",
     "Confidence",
     "CostSummary",
@@ -123,11 +125,11 @@ __all__ = [
     "TopicSummary",
     "Verification",
     "VerificationSummary",
+    "VocabularyHint",
     "filename_token",
     "is_export_safe",
     "parse_model",
     "parse_model_with",
-    "partition_vocabulary",
     "response_format_for",
     "slugify",
 ]

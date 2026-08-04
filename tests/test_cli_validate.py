@@ -15,55 +15,13 @@ about.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
 import pytest
 import typer.main
 from typer.testing import CliRunner
 
 from okf_loremaster.cli import app
 
-from graph_runs import full_run
-
 runner = CliRunner()
-
-
-async def test_validate_reports_a_good_bundle_and_exits_zero(
-    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    run = await full_run(settings_factory, tmp_path, monkeypatch)
-    bundle = Path(run.state["bundle"])
-
-    result = runner.invoke(app, ["validate", str(bundle)])
-
-    assert result.exit_code == 0, result.output
-    assert "passes" in result.output
-
-
-async def test_validate_names_what_is_wrong_and_exits_nonzero(
-    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    run = await full_run(settings_factory, tmp_path, monkeypatch)
-    bundle = Path(run.state["bundle"])
-    (bundle / "index.md").unlink()
-
-    result = runner.invoke(app, ["validate", str(bundle)])
-
-    assert result.exit_code == 1
-    assert "error" in result.output
-    assert "index.md" in result.output
-
-
-def test_validate_says_a_bundle_is_missing_rather_than_reporting_on_nothing(
-    tmp_path: Path,
-) -> None:
-    result = runner.invoke(app, ["validate", str(tmp_path / "not-a-bundle")])
-
-    assert result.exit_code == 1
-    assert "not-a-bundle" in result.output
-
-
 @pytest.mark.parametrize("flag", ["--dry-run", "--json"])
 def test_review_is_refused_with_any_flag_that_means_nobody_will_look(flag: str) -> None:
     result = runner.invoke(app, ["build", "a prompt", "--review", flag])
@@ -85,7 +43,7 @@ def test_review_is_allowed_on_an_autonomous_run() -> None:
     assert "--review cannot be combined with" not in result.output
 
 
-@pytest.mark.parametrize("command", ["build", "charter"])
+@pytest.mark.parametrize("command", ["build"])
 def test_cli_defaults_match_the_constants(command: str) -> None:
     """The flags spell out numbers the schema also declares. This is the tie.
 

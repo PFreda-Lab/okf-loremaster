@@ -14,11 +14,7 @@ are checked here rather than trusted to the writer.
 
 **Warnings are things that make a bundle worse without making it wrong.** A topic that
 retained nothing, a document with no tags — AFCE's retrieval haystack is title, tags and
-journal, so an untagged document is findable only by its title. And the vocabulary
-aggregate: an extraction that wanted a key the charter never listed is not an error, it
-is evidence the charter was written before anyone had read a paper. One such key is
-noise; the same key across more than `UNMAPPED_SHARE` of the corpus is a finding, and it
-comes with the exact command that fixes it.
+journal, so an untagged document is findable only by its title.
 
 Every frontmatter block is checked through *both* our line-parser and `yaml.safe_load`,
 and the two must agree. That is the only check that actually proves the flow-style
@@ -29,7 +25,7 @@ line-parser is a bundle that means two different things depending on who opens i
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
@@ -52,16 +48,11 @@ from okf_loremaster.okf.layout import (
 from okf_loremaster.okf.reader import OkfBundle, OkfDocument, read_bundle
 
 __all__ = [
-    "UNMAPPED_SHARE",
     "BundleReport",
     "Finding",
     "Severity",
     "validate_bundle",
 ]
-
-# The share of documents that must reach for the same unlisted vocabulary key before it
-# stops being one extraction's idea and starts being a hole in the charter.
-UNMAPPED_SHARE = 0.15
 
 # Embedding model names that are not a local checkpoint. A downstream consumer verifies
 # the embedder on attach and rejects a remote one outright, so a bundle built with one
@@ -158,7 +149,6 @@ def validate_bundle(path: Path, *, embed_model: str = "") -> BundleReport:
     _check_catalog(bundle, findings)
     _check_links(bundle, findings)
     _check_ids(bundle, findings)
-    _check_vocabulary(bundle, findings)
     _check_embedder(embed_model, findings)
     _check_vector_index(bundle, findings)
 
@@ -412,52 +402,6 @@ def _check_ids(bundle: OkfBundle, findings: list[Finding]) -> None:
 
 
 # --- advisory ---------------------------------------------------------------
-
-
-def _check_vocabulary(bundle: OkfBundle, findings: list[Finding]) -> None:
-    """Aggregate what extractions wanted to record and the charter never allowed.
-
-    Reported here rather than per paper because one extraction reaching for an unlisted
-    key is a judgment call and a fifth of them reaching for the same one is a hole in the
-    charter — and the difference is only visible once.
-    """
-    total = len(bundle.catalog)
-    if not total:
-        return
-    counts: dict[str, int] = {}
-    for row in bundle.catalog:
-        unmapped = row.get("unmapped_vocab")
-        if not isinstance(unmapped, Mapping):
-            continue
-        for key in unmapped:
-            counts[str(key)] = counts.get(str(key), 0) + 1
-    if not counts:
-        return
-
-    listed = _charter_vocabularies(bundle)
-    for key, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
-        share = count / total
-        message = (
-            f"{count} of {total} document(s) recorded coding hints under {key!r}, which "
-            f"the charter did not list — they are not in frontmatter"
-        )
-        if share >= UNMAPPED_SHARE:
-            message += f". Rerun with:\n    {_rerun_command(bundle, listed, key)}"
-        findings.append(Finding(Severity.WARNING, message, bundle.path / CATALOG_FILENAME))
-
-
-def _charter_vocabularies(bundle: OkfBundle) -> list[str]:
-    raw = bundle.charter.get("vocabularies")
-    if isinstance(raw, list):
-        return [str(item) for item in raw]
-    return []
-
-
-def _rerun_command(bundle: OkfBundle, listed: Iterable[str], key: str) -> str:
-    vocabularies = [*listed, key]
-    charter = bundle.path / CHARTER_FILENAME
-    where = charter if charter.exists() else Path(CHARTER_FILENAME)
-    return f"okf-loremaster build --charter {where} --vocab {','.join(vocabularies)}"
 
 
 def _check_vector_index(bundle: OkfBundle, findings: list[Finding]) -> None:

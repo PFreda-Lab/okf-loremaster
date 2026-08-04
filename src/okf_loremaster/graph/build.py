@@ -201,7 +201,7 @@ def build_graph(deps: Deps) -> StateGraph[RunState, Any, RunState, RunState]:
     # The index is derived from the same files the validator judged, and is built even
     # when the bundle failed the gate: those errors are things a person fixes in a file,
     # not a reason to withhold a rebuildable artifact. Unconditional and a no-op without
-    # `--index`, for the same reason `review` is.
+    # the finalize choice, for the same reason `review` is.
     graph.add_edge("validate", "index_vectors")
     graph.add_edge("index_vectors", END)
     return graph
@@ -263,7 +263,6 @@ async def run_build(
     deps: Deps,
     pause: Pause | None = None,
     charter: Charter | None = None,
-    vocab_override: list[str] | None = None,
     dry_run: bool = False,
     resume: bool = False,
 ) -> RunState:
@@ -289,7 +288,6 @@ async def run_build(
                 prompt,
                 dry_run=dry_run,
                 charter=charter,
-                vocab_override=vocab_override,
             )
         )
 

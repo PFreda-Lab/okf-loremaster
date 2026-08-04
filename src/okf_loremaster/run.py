@@ -23,14 +23,17 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import shutil
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from okf_loremaster.curation import MAX_ROUNDS
+from okf_loremaster.finalize import Finalize
+from okf_loremaster.okf.layout import okf_bundle_path
 from okf_loremaster.schemas import (
     DEFAULT_TARGET_PAPERS,
     DEFAULT_TOPIC_MAX,
@@ -54,10 +57,8 @@ __all__ = [
     "RunInterrupted",
     "RunOptions",
     "build_run",
-    "draft_charter",
     "embedder",
     "new_run_id",
-    "parse_vocab",
     "require_textual",
     "run_directory",
 ]
@@ -97,7 +98,6 @@ class RunOptions:
     topic_max: int = DEFAULT_TOPIC_MAX
     max_queries: int = 12
     max_rounds: int = MAX_ROUNDS
-    vocab: list[str] = field(default_factory=list)
     # Stop at the charter and the retrieved pool and ask. Off by default: a run is
     # autonomous end to end unless someone asks to be in it. The two pauses still print
     # what they would have asked about, so an unattended run is not a silent one.
@@ -106,9 +106,9 @@ class RunOptions:
     # `--json` by the CLI: auto-signing would attribute `human:<id>` to someone who
     # never looked.
     review: bool = False
-    # Build the vector index once the bundle is written. Off by default because it
-    # downloads an embedding model on first use, and a bundle is complete without one.
-    index: bool = False
+    # What the run keeps. `None` means nobody has said yet, so an attended run is asked
+    # at the end and an unattended one takes `BOTH` — the answer that discards nothing.
+    finalize: Finalize | None = None
     dry_run: bool = False
     resume: str | None = None
     # Full-screen Textual interface. Refused with `--json` by the CLI, and quietly
@@ -118,19 +118,13 @@ class RunOptions:
     verbose: int = 0
 
 
-def parse_vocab(raw: str | None) -> list[str]:
-    """`--vocab icd10,atc,loinc` to a list. Empty entries dropped, order kept."""
-    if not raw:
-        return []
-    return [part.strip() for part in raw.split(",") if part.strip()]
-
-
 def run_directory(options: RunOptions, settings: Settings, run_id: str) -> Path:
-    """Where this run's bundle goes.
+    """The folder holding everything this run produces — `okf/` and `vectors/`.
 
-    Without `-o` the run id names the folder, which is unique and sortable but not
-    memorable. With `-o` the name is the user's, resolved under the same output
-    directory — see `Settings.resolve_output`, which is also what `export` uses.
+    One folder rather than two siblings so that moving the deliverable into a consumer
+    is a single copy. Without `-o` the run id names it, which is unique and sortable but
+    not memorable. With `-o` the name is the user's, resolved under the configured
+    output directory — see `Settings.resolve_output`.
     """
     if options.out is None:
         return settings.output_dir / run_id
@@ -176,13 +170,17 @@ async def build_run(
     charter = _load_charter(options.charter_path)
     prompt = options.prompt or (charter.prompt if charter is not None else "")
     if not prompt:
-        raise ValueError("no prompt: pass one as an argument or use --charter")
+        raise ValueError("no prompt: pass one as the argument to `build`")
 
     run_id = options.resume or new_run_id()
     # Decided here, before the graph starts, and carried on `Deps`. The emit node must
     # not work it out for itself: a resumed run would then land somewhere else than the
     # run it resumed.
     directory = run_directory(options, resolved, run_id)
+    corpus = okf_bundle_path(directory)
+    # Settled before the graph starts because the embedder has to be built or not built
+    # up front, and an unattended run has nobody to ask later.
+    finalize = options.finalize if options.finalize is not None else Finalize.BOTH
     bus = EventBus()
     task = attach(bus) if attach is not None else _start_renderer(bus, options, console)
 
@@ -193,9 +191,9 @@ async def build_run(
         bus=bus,
         clients=clients,
         router=router,
-        bundle_dir=directory,
+        bundle_dir=corpus,
         reviewer=reviewer if reviewer is not None else _reviewer(options, resolved, console),
-        embedder=embedder(resolved) if options.index else None,
+        embedder=embedder(resolved) if finalize.builds_vectors else None,
         pool_size=options.pool_size,
         screen_budget=options.screen_budget,
         max_queries=options.max_queries,
@@ -212,7 +210,6 @@ async def build_run(
             deps=deps,
             pause=pause if pause is not None else _pause(options, console),
             charter=charter,
-            vocab_override=options.vocab,
             dry_run=options.dry_run,
             resume=options.resume is not None,
         )
@@ -223,77 +220,103 @@ async def build_run(
 
     settled = state.get("charter")
     if settled is not None:
-        # Written again here rather than only by the emitter: a run that stopped at a
-        # pause never reached `emit_okf`, and the charter is the file you go and edit.
+        # At the run root, not inside `okf/`. A run that stopped at a pause never
+        # reached `emit_okf` and has no corpus to put it in, and this copy is the one a
+        # person edits and reruns from. The emitter writes a second copy inside the
+        # corpus so that moving `okf/` on its own still carries its terms with it.
         _write_charter(settled, directory / CHARTER_FILENAME)
+
+    if state.get("bundle") and not options.dry_run:
+        _settle_finalize(options.finalize, corpus, console=console)
     return state, directory
 
 
-# --- the charter command ----------------------------------------------------
+# --- what the run keeps ------------------------------------------------------
 
 
-async def draft_charter(
-    prompt: str,
-    *,
-    out: Path,
-    vocab: list[str] | None = None,
-    target_papers: int = DEFAULT_TARGET_PAPERS,
-    topic_min: int = DEFAULT_TOPIC_MIN,
-    topic_max: int = DEFAULT_TOPIC_MAX,
-    console: Console | None = None,
-    settings: Settings | None = None,
-    verbose: int = 0,
-) -> Charter:
-    """One reasoning-tier call, then write the result. No search, no graph.
+def _settle_finalize(chosen: Finalize | None, corpus: Path, *, console: Console | None) -> Finalize:
+    """Ask what to keep, then make it so. Returns what was actually kept.
 
-    The charter node is invoked directly rather than through the graph: there is no
-    second node to run, and a checkpoint thread for a single call would be scaffolding
-    around nothing.
+    Asked at the end rather than up front because it is a question about a thing that
+    now exists: by this point both resources are on disk and their sizes can be shown.
+    `--finalize` answers it in advance, which is the only way to skip the embedding pass
+    entirely — an unattended run keeps both, because discarding work nobody asked to
+    discard is the one outcome that cannot be undone without paying for the run again.
     """
-    from okf_loremaster.clients import build_clients
-    from okf_loremaster.config import load_settings
-    from okf_loremaster.events import EventBus, RunFinished, RunStarted
-    from okf_loremaster.graph.nodes import charter_node
-    from okf_loremaster.graph.state import Deps, initial_state
+    from okf_loremaster.okf.layout import vector_store_path
 
-    resolved = settings if settings is not None else load_settings()
-    resolved.require_llm()
+    store = vector_store_path(corpus)
+    if chosen is None:
+        chosen = _ask_finalize(corpus, store, console=console)
 
-    bus = EventBus()
-    task = _start_renderer(bus, RunOptions(verbose=verbose), console)
-    # The charter node itself never touches the network, but `Deps` carries the clients
-    # for every other node and building them here keeps one code path.
-    clients = build_clients(resolved, bus=bus)
-    deps = Deps(
-        settings=resolved,
-        bus=bus,
-        clients=clients,
-        router=_router(resolved, bus),
-        target_papers=target_papers,
-        topic_min=topic_min,
-        topic_max=topic_max,
+    if not chosen.builds_vectors and store.exists():
+        shutil.rmtree(store)
+    if not chosen.keeps_okf and corpus.exists():
+        shutil.rmtree(corpus)
+    return chosen
+
+
+def _ask_finalize(corpus: Path, store: Path, *, console: Console | None) -> Finalize:
+    """The end-of-run question, or `BOTH` when there is nobody to ask.
+
+    A terminal that cannot prompt is not a terminal that should be guessed at, so every
+    non-interactive path lands on the answer that deletes nothing.
+    """
+    import sys
+
+    from rich.prompt import IntPrompt
+
+    from okf_loremaster.finalize import PROMPT_ORDER
+    from okf_loremaster.ui.plain import rich_enabled
+
+    if not sys.stdin.isatty() or not rich_enabled():
+        return Finalize.BOTH
+
+    out = console if console is not None else _default_console()
+    out.print()
+    out.print("[bold]finalize this run as[/bold]")
+    for number, option in enumerate(PROMPT_ORDER, start=1):
+        where = corpus if option.keeps_okf else store
+        size = _folder_size(corpus if option.keeps_okf else store)
+        detail = f"{where.name}/" if option is not Finalize.BOTH else "both folders"
+        out.print(f"  [cyan]{number}[/cyan]  {option.label}  [dim]{detail}  {size}[/dim]")
+
+    answer = IntPrompt.ask(
+        "keep", choices=[str(n) for n in range(1, len(PROMPT_ORDER) + 1)], default=3, console=out
     )
+    picked = PROMPT_ORDER[answer - 1]
+    if picked.keeps_okf:
+        return picked
 
-    run_id = new_run_id()
-    bus.emit(RunStarted(run_id=run_id, prompt=prompt))
-    try:
-        state = initial_state(run_id, prompt, vocab_override=vocab)
-        update = await charter_node(state, deps)
-        charter: Charter = update["charter"]
-        bus.emit(
-            RunFinished(
-                run_id=run_id,
-                ok=True,
-                summary=f"{len(charter.topic_taxonomy)} topics -> {out}",
-            )
-        )
-    finally:
-        await clients.aclose()
-        bus.close()
-        await task
+    # The corpus is what the run actually paid for, and the vector store is rebuilt from
+    # it. Deleting it is the one answer worth asking twice about.
+    from rich.prompt import Confirm
 
-    _write_charter(charter, out)
-    return charter
+    if not Confirm.ask(
+        f"[yellow]delete[/yellow] {corpus}? rebuilding it costs another full run",
+        default=False,
+        console=out,
+    ):
+        return Finalize.BOTH
+    return picked
+
+
+def _folder_size(path: Path) -> str:
+    """Rough on-disk size, for a question that is really about what to throw away."""
+    if not path.exists():
+        return "not built"
+    total = float(sum(item.stat().st_size for item in path.rglob("*") if item.is_file()))
+    for unit in ("B", "KB", "MB", "GB"):
+        if total < 1024 or unit == "GB":
+            return f"{total:.0f} {unit}" if unit == "B" else f"{total:.1f} {unit}"
+        total /= 1024.0
+    return f"{total:.1f} GB"
+
+
+def _default_console() -> Console:
+    from rich.console import Console as RichConsole
+
+    return RichConsole(stderr=True)
 
 
 # --- shared -----------------------------------------------------------------
@@ -320,7 +343,7 @@ def embedder(settings: Settings) -> Embedder:
         if importlib.util.find_spec(package) is None:
             raise ConfigError(
                 f"vector indexing needs {package}, which is not installed — "
-                f"`pip install 'okf-loremaster[vectors]'`, or drop --index"
+                f"`pip install 'okf-loremaster[vectors]'`, or use --finalize okf"
             )
     return SentenceTransformerEmbedder(settings.embed_model, settings.embed_revision)
 

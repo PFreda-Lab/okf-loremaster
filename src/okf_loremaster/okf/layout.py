@@ -27,13 +27,15 @@ __all__ = [
     "INDEX_FILENAME",
     "LOG_FILENAME",
     "NONE_CELL",
+    "OKF_DIRNAME",
     "PREDICTOR_COLUMNS",
     "QUOTE_LEAD",
     "RESERVED_FILENAMES",
     "ROOT_INDEX_TYPE",
     "TOPIC_INDEX_TYPE",
     "UNVERIFIED_CELL",
-    "VECTOR_SUFFIX",
+    "VECTORS_DIRNAME",
+    "okf_bundle_path",
     "vector_store_path",
 ]
 
@@ -99,8 +101,12 @@ FULL_TEXT_BASIS = "full_text"
 # is exactly the confusion the verification pass exists to prevent.
 UNVERIFIED_CELL = "unverified"
 
-# The derived vector index sits *beside* the bundle, never inside it.
-VECTOR_SUFFIX = ".chroma"
+# A run writes one folder holding two resources, so moving the deliverable is one copy.
+# The vector store is a *sibling* of the OKF corpus, never inside it: `read_bundle`
+# treats every directory at the bundle root as a topic, so a store nested there would
+# validate as a topic with no papers.
+OKF_DIRNAME = "okf"
+VECTORS_DIRNAME = "vectors"
 
 # The distance metrics a consumer knows how to honor. Here rather than in the emitter
 # because the validator checks the same list: a store built with one metric and queried
@@ -109,14 +115,20 @@ VECTOR_SUFFIX = ".chroma"
 DISTANCES = ("cosine", "l2", "ip")
 
 
-def vector_store_path(bundle: Path) -> Path:
-    """`<bundle>.chroma`, a sibling of the bundle directory.
+def okf_bundle_path(run: Path) -> Path:
+    """`<run>/okf` — the OKF corpus inside a run's output folder."""
+    resolved = run if run.name else run.resolve()
+    return resolved / OKF_DIRNAME
 
-    A sibling rather than a subdirectory for three reasons: `read_bundle` treats every
-    directory at the root as a topic, so an index inside would validate as a topic with
-    no papers; the store is binary and would otherwise be copied by anything that copies
-    a bundle; and it is derived, so deleting it costs nothing but deleting a topic costs
-    a rebuild.
+
+def vector_store_path(bundle: Path) -> Path:
+    """`<run>/vectors`, given the OKF corpus at `<run>/okf`.
+
+    Takes the corpus rather than the run folder because every caller holds the corpus:
+    the emitter walks it, the validator reads it, and the overview reports on it. A
+    sibling rather than a subdirectory because `read_bundle` treats every directory at
+    the corpus root as a topic, and because the store is derived — deleting it costs an
+    embedding pass, deleting a topic costs a whole run.
     """
     resolved = bundle if bundle.name else bundle.resolve()
-    return resolved.parent / f"{resolved.name}{VECTOR_SUFFIX}"
+    return resolved.parent / VECTORS_DIRNAME

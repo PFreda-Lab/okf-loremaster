@@ -35,11 +35,14 @@ from fake_ncbi import (
     REFERENCE_ONLY,
     FakeNCBI,
     abstract_for,
+    code_for,
     finding_sentence,
     has_full_text,
     license_for,
+    methods_sentence,
     pmcid_for,
     sample_size,
+    snomed_for,
     title_for,
 )
 from graph_runs import charter_for, node_deps
@@ -52,8 +55,8 @@ CLOSED = "10002"
 # What `_select` charges for a section: its text, its type name, and the `## ` heading
 # with the blank line after it. Restated here so the budgets below are arithmetic a
 # reader can check rather than numbers somebody once observed passing.
-TITLE_ABSTRACT_RESULTS_TABLE = 350
-METHODS_COST = 120
+TITLE_ABSTRACT_RESULTS_TABLE = 378
+METHODS_COST = 180
 DISCUSS_COST = 65
 
 
@@ -212,6 +215,7 @@ def extract_state(*pmids: str, text: str | None = None) -> RunState:
                 if text is not None
                 else f"Title: {title_for(pmid)}\n\n"
                 f"## ABSTRACT\n{abstract_for(pmid)}\n\n"
+                f"## METHODS\n{methods_sentence(pmid)}\n\n"
                 f"## RESULTS\n{finding_sentence(pmid)}",
             )
             for pmid in pmids
@@ -352,20 +356,41 @@ async def test_length_budgets_are_applied_before_verification_not_after(
     assert any("ran over a length budget" in note for note in update["warnings"])
 
 
-async def test_a_vocabulary_key_the_charter_did_not_list_is_kept_out_of_frontmatter(
+async def test_every_code_a_paper_gave_survives_reconcile_attached_to_its_concept(
     settings_factory: Any, tmp_path: Path
 ) -> None:
-    """`unmapped_vocab` is the escape hatch for the one call made before any paper was
-    read. It is recorded and reported, and it never reaches a frontmatter block."""
-    hinting = read_of(OPEN, vocabulary_hints={"icd10": ["A00"], "snomed": ["44054006"]})
+    """Nothing filters hints by coding system, because nothing decides them in advance.
+
+    The previous design gated these against a charter list written before any paper was
+    read, which silently discarded codes from any system that call had not anticipated.
+    Two systems, because one could not tell "nothing is filtered" apart from "the one
+    system in the fixture happens to be the allowed one". Both are codes this paper
+    actually prints — verification drops the ones that are not, which is a different test.
+    """
+    hinting = read_of(
+        OPEN,
+        vocabulary_hints=[
+            {
+                "concept": "the exposure",
+                "codes": [
+                    {"system": "icd10", "code": code_for(OPEN)},
+                    {"system": "snomed", "code": snomed_for(OPEN)},
+                ],
+            },
+            {"concept": "an uncoded variable", "codes": []},
+        ],
+    )
 
     async with node_deps(settings_factory, tmp_path) as deps:
         update = await reconcile_node(reconcile_state({OPEN: hinting}), deps)
 
-    record = update["records"][0]
-    assert record.extraction.vocabulary_hints == {"icd10": ["A00"]}
-    assert record.unmapped_vocab == {"snomed": ["44054006"]}
-    assert any("snomed" in note and "did not list" in note for note in update["warnings"])
+    hints = update["records"][0].extraction.vocabulary_hints
+    assert [h.concept for h in hints] == ["the exposure", "an uncoded variable"]
+    assert [(c.system, c.code) for c in hints[0].codes] == [
+        ("icd10", code_for(OPEN)),
+        ("snomed", snomed_for(OPEN)),
+    ]
+    assert hints[1].codes == []
 
 
 async def test_a_paper_with_no_extraction_leaves_its_topic_and_is_named(

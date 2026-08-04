@@ -45,6 +45,7 @@ _FINDING = re.compile(
     r"\(95% CI (?P<low>\d+\.\d+)-(?P<high>\d+\.\d+); p = (?P<p>[\d.]+)\)\.)"
 )
 _COHORT = re.compile(r"cohort of (?P<n>\d+) adults")
+_CODE = re.compile(r"ICD-10 (?P<code>[A-Z]\d+\.\d+)")
 
 # A paper's title and abstract -> the fields of one `ScreenVerdict`.
 ScreenFn = Callable[[str], dict[str, Any]]
@@ -102,7 +103,7 @@ def extraction(
     predictors: Sequence[dict[str, Any]] = (),
     null_findings: Sequence[dict[str, Any]] = (),
     n: int | None = None,
-    vocabulary_hints: dict[str, list[str]] | None = None,
+    vocabulary_hints: list[dict[str, Any]] | None = None,
     **fields: Any,
 ) -> dict[str, Any]:
     """One extraction reply. The prose is boilerplate; the numbers are the subject."""
@@ -115,7 +116,7 @@ def extraction(
         "outcome_definition": "the outcome as this study measured it",
         "predictors": list(predictors),
         "null_findings": list(null_findings),
-        "vocabulary_hints": vocabulary_hints or {},
+        "vocabulary_hints": list(vocabulary_hints or []),
         "caveats": "Observational; residual confounding is likely.",
         "tags": ["exposure", "outcome"],
     }
@@ -148,10 +149,15 @@ def supported(source: str) -> dict[str, Any]:
             "p_value": finding["p"],
             "quote": finding["quote"],
         }
+    # The code is read off the page like everything else. A hint whose concept is named
+    # but whose `codes` is empty is the normal case, not a failure, so a paper that
+    # prints no code still gets an entry.
+    code = _CODE.search(source)
+    codes = [{"system": "icd10", "code": code["code"]}] if code is not None else []
     return extraction(
         n=int(cohort["n"]) if cohort is not None else None,
         predictors=[row(**numbers)],
-        vocabulary_hints={"icd10": ["A00"]},
+        vocabulary_hints=[{"concept": "the exposure", "codes": codes}],
     )
 
 

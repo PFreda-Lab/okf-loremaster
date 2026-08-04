@@ -56,6 +56,7 @@ class VerificationSummary(Model):
     effects_dropped: int = 0
     intervals_dropped: int = 0
     quotes_dropped: int = 0
+    codes_dropped: int = 0
     sample_sizes_dropped: int = 0
     # A handful of the offending rows, named. Not all of them: this gets printed, and a
     # run where every row failed should say so in one line rather than in two hundred.
@@ -67,6 +68,7 @@ class VerificationSummary(Model):
             self.effects_dropped
             or self.intervals_dropped
             or self.quotes_dropped
+            or self.codes_dropped
             or self.sample_sizes_dropped
         )
 
@@ -83,6 +85,8 @@ class VerificationSummary(Model):
             parts.append(f"{self.intervals_dropped} interval(s) dropped")
         if self.quotes_dropped:
             parts.append(f"{self.quotes_dropped} quote(s) dropped")
+        if self.codes_dropped:
+            parts.append(f"{self.codes_dropped} code(s) dropped")
         if self.sample_sizes_dropped:
             parts.append(f"{self.sample_sizes_dropped} sample size(s) dropped")
         return f"{self.rows} row(s) checked; " + ", ".join(parts)

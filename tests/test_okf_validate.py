@@ -28,7 +28,7 @@ from okf_loremaster.okf.frontmatter import (
 )
 from okf_loremaster.okf.layout import CATALOG_FILENAME, INDEX_FILENAME
 from okf_loremaster.okf.reader import body_sections
-from okf_loremaster.okf.validate import UNMAPPED_SHARE, Severity, validate_bundle
+from okf_loremaster.okf.validate import Severity, validate_bundle
 from okf_loremaster.schemas import Topic
 
 from graph_runs import charter_for, full_run
@@ -321,44 +321,6 @@ async def test_an_untagged_document_is_a_warning_and_not_a_failure(
     report = validate_bundle(bundle)
     assert report.ok
     assert any("no `tags`" in f.message for f in report.warnings)
-
-
-async def test_a_vocabulary_key_the_charter_never_listed_arrives_with_its_fix(
-    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """One extraction reaching for an unlisted key is a judgment call; a fifth of the
-    corpus reaching for the same one is a hole in the charter — so past the threshold
-    the warning carries the exact command that closes it."""
-    bundle = await bundle_for(settings_factory, tmp_path, monkeypatch)
-    catalog = bundle / CATALOG_FILENAME
-    lines = catalog.read_text(encoding="utf-8").splitlines()
-    reached = max(1, int(len(lines) * UNMAPPED_SHARE) + 1)
-    patched = [
-        line[:-1] + ', "unmapped_vocab": {"snomed": ["12345"]}}' if index < reached else line
-        for index, line in enumerate(lines)
-    ]
-    catalog.write_text("\n".join(patched) + "\n", encoding="utf-8")
-
-    report = validate_bundle(bundle)
-    assert report.ok  # advisory, never a gate
-    note = next(f.message for f in report.warnings if "snomed" in f.message)
-    assert "the charter did not list" in note
-    assert "--vocab icd10,snomed" in note
-    assert "--charter" in note
-
-
-async def test_one_stray_vocabulary_key_is_reported_without_a_rerun_command(
-    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    bundle = await bundle_for(settings_factory, tmp_path, monkeypatch)
-    catalog = bundle / CATALOG_FILENAME
-    lines = catalog.read_text(encoding="utf-8").splitlines()
-    lines[0] = lines[0][:-1] + ', "unmapped_vocab": {"snomed": ["12345"]}}'
-    catalog.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-    report = validate_bundle(bundle)
-    note = next(f.message for f in report.warnings if "snomed" in f.message)
-    assert "--vocab" not in note
 
 
 async def test_a_topic_the_literature_could_not_fill_is_emitted_empty_and_warned_about(

@@ -1,17 +1,15 @@
 """The reconcile node: turn extractions into records the emitter can write. No model call.
 
-Four deterministic steps per paper, in this order:
+Three deterministic steps per paper, in this order:
 
 1. **Length budgets** (`Extraction.enforce_budgets`) — before verification rather than
    after, so nothing is checked that a budget was about to drop, and so the verification
    counts describe what is actually in the bundle rather than what a model returned.
-2. **Numeric verification** (`verification.verify_extraction`) — every number looked for
-   in the text the extractor read. One that is not there is removed, its row's confidence
-   is lowered, and the run continues. This is the whole reason the node exists.
-3. **Vocabulary partition** (`partition_vocabulary`) — hints split against the charter's
-   keys. What does not match goes to `unmapped_vocab`, which never reaches frontmatter
-   and is what `validate` later aggregates into a concrete rerun command.
-4. **Assembly** — bibliographic fields read from the PubMed record, license and text
+2. **Verification** (`verification.verify_extraction`) — every number, quoted sentence
+   and vocabulary code looked for in the text the extractor read. What is not there is
+   removed, the affected row's confidence is lowered, and the run continues. This is the
+   whole reason the node exists.
+3. **Assembly** — bibliographic fields read from the PubMed record, license and text
    basis from the retrieval, provenance stamped here.
 
 A paper with no extraction is dropped from its topic here rather than left as a topic
@@ -29,13 +27,11 @@ from okf_loremaster.config import ConfigError, Role
 from okf_loremaster.graph.state import Deps, RunState, span
 from okf_loremaster.schemas import (
     Candidate,
-    Charter,
     ConceptRecord,
     Extraction,
     PaperText,
     TextBasis,
     VerificationSummary,
-    partition_vocabulary,
 )
 from okf_loremaster.verification import verify_extraction
 
@@ -50,9 +46,6 @@ MAX_EXAMPLES = 5
 
 
 async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
-    charter = state.get("charter")
-    if charter is None:
-        raise RuntimeError("reconcile reached without a charter — the graph is wired wrong")
 
     topics = {slug: list(pmids) for slug, pmids in (state.get("topics") or {}).items()}
     texts = state.get("texts") or {}
@@ -66,7 +59,6 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
         summary = VerificationSummary()
         dropped: list[str] = []
         trimmed_papers = 0
-        unmapped_keys: set[str] = set()
 
         for slug, pmids in topics.items():
             kept: list[str] = []
@@ -76,8 +68,7 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
                 if extraction is None or candidate is None:
                     dropped.append(pmid)
                     continue
-                record, was_trimmed, unmapped = _reconcile_one(
-                    charter,
+                record, was_trimmed = _reconcile_one(
                     slug,
                     candidate,
                     extraction,
@@ -86,7 +77,6 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
                     stamp,
                 )
                 trimmed_papers += int(was_trimmed)
-                unmapped_keys.update(unmapped)
                 records.append(record)
                 kept.append(pmid)
             topics[slug] = kept
@@ -97,7 +87,6 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
             summary,
             dropped=dropped,
             trimmed=trimmed_papers,
-            unmapped=sorted(unmapped_keys),
         )
         report["summary"] = f"{len(records)} record(s); {summary.line()}"
 
@@ -110,14 +99,13 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
 
 
 def _reconcile_one(
-    charter: Charter,
     slug: str,
     candidate: Candidate,
     extraction: Extraction,
     source: PaperText | None,
     summary: VerificationSummary,
     stamp: str,
-) -> tuple[ConceptRecord, bool, list[str]]:
+) -> tuple[ConceptRecord, bool]:
     trimmed, budget_notes = extraction.enforce_budgets()
 
     # No stored source means the paper was never retrieved, which the graph makes
@@ -130,15 +118,11 @@ def _reconcile_one(
     summary.effects_dropped += check.effects_dropped
     summary.intervals_dropped += check.intervals_dropped
     summary.quotes_dropped += check.quotes_dropped
+    summary.codes_dropped += check.codes_dropped
     summary.sample_sizes_dropped += int(check.sample_size_missing)
     for note in check.notes():
         if len(summary.examples) < MAX_EXAMPLES:
             summary.examples.append(f"{candidate.pmid} {note}")
-
-    recognized, unmapped = partition_vocabulary(
-        check.extraction.vocabulary_hints, list(charter.vocabularies)
-    )
-    verified = check.extraction.model_copy(update={"vocabulary_hints": recognized})
 
     record = ConceptRecord(
         pmid=candidate.pmid,
@@ -152,15 +136,14 @@ def _reconcile_one(
         domain=slug,
         license=source.license if source is not None else "",
         text_basis=source.basis if source is not None else TextBasis.ABSTRACT,
-        extraction=verified,
-        unmapped_vocab=unmapped,
+        extraction=check.extraction,
         generated_by=stamp,
         generated_at=datetime.now(UTC),
     )
     # Set after construction because the entries are derived from the identifiers the
     # record was just given.
     record.sources = record.default_sources()
-    return record, bool(budget_notes), list(unmapped)
+    return record, bool(budget_notes)
 
 
 def _provenance(deps: Deps) -> str:
@@ -179,7 +162,6 @@ def _report(
     *,
     dropped: list[str],
     trimmed: int,
-    unmapped: list[str],
 ) -> None:
     """One warning per category, never one per row."""
     if summary.effects_dropped:
@@ -208,6 +190,14 @@ def _report(
         warnings.append(note)
         deps.warn(NODE, note)
 
+    if summary.codes_dropped:
+        note = (
+            f"{summary.codes_dropped} vocabulary code(s) were not printed in the source "
+            f"text and were dropped; the concepts they were attached to were kept"
+        )
+        warnings.append(note)
+        deps.warn(NODE, note)
+
     if summary.sample_sizes_dropped:
         note = (
             f"{summary.sample_sizes_dropped} sample size(s) were not in the source text "
@@ -218,14 +208,6 @@ def _report(
 
     if trimmed:
         note = f"{trimmed} extraction(s) ran over a length budget and were trimmed"
-        warnings.append(note)
-        deps.warn(NODE, note)
-
-    if unmapped:
-        note = (
-            f"extractions used {len(unmapped)} vocabulary key(s) the charter did not "
-            f"list: {', '.join(unmapped)} — recorded as unmapped, not in frontmatter"
-        )
         warnings.append(note)
         deps.warn(NODE, note)
 

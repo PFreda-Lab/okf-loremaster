@@ -107,13 +107,39 @@ def sample_size(pmid: str) -> int:
     return 200 + n
 
 
+def code_for(pmid: str) -> str:
+    """The one diagnosis code this paper prints, in the section that would print one.
+
+    Verification checks a code against the source the same way it checks a number, so the
+    corpus needs papers that actually print one — a faithful extractor that could only
+    ever report an empty `codes` list would exercise none of that path. Shaped like an
+    ICD-10 code because that is what a methods section prints, and deterministic per pmid
+    so the same paper always carries the same one.
+    """
+    topic_index, n = _owner(pmid)
+    return f"{'EFGH'[topic_index % len(TOPICS)]}{10 + n % 90}.{n % 10}"
+
+
+def snomed_for(pmid: str) -> str:
+    """A second coding system, printed only in the full text.
+
+    Two systems rather than one because nothing in the package filters hints by system,
+    and a fixture printing a single system could not tell that apart from a fixture whose
+    one system happened to be the only one allowed. Full text only, so an abstract-only
+    paper carrying fewer codes than a full-text one is exercised as well.
+    """
+    _, n = _owner(pmid)
+    return str(44000000 + n)
+
+
 def abstract_for(pmid: str) -> str:
     topic_index, _ = _owner(pmid)
     if pmid in NO_ABSTRACT:
         return ""
     return (
         f"Background: we examined {TOPICS[topic_index]} exposure. "
-        f"Methods: a cohort of {sample_size(pmid)} adults. "
+        f"Methods: a cohort of {sample_size(pmid)} adults, identified by "
+        f"ICD-10 {code_for(pmid)}. "
         f"Results: the association was estimated and reported."
     )
 
@@ -173,6 +199,21 @@ def interval_for(pmid: str) -> tuple[float, float]:
     return round(effect - 0.28, 2), round(effect + 0.41, 2)
 
 
+def methods_sentence(pmid: str) -> str:
+    """The section carrying this paper's codes, on its own so a test can reuse it.
+
+    A test that assembles a source by hand has to assemble the same one the graph would,
+    or a code verification will fail against text nobody would have been shown.
+    """
+    topic_index, _ = _owner(pmid)
+    return (
+        f"We followed a cohort of {sample_size(pmid)} adults for one year, "
+        f"measuring {TOPICS[topic_index]} exposure before the outcome window opened. "
+        f"Cases were identified by ICD-10 {code_for(pmid)} "
+        f"(SNOMED CT {snomed_for(pmid)})."
+    )
+
+
 def finding_sentence(pmid: str) -> str:
     """The one sentence carrying this paper's numbers, on one line and verbatim.
 
@@ -195,12 +236,7 @@ def _passages(pmid: str) -> list[dict[str, Any]]:
         ("TITLE", "front", title_for(pmid)),
         ("ABSTRACT", "abstract", abstract_for(pmid) or f"We examined {topic} exposure."),
         ("INTRO", "paragraph", f"Reports of {topic} exposure and this outcome disagree."),
-        (
-            "METHODS",
-            "paragraph",
-            f"We followed a cohort of {sample_size(pmid)} adults for one year, "
-            f"measuring {topic} exposure before the outcome window opened.",
-        ),
+        ("METHODS", "paragraph", methods_sentence(pmid)),
         ("RESULTS", "paragraph", finding_sentence(pmid)),
         ("TABLE", "table_caption", f"Table 1. {topic.title()} exposure by outcome status."),
         ("DISCUSS", "paragraph", f"The direction of the {topic} association was expected."),

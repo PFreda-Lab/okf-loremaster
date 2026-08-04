@@ -1,10 +1,9 @@
 """Writing the markdown a bundle is made of — the inverse of `reader.py`.
 
-Here rather than in the emitter because there are now two writers. `emitters/okf.py`
-renders a bundle from a finished run and `emitters/export.py` renders a filtered copy of
-one from files on disk, and both have to produce tables that `reader.markdown_table`
-reads back cell for cell. Two private copies of `_cell` would be two places for the
-escaping to drift, and the drift would be invisible: a table that round-trips wrong still
+Here rather than in the emitter so that writing and reading a table stay one decision.
+`emitters/okf.py` produces tables that `reader.markdown_table` has to read back cell for
+cell; keeping the escaping beside the format rather than inside a writer is what stops the
+two drifting apart. The drift would be invisible: a table that round-trips wrong still
 renders fine.
 
 Three rules, all of them load-bearing for the round trip:

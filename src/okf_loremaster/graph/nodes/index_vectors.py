@@ -6,7 +6,7 @@ files the validator judged — and a bundle that failed the gate still gets an i
 because the errors that gate reports are things a person fixes in a file, not reasons to
 withhold a derived artifact.
 
-Skipped entirely without `--index`. There is no default embedder: `deps.embedder` is
+Skipped entirely under `--finalize okf`. There is no default embedder: `deps.embedder` is
 `None` unless something upstream built one, so a run that never asked to index cannot
 accidentally download a model.
 

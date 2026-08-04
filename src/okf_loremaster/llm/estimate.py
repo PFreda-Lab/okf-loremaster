@@ -315,7 +315,6 @@ def project_spend(
                         outcome=charter.outcome,
                         topic=s.slug,
                         scope=s.scope or s.title,
-                        vocabularies=list(charter.vocabularies),
                     )
                 )
                 for s in charter.topic_taxonomy
