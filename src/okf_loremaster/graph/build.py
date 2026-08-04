@@ -75,10 +75,10 @@ from okf_loremaster.schemas import (
     RunManifest,
     ScoredCandidate,
     ScreenVerdict,
-    Shelf,
-    ShelfGap,
-    ShelfSummary,
     SourceRef,
+    Topic,
+    TopicGap,
+    TopicSummary,
     Verification,
     VerificationSummary,
 )
@@ -145,9 +145,9 @@ CHECKPOINTED_TYPES = (
     ScoredCandidate,
     ScreenVerdict,
     SelectionComparison,
-    Shelf,
-    ShelfGap,
-    ShelfSummary,
+    Topic,
+    TopicGap,
+    TopicSummary,
     SourceRef,
     Verification,
     VerificationSummary,
@@ -222,7 +222,7 @@ def _after_curate(deps: Deps) -> Callable[[RunState], str]:
 
     Three conditions, all of which must hold for another round: a charter to search
     with, rounds left, and a gap plan carrying at least one query no earlier round
-    already ran. The last is the one that matters — without it a shelf that is thin
+    already ran. The last is the one that matters — without it a topic that is thin
     because the literature is thin would re-run the same searches and arrive at the same
     shortfall, having paid twice.
     """
@@ -332,7 +332,7 @@ async def _drive(compiled: Any, config: Any, *, limit: int) -> RunState:
 
     One `ainvoke(None, ...)` clears one interrupt. The re-query edge sends a run back
     through `rank`, which is an interrupt point, so a single resume would leave it
-    parked with a curated shelf set nobody ever asked for. `limit` is a backstop against
+    parked with a curated topic set nobody ever asked for. `limit` is a backstop against
     a wiring mistake, not the bound that matters — `max_rounds` is, and it is enforced
     in the route function.
     """
@@ -348,13 +348,13 @@ async def _drive(compiled: Any, config: Any, *, limit: int) -> RunState:
 
 def _summary(state: RunState) -> str:
     pool = len(state.get("pool") or [])
-    shelves = state.get("shelves") or {}
-    if not shelves:
+    topics = state.get("topics") or {}
+    if not topics:
         return f"{pool} papers pooled"
-    kept = sum(len(pmids) for pmids in shelves.values())
-    filled = sum(1 for pmids in shelves.values() if pmids)
+    kept = sum(len(pmids) for pmids in topics.values())
+    filled = sum(1 for pmids in topics.values() if pmids)
     rounds = int(state.get("rounds") or 1)
-    detail = f"{kept} papers across {filled} of {len(shelves)} shelves, from {pool} pooled"
+    detail = f"{kept} papers across {filled} of {len(topics)} topics, from {pool} pooled"
     if rounds > 1:
         detail += f" over {rounds} search rounds"
     records = state.get("records") or []

@@ -28,6 +28,11 @@ bundles/
 /charter.yaml
 /*.charter.yaml
 
+# Internal working notes: the agent operating manual and the datestamped build log.
+# Kept local — they are about how this was built, not about how it is used.
+/CLAUDE.md
+/Build_Progress.md
+
 .DS_Store
 .vscode/
 .idea/

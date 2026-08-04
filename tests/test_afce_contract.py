@@ -8,7 +8,7 @@ into a `resources/` directory and asks whether it resolves.
 
 The rules are numbered as they are in that spec (§6.4.1), and each test names the one it
 covers. What they have in common is that every one of them fails *silently* on a real
-corpus: a `domain` that does not match its folder shelves a paper where nobody looks, a
+corpus: a `domain` that does not match its folder files a paper where nobody looks, a
 frontmatter block that YAML and a line parser read differently means two things at once,
 and an empty search surface makes a perfectly good document unfindable rather than
 missing. None of those raise, and none are visible in the bundle we wrote.
@@ -235,7 +235,7 @@ async def test_the_search_surface_is_populated_for_every_document(
         for field_name in HAYSTACK_FIELDS:
             assert record[field_name], f"{record['path']} has no {field_name}"
 
-    # And the surface discriminates: a shelf-specific term ranks that shelf first.
+    # And the surface discriminates: a topic-specific term ranks that topic first.
     slug = next(iter(consumer.domains))
     ranked = consumer.search(f"{slug} exposure outcome")
     top = ranked[: len(consumer.browse(slug))]
@@ -245,13 +245,13 @@ async def test_the_search_surface_is_populated_for_every_document(
 async def test_only_title_and_domain_are_required_and_domain_is_the_folder(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Rules 1 and 2 — a mismatch shelves a paper where nobody browsing will look."""
+    """Rules 1 and 2 — a mismatch files a paper where nobody browsing will look."""
     consumer = Consumer(await dropped_in(settings_factory, tmp_path, monkeypatch))
 
     for record in consumer.records:
         assert record["title"]
         assert record["domain"] == record["path"].split("/")[0]
-        assert "shelf" not in record["raw"], "the human word leaked into frontmatter"
+        assert "topic" not in record["raw"], "the human word leaked into frontmatter"
 
 
 async def test_the_reserved_names_are_never_documents(

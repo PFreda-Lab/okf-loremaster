@@ -50,18 +50,25 @@ TIMEOUT = 20.0
 def tui_run(
     settings_factory: Any, tmp_path: Path, **overrides: Any
 ) -> tuple[LoremasterApp, Any]:
-    """An app wired to the fake corpus, and the settings it will use."""
+    """An app wired to the fake corpus, and the settings it will use.
+
+    `interactive=True` unless a test says otherwise: a run is autonomous by default and
+    would never raise a modal, and most of what there is to test here is the modal.
+    """
     charter_path = tmp_path / "given.yaml"
     charter_path.write_text(charter_for().to_yaml(), encoding="utf-8")
     options = RunOptions(
-        prompt=PROMPT,
-        charter_path=charter_path,
-        out=tmp_path / "run",
-        pool_size=POOL_SIZE,
-        target_papers=120,
-        dry_run=True,
-        tui=True,
-        **overrides,
+        **{
+            "prompt": PROMPT,
+            "charter_path": charter_path,
+            "out": tmp_path / "run",
+            "pool_size": POOL_SIZE,
+            "target_papers": 120,
+            "dry_run": True,
+            "tui": True,
+            "interactive": True,
+            **overrides,
+        }
     )
     settings = settings_factory(
         ncbi_email="test@example.org",
@@ -146,6 +153,29 @@ async def test_a_run_through_the_app_reaches_the_same_state(
     assert app._status["screen"] == PENDING  # a dry run stops after ranking
     assert app.run_id in log
     assert "rank" in log
+
+
+async def test_an_autonomous_run_logs_the_pauses_instead_of_asking(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without `--interactive` no modal ever opens, and nothing is hidden either.
+
+    The full screen is worth watching on an unattended run, so what the modal would have
+    shown goes to the log instead — the same view, minus the question.
+    """
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path, interactive=False)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: app.outcome is not None)
+        assert not asking(app)
+        log = log_text(app)
+        await pilot.press("q")
+
+    assert app.error is None
+    assert log.count("continuing without asking") == 2  # charter, then retrieve
 
 
 async def test_declining_the_charter_stops_the_run_without_failing_it(

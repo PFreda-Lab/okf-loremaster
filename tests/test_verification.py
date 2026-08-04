@@ -254,7 +254,7 @@ async def test_a_fabricated_odds_ratio_is_caught_and_the_run_continues(
     """The step 6 gate.
 
     `effect=None`, the confidence one step lower, a warning that names the paper and the
-    number, and a finished bundle — every paper still has a record, every shelf still has
+    number, and a finished bundle — every paper still has a record, every topic still has
     its papers, and everything the row said apart from the magnitude is still there.
     """
     run = await full_run(
@@ -262,7 +262,7 @@ async def test_a_fabricated_odds_ratio_is_caught_and_the_run_continues(
     )
 
     assert len(run.records) == TARGET
-    assert sum(len(pmids) for pmids in run.shelves.values()) == TARGET
+    assert sum(len(pmids) for pmids in run.topics.values()) == TARGET
 
     for record in run.records:
         row = record.extraction.predictors[0]

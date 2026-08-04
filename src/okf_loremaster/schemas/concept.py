@@ -154,7 +154,7 @@ class NullFinding(Model):
 class Extraction(Model):
     """Everything a model decided about one paper. No bibliographic data."""
 
-    # Two lines, for the shelf index and for frontmatter. The highest-signal browse
+    # Two lines, for the topic index and for frontmatter. The highest-signal browse
     # field in the bundle: it is what an agent reads before deciding to open the file.
     description: str = ""
     # The finding, in at most two sentences.
@@ -218,7 +218,7 @@ class Extraction(Model):
         """Trim to the length budgets, returning the trimmed copy and what was cut.
 
         Truncate and warn rather than reject: an over-long extraction is a good one
-        that ran on, and re-asking costs a DEEP call to fix a formatting problem.
+        that ran on, and re-asking costs a reasoning-tier call to fix a formatting problem.
         Dropped predictor rows are named in the warning so nothing vanishes quietly.
         """
         trimmed = self.model_copy(deep=True)

@@ -39,10 +39,10 @@ class PlannedQuery(Model):
     # Why this query exists, in one line. Printed by --dry-run, so a plan can be
     # judged before it costs anything.
     rationale: str = ""
-    # The shelf this query is meant to fill, when it targets one. Free-form rather than
-    # a Slug: the planner may name a shelf that the charter does not have, and that
+    # The topic this query is meant to fill, when it targets one. Free-form rather than
+    # a Slug: the planner may name a topic that the charter does not have, and that
     # mismatch is worth surfacing rather than failing validation over.
-    shelf: str = ""
+    topic: str = ""
 
 
 class QueryPlan(Model):

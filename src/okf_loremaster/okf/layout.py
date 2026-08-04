@@ -31,7 +31,7 @@ __all__ = [
     "QUOTE_LEAD",
     "RESERVED_FILENAMES",
     "ROOT_INDEX_TYPE",
-    "SHELF_INDEX_TYPE",
+    "TOPIC_INDEX_TYPE",
     "UNVERIFIED_CELL",
     "VECTOR_SUFFIX",
     "vector_store_path",
@@ -43,7 +43,7 @@ CATALOG_FILENAME = "_catalog.jsonl"
 DESCRIPTOR_FILENAME = "resource_descriptor.yaml"
 CHARTER_FILENAME = "charter.yaml"
 
-# Files at the root of a bundle or a shelf that are ours to regenerate, never documents.
+# Files at the root of a bundle or a topic that are ours to regenerate, never documents.
 RESERVED_FILENAMES = frozenset(
     {INDEX_FILENAME, LOG_FILENAME, CATALOG_FILENAME, DESCRIPTOR_FILENAME, CHARTER_FILENAME}
 )
@@ -52,7 +52,7 @@ RESERVED_FILENAMES = frozenset(
 # field the spec actually requires, so it says what kind of thing the reader is holding.
 DOCUMENT_TYPE = "Literature Evidence"
 ROOT_INDEX_TYPE = "Bundle Index"
-SHELF_INDEX_TYPE = "Shelf Index"
+TOPIC_INDEX_TYPE = "Topic Index"
 
 # `# ` headings, in this order, in every concept file.
 BODY_SECTIONS = (
@@ -113,9 +113,9 @@ def vector_store_path(bundle: Path) -> Path:
     """`<bundle>.chroma`, a sibling of the bundle directory.
 
     A sibling rather than a subdirectory for three reasons: `read_bundle` treats every
-    directory at the root as a shelf, so an index inside would validate as a shelf with
+    directory at the root as a topic, so an index inside would validate as a topic with
     no papers; the store is binary and would otherwise be copied by anything that copies
-    a bundle; and it is derived, so deleting it costs nothing but deleting a shelf costs
+    a bundle; and it is derived, so deleting it costs nothing but deleting a topic costs
     a rebuild.
     """
     resolved = bundle if bundle.name else bundle.resolve()

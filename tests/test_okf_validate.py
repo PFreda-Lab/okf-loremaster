@@ -29,7 +29,7 @@ from okf_loremaster.okf.frontmatter import (
 from okf_loremaster.okf.layout import CATALOG_FILENAME, INDEX_FILENAME
 from okf_loremaster.okf.reader import body_sections
 from okf_loremaster.okf.validate import UNMAPPED_SHARE, Severity, validate_bundle
-from okf_loremaster.schemas import Shelf
+from okf_loremaster.schemas import Topic
 
 from graph_runs import charter_for, full_run
 
@@ -40,7 +40,7 @@ def test_a_block_survives_the_round_trip_it_will_actually_make() -> None:
     fields = {
         "type": "Literature Evidence",
         "title": 'A study of "quoted" things',
-        "domain": "some-shelf",
+        "domain": "some-topic",
         "n": 1454,
         "export_safe": False,
         "tags": ["one", "two"],
@@ -93,7 +93,7 @@ def test_the_line_parser_refuses_what_a_line_parser_would_misread(block: str, wh
 
 def test_a_document_with_no_frontmatter_is_an_error_not_a_body(tmp_path: Path) -> None:
     """A file with no frontmatter has no `domain`, so reading it as body-only would
-    produce a document that cannot be shelved."""
+    produce a document that cannot be filed."""
     with pytest.raises(FrontmatterError):
         load("# just a heading\n")
     with pytest.raises(FrontmatterError):
@@ -130,9 +130,9 @@ async def bundle_for(
 def documents_in(bundle: Path) -> list[Path]:
     return sorted(
         path
-        for shelf in sorted(bundle.iterdir())
-        if shelf.is_dir()
-        for path in sorted(shelf.glob("*.md"))
+        for topic in sorted(bundle.iterdir())
+        if topic.is_dir()
+        for path in sorted(topic.glob("*.md"))
         if path.name != INDEX_FILENAME
     )
 
@@ -150,7 +150,7 @@ async def test_a_domain_that_does_not_match_its_folder_is_an_error(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Rule 2 of the downstream contract, and almost always a copy-paste bug. Silently
-    re-shelving it would hide the bug and move the paper."""
+    re-filing it would hide the bug and move the paper."""
     bundle = await bundle_for(settings_factory, tmp_path, monkeypatch)
     document = one_document(bundle)
     document.write_text(
@@ -176,14 +176,14 @@ async def test_a_bare_scalar_is_an_error_even_though_yaml_accepts_it(
     assert "bare scalar" in messages(bundle)
 
 
-async def test_a_shelf_key_in_frontmatter_is_an_error(
+async def test_a_topic_key_in_frontmatter_is_an_error(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bundle = await bundle_for(settings_factory, tmp_path, monkeypatch)
     document = one_document(bundle)
     document.write_text(
         document.read_text(encoding="utf-8").replace(
-            "domain:", 'shelf: "sneaked-in"\ndomain:', 1
+            "domain:", 'topic: "sneaked-in"\ndomain:', 1
         ),
         encoding="utf-8",
     )
@@ -273,8 +273,8 @@ async def test_a_reserved_name_cannot_be_a_document(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bundle = await bundle_for(settings_factory, tmp_path, monkeypatch)
-    shelf = next(p for p in sorted(bundle.iterdir()) if p.is_dir())
-    (shelf / "log.md").write_text('---\ntitle: "x"\n---\n\n# Bottom line\n\nx\n', encoding="utf-8")
+    topic = next(p for p in sorted(bundle.iterdir()) if p.is_dir())
+    (topic / "log.md").write_text('---\ntitle: "x"\n---\n\n# Bottom line\n\nx\n', encoding="utf-8")
 
     assert "is reserved and cannot be a document" in messages(bundle)
 
@@ -361,16 +361,16 @@ async def test_one_stray_vocabulary_key_is_reported_without_a_rerun_command(
     assert "--vocab" not in note
 
 
-async def test_a_shelf_the_literature_could_not_fill_is_emitted_empty_and_warned_about(
+async def test_a_topic_the_literature_could_not_fill_is_emitted_empty_and_warned_about(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An empty folder is a claim about the literature. Omitting it would make a shelf
+    """An empty folder is a claim about the literature. Omitting it would make a topic
     nobody could fill indistinguishable from one nobody planned — so the charter asks
     for a facet the corpus does not contain, and the bundle has to say so."""
     charter = charter_for(
-        shelf_taxonomy=[
-            *charter_for().shelf_taxonomy,
-            Shelf(slug="epsilon", title="Epsilon", scope="a facet nobody wrote about",
+        topic_taxonomy=[
+            *charter_for().topic_taxonomy,
+            Topic(slug="epsilon", title="Epsilon", scope="a facet nobody wrote about",
                   seed_terms=["epsilon"]),
         ]
     )

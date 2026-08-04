@@ -2,13 +2,18 @@
 
 The graph stops after `charter` and after `rank` because those are the last moments a
 person can act cheaply. Everything before the charter pause is one model call;
-everything after the retrieve pause is thousands. A charter with a wrong shelf taxonomy
+everything after the retrieve pause is thousands. A charter with a wrong topic taxonomy
 or a missing vocabulary is fixable in ten seconds at the first pause and expensive to
 notice at the last.
 
+**A run is autonomous unless `--interactive` asks otherwise**, so both moments are
+printed on every run and only *asked* on an interactive one. The graph is interrupted
+either way: the interrupt is what writes the checkpoint that `--resume` needs, and
+skipping the question is not the same as skipping the stop.
+
 This is UI, not a node — nodes never print, and these do nothing else. `Pause` is a
-protocol so the orchestrator can be driven by a console, by `--yes`, by the TUI, or by
-a test without knowing which.
+protocol so the orchestrator can be driven by a console, by an autonomous run, by the
+TUI, or by a test without knowing which.
 
 **What a pause shows is built as renderables, not printed.** `charter_view` and
 `retrieve_view` return a list; `ConsolePause` prints it and the Textual pause screen
@@ -102,7 +107,7 @@ def charter_view(charter: Charter) -> list[RenderableType]:
     if charter.outcome:
         facts.add_row("outcome", charter.outcome)
     facts.add_row("target", f"{charter.target_papers} papers")
-    facts.add_row("per shelf", f"{charter.shelf_min}-{charter.shelf_max}")
+    facts.add_row("per topic", f"{charter.topic_min}-{charter.topic_max}")
     if charter.min_year:
         facts.add_row("from", str(charter.min_year))
     facts.add_row("languages", ", ".join(charter.languages) or "[dim]any[/dim]")
@@ -117,7 +122,7 @@ def charter_view(charter: Charter) -> list[RenderableType]:
                 criteria.add_row(label if index == 0 else "", item)
         view.append(criteria)
 
-    view.append(_shelf_table(charter))
+    view.append(_topic_table(charter))
 
     # Directly under the taxonomy, deliberately: this is the field that gates every
     # later extraction and it is the one a reader skims past.
@@ -148,15 +153,15 @@ def render_charter(console: Console, charter: Charter) -> None:
         console.print(item)
 
 
-def _shelf_table(charter: Charter) -> Table:
-    table = Table(title="shelf_taxonomy", title_style="bold", show_lines=False)
+def _topic_table(charter: Charter) -> Table:
+    table = Table(title="topic_taxonomy", title_style="bold", show_lines=False)
     table.add_column("slug", style="cyan", no_wrap=True)
     table.add_column("title")
     table.add_column("scope", overflow="fold")
     table.add_column("seed terms", overflow="fold", style="dim")
-    for shelf in charter.shelf_taxonomy:
-        table.add_row(shelf.slug, shelf.title, shelf.scope, ", ".join(shelf.seed_terms))
-    if not charter.shelf_taxonomy:
+    for topic in charter.topic_taxonomy:
+        table.add_row(topic.slug, topic.title, topic.scope, ", ".join(topic.seed_terms))
+    if not charter.topic_taxonomy:
         table.add_row("[yellow]none[/yellow]", "", "", "")
     return table
 
@@ -233,20 +238,20 @@ def _comparison(state: RunState) -> list[RenderableType]:
     view: list[RenderableType] = [
         Text.from_markup(f"[bold]diversification[/bold]  {comparison.summary()}")
     ]
-    shelves = sorted(set(comparison.pure_by_shelf) | set(comparison.diversified_by_shelf))
-    if not shelves:
+    topics = sorted(set(comparison.pure_by_topic) | set(comparison.diversified_by_topic))
+    if not topics:
         return view
-    table = Table(title="pool by shelf affinity", title_style="dim")
-    table.add_column("shelf", style="cyan")
+    table = Table(title="pool by topic affinity", title_style="dim")
+    table.add_column("topic", style="cyan")
     table.add_column("pure rank", justify="right")
     table.add_column("MMR + quota", justify="right")
     table.add_column("delta", justify="right")
-    for shelf in shelves:
-        before = comparison.pure_by_shelf.get(shelf, 0)
-        after = comparison.diversified_by_shelf.get(shelf, 0)
+    for topic in topics:
+        before = comparison.pure_by_topic.get(topic, 0)
+        after = comparison.diversified_by_topic.get(topic, 0)
         delta = after - before
         color = "green" if delta > 0 else ("red" if delta < 0 else "dim")
-        table.add_row(shelf, str(before), str(after), f"[{color}]{delta:+d}[/{color}]")
+        table.add_row(topic, str(before), str(after), f"[{color}]{delta:+d}[/{color}]")
     view.append(table)
     return view
 
@@ -282,9 +287,9 @@ def _estimate(estimate: SpendEstimate | None) -> list[RenderableType]:
 class ConsolePause:
     """Prints the decision surface, and asks unless told not to.
 
-    `interactive=False` is what `--yes` and `--dry-run` use. It still prints everything:
-    the information is the point, and a run whose output is being piped into a log
-    wants it more, not less.
+    `interactive=False` is the default surface for an autonomous run, and what a dry run
+    uses. It still prints everything: the information is the point, and a run whose
+    output is being piped into a log wants it more, not less.
     """
 
     def __init__(self, console: Console | None = None, *, interactive: bool = True) -> None:
@@ -309,7 +314,9 @@ class ConsolePause:
     def _ask(self, question: str) -> PauseDecision:
         """Blocking on purpose — nothing else should run while a person is typing."""
         if not self._interactive:
-            self._console.print(f"[dim]{question} — not asking (--yes or --dry-run)[/dim]")
+            self._console.print(
+                f"[dim]{question} — continuing without asking; --interactive stops here[/dim]"
+            )
             return PauseDecision(proceed=True)
         from rich.prompt import Confirm
 

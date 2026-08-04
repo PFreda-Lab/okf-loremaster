@@ -32,10 +32,10 @@ from okf_loremaster.schemas import (
     PredictorRow,
     RunManifest,
     ScreenVerdict,
-    Shelf,
-    ShelfGap,
     SourceRef,
     TextBasis,
+    Topic,
+    TopicGap,
     is_export_safe,
     partition_vocabulary,
     slugify,
@@ -44,14 +44,14 @@ from okf_loremaster.schemas.limits import sentences, truncate_chars
 from okf_loremaster.schemas.parse import SchemaError, extract_json, parse_model
 
 
-def a_shelf(slug: str = "risk-factors") -> Shelf:
-    return Shelf(slug=slug, title=slug.replace("-", " ").title(), scope="what belongs here")
+def a_topic(slug: str = "risk-factors") -> Topic:
+    return Topic(slug=slug, title=slug.replace("-", " ").title(), scope="what belongs here")
 
 
 def a_charter(**overrides: object) -> Charter:
     base: dict[str, object] = {
         "prompt": "build a bundle",
-        "shelf_taxonomy": [a_shelf(), a_shelf("outcome-definition")],
+        "topic_taxonomy": [a_topic(), a_topic("outcome-definition")],
         "vocabularies": ["vocab-a", "vocab-b"],
     }
     base.update(overrides)
@@ -271,13 +271,13 @@ def test_export_safety_is_conservative(license_text: str, safe: bool) -> None:
 # --- slugs and filenames ----------------------------------------------------
 
 
-def test_a_shelf_slug_must_be_a_slug() -> None:
+def test_a_topic_slug_must_be_a_slug() -> None:
     """The slug is a directory name and the `domain` frontmatter value at once."""
     with pytest.raises(ValidationError):
-        Shelf(slug="Risk Factors", title="x")
+        Topic(slug="Risk Factors", title="x")
     with pytest.raises(ValidationError):
-        Shelf(slug="-leading", title="x")
-    assert Shelf(slug="risk-factors", title="x").slug == "risk-factors"
+        Topic(slug="-leading", title="x")
+    assert Topic(slug="risk-factors", title="x").slug == "risk-factors"
 
 
 def test_slugify_folds_arbitrary_text() -> None:
@@ -370,15 +370,15 @@ def test_vocabularies_are_lowercased_and_deduped() -> None:
     assert charter.vocabularies == ["vocab-a", "vocab-b"]
 
 
-def test_duplicate_shelf_slugs_are_rejected() -> None:
+def test_duplicate_topic_slugs_are_rejected() -> None:
     """They are directory names; the second would silently overwrite the first."""
     with pytest.raises(ValidationError, match="unique"):
-        a_charter(shelf_taxonomy=[a_shelf(), a_shelf()])
+        a_charter(topic_taxonomy=[a_topic(), a_topic()])
 
 
-def test_an_inverted_shelf_range_is_rejected() -> None:
-    with pytest.raises(ValidationError, match="shelf_min"):
-        a_charter(shelf_min=20, shelf_max=10)
+def test_an_inverted_topic_range_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="topic_min"):
+        a_charter(topic_min=20, topic_max=10)
 
 
 def test_a_charter_round_trips_through_yaml() -> None:
@@ -393,8 +393,8 @@ def test_a_charter_round_trips_through_yaml() -> None:
 def test_charter_yaml_keeps_declaration_order() -> None:
     lines = a_charter().to_yaml().splitlines()
     keys = [line.split(":")[0] for line in lines if line and not line.startswith((" ", "-"))]
-    assert keys.index("prompt") < keys.index("shelf_taxonomy") < keys.index("vocabularies")
-    assert keys.index("shelf_min") < keys.index("shelf_max")
+    assert keys.index("prompt") < keys.index("topic_taxonomy") < keys.index("vocabularies")
+    assert keys.index("topic_min") < keys.index("topic_max")
 
 
 def test_the_charter_digest_ignores_when_it_was_generated() -> None:
@@ -414,16 +414,16 @@ def test_a_charter_with_no_vocabularies_says_so_at_the_pause() -> None:
 
 
 def test_a_target_the_taxonomy_cannot_hold_is_reported() -> None:
-    problems = a_charter(target_papers=500, shelf_max=10).problems()
+    problems = a_charter(target_papers=500, topic_max=10).problems()
     assert any("exceeds what the taxonomy can hold" in p for p in problems)
 
 
 def test_a_workable_charter_has_no_problems() -> None:
-    assert a_charter(target_papers=40, shelf_min=8, shelf_max=40).problems() == []
+    assert a_charter(target_papers=40, topic_min=8, topic_max=40).problems() == []
 
 
 def test_capacity_reflects_the_taxonomy_size() -> None:
-    charter = a_charter(shelf_min=5, shelf_max=25)
+    charter = a_charter(topic_min=5, topic_max=25)
     assert charter.capacity() == (10, 50)
 
 
@@ -431,7 +431,7 @@ def test_capacity_reflects_the_taxonomy_size() -> None:
 
 
 def test_a_near_miss_is_flagged_borderline_for_reconsideration() -> None:
-    """Cheaper and better-informed than another search round when a shelf is thin."""
+    """Cheaper and better-informed than another search round when a topic is thin."""
     assert ScreenVerdict(pmid="1", include=False, relevance=2).borderline
     assert not ScreenVerdict(pmid="2", include=False, relevance=0).borderline
     assert ScreenVerdict(
@@ -444,24 +444,24 @@ def test_relevance_is_bounded() -> None:
         ScreenVerdict(pmid="1", include=True, relevance=7)
 
 
-def test_curation_groups_kept_papers_by_shelf() -> None:
+def test_curation_groups_kept_papers_by_topic() -> None:
     result = CurationResult(
         decisions=[
-            CurationDecision(pmid="1", keep=True, shelf="risk-factors"),
+            CurationDecision(pmid="1", keep=True, topic="risk-factors"),
             CurationDecision(pmid="2", keep=False),
-            CurationDecision(pmid="3", keep=True, shelf="risk-factors"),
+            CurationDecision(pmid="3", keep=True, topic="risk-factors"),
         ]
     )
-    assert result.by_shelf() == {"risk-factors": ["1", "3"]}
+    assert result.by_topic() == {"risk-factors": ["1", "3"]}
     assert len(result.kept) == 2
 
 
-def test_a_shelf_under_its_floor_drives_the_requery_edge() -> None:
-    result = CurationResult(gaps=[ShelfGap(shelf="risk-factors", kept=3, floor=8)])
+def test_a_topic_under_its_floor_drives_the_requery_edge() -> None:
+    result = CurationResult(gaps=[TopicGap(topic="risk-factors", kept=3, floor=8)])
     assert result.gaps[0].shortfall == 5
     assert result.needs_more_search
 
-    filled = CurationResult(gaps=[ShelfGap(shelf="risk-factors", kept=9, floor=8)])
+    filled = CurationResult(gaps=[TopicGap(topic="risk-factors", kept=9, floor=8)])
     assert not filled.needs_more_search
 
 

@@ -5,10 +5,12 @@ the only way to check a bundle somebody else built, or one built six months ago.
 exit code is the whole point: a gate that reported failure and exited zero would be a
 gate no script could act on.
 
-The `--review` refusal is the other. `--yes`, `--dry-run` and `--json` each mean nobody
-is going to look, and signing anyway would write `by: "human:<id>"` naming a person who
-never saw the bundle. That is a false attestation rather than a weak one, so the
-combination is refused rather than degraded.
+The `--review` refusal is the other. `--dry-run` and `--json` each mean nobody is going
+to look, and signing anyway would write `by: "human:<id>"` naming a person who never saw
+the bundle. That is a false attestation rather than a weak one, so the combination is
+refused rather than degraded. An autonomous run is not on that list: nobody steered the
+search, but somebody still reads the bundle at the end, which is what the signature is
+about.
 """
 
 from __future__ import annotations
@@ -61,10 +63,22 @@ def test_validate_says_a_bundle_is_missing_rather_than_reporting_on_nothing(
     assert "not-a-bundle" in result.output
 
 
-@pytest.mark.parametrize("flag", ["--yes", "--dry-run", "--json"])
+@pytest.mark.parametrize("flag", ["--dry-run", "--json"])
 def test_review_is_refused_with_any_flag_that_means_nobody_will_look(flag: str) -> None:
     result = runner.invoke(app, ["build", "a prompt", "--review", flag])
 
     assert result.exit_code == 1
     assert "--review cannot be combined with" in result.output
     assert flag in result.output
+
+
+def test_review_is_allowed_on_an_autonomous_run() -> None:
+    """The default run asks nobody to steer, which says nothing about who signs.
+
+    Refusing this pair would mean a bundle can only be attested by someone who also sat
+    through the search — an unrelated requirement, and the common case is the opposite.
+    """
+    result = runner.invoke(app, ["build", "a prompt", "--review", "--help"])
+
+    assert result.exit_code == 0
+    assert "--review cannot be combined with" not in result.output

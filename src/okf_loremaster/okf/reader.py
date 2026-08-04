@@ -36,7 +36,7 @@ from okf_loremaster.okf.layout import (
 __all__ = [
     "OkfBundle",
     "OkfDocument",
-    "OkfShelf",
+    "OkfTopic",
     "body_sections",
     "fact_list",
     "markdown_table",
@@ -134,7 +134,7 @@ class OkfDocument:
 
     path: Path
     # The folder that holds it, which `domain` is required to equal. Empty at the root.
-    shelf: str
+    topic: str
     fields: dict[str, Any] = field(default_factory=dict)
     body: str = ""
 
@@ -204,7 +204,7 @@ class OkfDocument:
 
 
 @dataclass(frozen=True, slots=True)
-class OkfShelf:
+class OkfTopic:
     slug: str
     path: Path
     index: OkfDocument | None = None
@@ -221,7 +221,7 @@ class OkfShelf:
 class OkfBundle:
     path: Path
     index: OkfDocument | None = None
-    shelves: tuple[OkfShelf, ...] = ()
+    topics: tuple[OkfTopic, ...] = ()
     catalog: tuple[dict[str, Any], ...] = ()
     descriptor: dict[str, Any] = field(default_factory=dict)
     charter: dict[str, Any] = field(default_factory=dict)
@@ -229,12 +229,12 @@ class OkfBundle:
     problems: tuple[tuple[Path, str], ...] = ()
 
     def documents(self) -> Iterator[OkfDocument]:
-        for shelf in self.shelves:
-            yield from shelf.documents
+        for topic in self.topics:
+            yield from topic.documents
 
     @property
     def document_count(self) -> int:
-        return sum(len(shelf.documents) for shelf in self.shelves)
+        return sum(len(topic.documents) for topic in self.topics)
 
     @property
     def has_catalog(self) -> bool:
@@ -261,13 +261,13 @@ def read_bundle(path: Path) -> OkfBundle:
         raise NotADirectoryError(f"{path} is a file, not a bundle directory")
 
     problems: list[tuple[Path, str]] = []
-    index = _read_document(path / INDEX_FILENAME, shelf="", problems=problems)
+    index = _read_document(path / INDEX_FILENAME, topic="", problems=problems)
 
-    shelves: list[OkfShelf] = []
+    topics: list[OkfTopic] = []
     for directory in sorted(p for p in path.iterdir() if p.is_dir()):
         if directory.name.startswith(".") or directory.name.startswith("_"):
             continue
-        shelves.append(_read_shelf(directory, problems))
+        topics.append(_read_topic(directory, problems))
 
     catalog, catalog_problems = _read_catalog(path / CATALOG_FILENAME)
     problems.extend(catalog_problems)
@@ -275,7 +275,7 @@ def read_bundle(path: Path) -> OkfBundle:
     return OkfBundle(
         path=path,
         index=index,
-        shelves=tuple(shelves),
+        topics=tuple(topics),
         catalog=tuple(catalog),
         descriptor=_read_yaml(path / DESCRIPTOR_FILENAME, problems),
         charter=_read_yaml(path / CHARTER_FILENAME, problems),
@@ -283,24 +283,24 @@ def read_bundle(path: Path) -> OkfBundle:
     )
 
 
-def _read_shelf(directory: Path, problems: list[tuple[Path, str]]) -> OkfShelf:
+def _read_topic(directory: Path, problems: list[tuple[Path, str]]) -> OkfTopic:
     documents: list[OkfDocument] = []
     for candidate in sorted(directory.glob("*.md")):
         if candidate.name == INDEX_FILENAME:
             continue
-        document = _read_document(candidate, shelf=directory.name, problems=problems)
+        document = _read_document(candidate, topic=directory.name, problems=problems)
         if document is not None:
             documents.append(document)
-    return OkfShelf(
+    return OkfTopic(
         slug=directory.name,
         path=directory,
-        index=_read_document(directory / INDEX_FILENAME, shelf=directory.name, problems=problems),
+        index=_read_document(directory / INDEX_FILENAME, topic=directory.name, problems=problems),
         documents=tuple(documents),
     )
 
 
 def _read_document(
-    path: Path, *, shelf: str, problems: list[tuple[Path, str]]
+    path: Path, *, topic: str, problems: list[tuple[Path, str]]
 ) -> OkfDocument | None:
     if not path.exists():
         return None
@@ -309,7 +309,7 @@ def _read_document(
     except (FrontmatterError, OSError, UnicodeDecodeError) as exc:
         problems.append((path, str(exc)))
         return None
-    return OkfDocument(path=path, shelf=shelf, fields=fields, body=body)
+    return OkfDocument(path=path, topic=topic, fields=fields, body=body)
 
 
 def _read_catalog(path: Path) -> tuple[list[dict[str, Any]], list[tuple[Path, str]]]:

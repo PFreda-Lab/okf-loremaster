@@ -87,7 +87,7 @@ async def _screen_all(
         outcome=charter.outcome,
         inclusion=list(charter.inclusion),
         exclusion=list(charter.exclusion),
-        shelves=[(shelf.slug, shelf.scope or shelf.title) for shelf in charter.shelf_taxonomy],
+        topics=[(topic.slug, topic.scope or topic.title) for topic in charter.topic_taxonomy],
     )
     schema = response_format_for(ScreenVerdict, name="screen_verdict")
     known = set(charter.slugs)
@@ -107,9 +107,9 @@ async def _screen_all(
             failures.append(f"{candidate.pmid}: {type(exc).__name__}: {exc}")
             verdict = _unreadable(candidate.pmid, f"screening call failed ({type(exc).__name__})")
 
-        if verdict.shelf and verdict.shelf not in known:
-            unknown.add(verdict.shelf)
-            verdict = verdict.model_copy(update={"shelf": ""})
+        if verdict.topic and verdict.topic not in known:
+            unknown.add(verdict.topic)
+            verdict = verdict.model_copy(update={"topic": ""})
 
         done += 1
         deps.progress(NODE, f"screened {done} of {total}", current=done, total=total)
@@ -176,8 +176,8 @@ def _report(
         deps.warn(NODE, note)
     if unknown:
         note = (
-            "screener named shelf(s) the charter does not have, so those papers carry no "
-            "shelf hint: " + ", ".join(sorted(unknown))
+            "screener named topic(s) the charter does not have, so those papers carry no "
+            "topic hint: " + ", ".join(sorted(unknown))
         )
         warnings.append(note)
         deps.warn(NODE, note)

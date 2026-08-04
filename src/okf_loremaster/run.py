@@ -32,9 +32,9 @@ from uuid import uuid4
 
 from okf_loremaster.curation import MAX_ROUNDS
 from okf_loremaster.schemas import (
-    DEFAULT_SHELF_MAX,
-    DEFAULT_SHELF_MIN,
     DEFAULT_TARGET_PAPERS,
+    DEFAULT_TOPIC_MAX,
+    DEFAULT_TOPIC_MIN,
     Charter,
 )
 
@@ -93,13 +93,16 @@ class RunOptions:
     pool_size: int = 800
     screen_budget: int = 400
     target_papers: int = DEFAULT_TARGET_PAPERS
-    shelf_min: int = DEFAULT_SHELF_MIN
-    shelf_max: int = DEFAULT_SHELF_MAX
+    topic_min: int = DEFAULT_TOPIC_MIN
+    topic_max: int = DEFAULT_TOPIC_MAX
     max_queries: int = 12
     max_rounds: int = MAX_ROUNDS
     vocab: list[str] = field(default_factory=list)
-    yes: bool = False
-    # Ask for human sign-off before the bundle is written. Refused with `--yes` or
+    # Stop at the charter and the retrieved pool and ask. Off by default: a run is
+    # autonomous end to end unless someone asks to be in it. The two pauses still print
+    # what they would have asked about, so an unattended run is not a silent one.
+    interactive: bool = False
+    # Ask for human sign-off before the bundle is written. Refused with `--dry-run` or
     # `--json` by the CLI: auto-signing would attribute `human:<id>` to someone who
     # never looked.
     review: bool = False
@@ -190,8 +193,8 @@ async def build_run(
         max_queries=options.max_queries,
         max_rounds=options.max_rounds,
         target_papers=options.target_papers,
-        shelf_min=options.shelf_min,
-        shelf_max=options.shelf_max,
+        topic_min=options.topic_min,
+        topic_max=options.topic_max,
     )
 
     try:
@@ -227,13 +230,13 @@ async def draft_charter(
     out: Path,
     vocab: list[str] | None = None,
     target_papers: int = DEFAULT_TARGET_PAPERS,
-    shelf_min: int = DEFAULT_SHELF_MIN,
-    shelf_max: int = DEFAULT_SHELF_MAX,
+    topic_min: int = DEFAULT_TOPIC_MIN,
+    topic_max: int = DEFAULT_TOPIC_MAX,
     console: Console | None = None,
     settings: Settings | None = None,
     verbose: int = 0,
 ) -> Charter:
-    """One DEEP call, then write the result. No search, no graph.
+    """One reasoning-tier call, then write the result. No search, no graph.
 
     The charter node is invoked directly rather than through the graph: there is no
     second node to run, and a checkpoint thread for a single call would be scaffolding
@@ -259,8 +262,8 @@ async def draft_charter(
         clients=clients,
         router=_router(resolved, bus),
         target_papers=target_papers,
-        shelf_min=shelf_min,
-        shelf_max=shelf_max,
+        topic_min=topic_min,
+        topic_max=topic_max,
     )
 
     run_id = new_run_id()
@@ -273,7 +276,7 @@ async def draft_charter(
             RunFinished(
                 run_id=run_id,
                 ok=True,
-                summary=f"{len(charter.shelf_taxonomy)} shelves -> {out}",
+                summary=f"{len(charter.topic_taxonomy)} topics -> {out}",
             )
         )
     finally:
@@ -332,16 +335,22 @@ def require_textual() -> None:
 def _pause(options: RunOptions, console: Console | None) -> Pause:
     """Which confirmation surface to use.
 
-    `--json` gets `AutoApprove` because a machine-readable stream has nobody to ask and
-    printing tables into it would corrupt it. `--yes` and `--dry-run` still print
-    everything and just do not ask: on a dry run the printing *is* the deliverable.
+    A run is autonomous unless `--interactive` asks for the pauses, so the default
+    surface prints each decision and continues. `--json` is the one override: a
+    machine-readable stream has nobody to ask, and printing tables into it would corrupt
+    the thing the flag exists to produce.
+
+    `--dry-run` is deliberately *not* an override. Interactivity used to be the default
+    and a dry run opted out of it, because approving a run that costs nothing is noise.
+    Now that asking has to be requested, honoring the request is the simpler rule and
+    the one both renderers can share — and a dry run is exactly where rehearsing the
+    decisions is cheap.
     """
     from okf_loremaster.ui.pauses import AutoApprove, ConsolePause
 
     if options.json_out:
         return AutoApprove()
-    interactive = not (options.yes or options.dry_run)
-    return ConsolePause(console, interactive=interactive)
+    return ConsolePause(console, interactive=options.interactive)
 
 
 def _reviewer(options: RunOptions, settings: Settings, console: Console | None) -> Reviewer | None:

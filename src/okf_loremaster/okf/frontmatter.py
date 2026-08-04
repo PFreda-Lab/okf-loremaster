@@ -184,7 +184,7 @@ def split(text: str) -> tuple[str, str]:
 
     A document with no opening fence raises: an OKF file without frontmatter has no
     `domain`, so treating it as a body-only document would produce a document that
-    cannot be shelved.
+    cannot be filed.
     """
     lines = text.splitlines()
     start = 0

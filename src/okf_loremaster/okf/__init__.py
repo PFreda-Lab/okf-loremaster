@@ -29,15 +29,15 @@ from okf_loremaster.okf.layout import (
     NONE_CELL,
     RESERVED_FILENAMES,
     ROOT_INDEX_TYPE,
-    SHELF_INDEX_TYPE,
+    TOPIC_INDEX_TYPE,
     UNVERIFIED_CELL,
 )
 from okf_loremaster.okf.markdown import cell, facts, inline, table_row, table_rule
-from okf_loremaster.okf.overview import BundleOverview, ShelfOverview, read_overview
+from okf_loremaster.okf.overview import BundleOverview, TopicOverview, read_overview
 from okf_loremaster.okf.reader import (
     OkfBundle,
     OkfDocument,
-    OkfShelf,
+    OkfTopic,
     body_sections,
     fact_list,
     markdown_table,
@@ -64,7 +64,7 @@ __all__ = [
     "NONE_CELL",
     "RESERVED_FILENAMES",
     "ROOT_INDEX_TYPE",
-    "SHELF_INDEX_TYPE",
+    "TOPIC_INDEX_TYPE",
     "UNMAPPED_SHARE",
     "UNVERIFIED_CELL",
     "BundleOverview",
@@ -73,9 +73,9 @@ __all__ = [
     "FrontmatterError",
     "OkfBundle",
     "OkfDocument",
-    "OkfShelf",
+    "OkfTopic",
     "Severity",
-    "ShelfOverview",
+    "TopicOverview",
     "body_sections",
     "cell",
     "fact_list",

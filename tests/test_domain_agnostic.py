@@ -2,7 +2,7 @@
 
 `src/` is biomedical by construction — PubMed, MeSH, `[tiab]`, BioC, PubTator and a
 biomedical embedding model all belong there. What must never appear is anything *below*
-that level: a named disease, drug, drug class, lab, specialty, cohort, registry, shelf,
+that level: a named disease, drug, drug class, lab, specialty, cohort, registry, topic,
 or a fixed list of vocabulary keys. Those are decided by the charter at runtime, which
 is the whole reason the same code serves any cohort.
 
@@ -24,7 +24,7 @@ from okf_loremaster.schemas import Charter, partition_vocabulary
 SRC = Path(__file__).resolve().parents[1] / "src"
 
 # Grouped by the kind of mistake, because the fix differs: a disease name means the
-# charter should have supplied it, while a shelf slug means someone copied the bundle
+# charter should have supplied it, while a topic slug means someone copied the bundle
 # this tool replaces.
 FORBIDDEN: dict[str, tuple[str, ...]] = {
     "disease or condition": (
@@ -105,9 +105,9 @@ FORBIDDEN: dict[str, tuple[str, ...]] = {
         "framingham",
         "seer",
     ),
-    # The shelves of the hand-built bundle this tool replaces. A slug from that bundle
+    # The topics of the hand-built bundle this tool replaces. A slug from that bundle
     # in `src/` means a taxonomy got hardcoded instead of derived.
-    "shelf slug": (
+    "topic slug": (
         "art-pharmacology-adherence",
         "comorbidities-coinfections",
         "immunology-virology",
@@ -222,7 +222,7 @@ def test_infrastructure_terms_are_not_flagged() -> None:
 
 def test_the_scan_would_actually_catch_something() -> None:
     """A positive control. Without it, a broken matcher reads as a clean codebase."""
-    assert "hiv" in flagged_terms('SHELVES = ["hiv-labs"]  # HIV cohort')
+    assert "hiv" in flagged_terms('TOPICS = ["hiv-labs"]  # HIV cohort')
     assert "metformin" in flagged_terms("if drug == 'Metformin':")
     assert "labs-biomarkers" in flagged_terms('domain = "labs-biomarkers"')
     assert "cd4" in flagged_terms("the CD4 count")
@@ -244,7 +244,7 @@ def test_the_charter_ships_no_default_vocabularies() -> None:
     every extraction on the next one.
     """
     assert Charter(prompt="anything").vocabularies == []
-    assert Charter(prompt="anything").shelf_taxonomy == []
+    assert Charter(prompt="anything").topic_taxonomy == []
 
 
 def test_vocabulary_partitioning_has_no_implicit_allowlist() -> None:

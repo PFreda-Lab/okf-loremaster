@@ -27,9 +27,9 @@ resource id — so an export sharing the source's id is two different corpora cl
 be the same one. The `vectors` pointer is dropped for the same reason it is not copied:
 the store still embeds every document, including the ones the filter just removed.
 
-**An emptied shelf keeps its directory and its index**, saying that nothing on it was
-redistributable. Same reason the emitter keeps a shelf that retained no papers: an absent
-shelf and an empty one are different claims, and the taxonomy still reads the same.
+**An emptied topic keeps its directory and its index**, saying that nothing on it was
+redistributable. Same reason the emitter keeps a topic that retained no papers: an absent
+topic and an empty one are different claims, and the taxonomy still reads the same.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from typing import Any
 
 import yaml
 
-from okf_loremaster.emitters.okf import SHELF_COLUMNS, SHELF_PREDICTORS
+from okf_loremaster.emitters.okf import TOPIC_COLUMNS, TOPIC_PREDICTORS
 from okf_loremaster.okf.frontmatter import render
 from okf_loremaster.okf.layout import (
     BODY_SECTIONS,
@@ -55,10 +55,10 @@ from okf_loremaster.okf.layout import (
     NONE_CELL,
     PREDICTOR_COLUMNS,
     ROOT_INDEX_TYPE,
-    SHELF_INDEX_TYPE,
+    TOPIC_INDEX_TYPE,
 )
 from okf_loremaster.okf.markdown import facts, inline, table_row, table_rule
-from okf_loremaster.okf.reader import OkfBundle, OkfDocument, OkfShelf, markdown_table, read_bundle
+from okf_loremaster.okf.reader import OkfBundle, OkfDocument, OkfTopic, markdown_table, read_bundle
 from okf_loremaster.schemas.common import is_export_safe
 
 __all__ = ["ExportResult", "export_bundle"]
@@ -70,7 +70,7 @@ _DESIGN = "study_design"
 _PREDICTORS_SECTION = BODY_SECTIONS[1]
 _PREDICTOR_NAME = PREDICTOR_COLUMNS[1]
 
-_ROOT_COLUMNS = ("shelf", "title", "papers", "full text", "abstract only", "scope")
+_ROOT_COLUMNS = ("topic", "title", "papers", "full text", "abstract only", "scope")
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +79,7 @@ class ExportResult:
 
     path: Path
     documents: int
-    shelves: int
+    topics: int
     permissive_only: bool
     # `(file, license)` for each document the filter left behind, so the caller can say
     # what was not copied rather than only how much.
@@ -107,9 +107,9 @@ def export_bundle(
 
     kept: dict[str, list[OkfDocument]] = {}
     omitted: list[tuple[str, str]] = []
-    for shelf in bundle.shelves:
+    for topic in bundle.topics:
         keep: list[OkfDocument] = []
-        for document in shelf.documents:
+        for document in topic.documents:
             if not permissive_only:
                 keep.append(document)
                 continue
@@ -117,15 +117,15 @@ def export_bundle(
             flagged, derived = document.export_safe, is_export_safe(license_text)
             if flagged != derived:
                 warnings.append(
-                    f"{shelf.slug}/{document.filename} records export_safe="
+                    f"{topic.slug}/{document.filename} records export_safe="
                     f"{str(flagged).lower()} but its license ({license_text or 'none'}) reads "
                     f"as {str(derived).lower()}; it was left behind"
                 )
             if flagged and derived:
                 keep.append(document)
             else:
-                omitted.append((f"{shelf.slug}/{document.filename}", license_text or "none"))
-        kept[shelf.slug] = keep
+                omitted.append((f"{topic.slug}/{document.filename}", license_text or "none"))
+        kept[topic.slug] = keep
 
     total = sum(len(items) for items in kept.values())
     if not total:
@@ -140,14 +140,14 @@ def export_bundle(
 
     scopes = _scopes(bundle)
     destination.mkdir(parents=True, exist_ok=True)
-    for shelf in bundle.shelves:
-        directory = destination / shelf.slug
+    for topic in bundle.topics:
+        directory = destination / topic.slug
         directory.mkdir(parents=True, exist_ok=True)
-        for document in kept[shelf.slug]:
+        for document in kept[topic.slug]:
             # Byte for byte: the body holds quotes reproduced exactly as published.
             shutil.copyfile(document.path, directory / document.filename)
         (directory / INDEX_FILENAME).write_text(
-            _shelf_index(shelf, kept[shelf.slug], scope=scopes.get(shelf.slug, "")),
+            _topic_index(topic, kept[topic.slug], scope=scopes.get(topic.slug, "")),
             encoding="utf-8",
         )
 
@@ -169,7 +169,7 @@ def export_bundle(
     return ExportResult(
         path=destination,
         documents=total,
-        shelves=len(bundle.shelves),
+        topics=len(bundle.topics),
         permissive_only=permissive_only,
         omitted=tuple(omitted),
         warnings=tuple(warnings),
@@ -184,7 +184,7 @@ def _refuse_bad_destination(source: Path, destination: Path) -> None:
     if there.is_relative_to(here):
         raise ValueError(
             f"{destination} is inside {source}; an export written into its own source "
-            f"would be read as a shelf of it"
+            f"would be read as a topic of it"
         )
     if here.is_relative_to(there):
         raise ValueError(f"{destination} contains {source}; pick a directory of its own")
@@ -200,14 +200,14 @@ def _refuse_bad_destination(source: Path, destination: Path) -> None:
 # --- the rewritten indexes ---------------------------------------------------
 
 
-def _shelf_index(shelf: OkfShelf, documents: Sequence[OkfDocument], *, scope: str) -> str:
-    """The source shelf index, re-rendered for the documents that survived."""
-    title = shelf.title or shelf.slug
+def _topic_index(topic: OkfTopic, documents: Sequence[OkfDocument], *, scope: str) -> str:
+    """The source topic index, re-rendered for the documents that survived."""
+    title = topic.title or topic.slug
     fields: dict[str, Any] = {
-        "type": SHELF_INDEX_TYPE,
+        "type": TOPIC_INDEX_TYPE,
         "title": title,
         "description": scope or f"{len(documents)} paper(s) on {title}.",
-        "domain": shelf.slug,
+        "domain": topic.slug,
         "domain_title": title,
     }
 
@@ -216,9 +216,9 @@ def _shelf_index(shelf: OkfShelf, documents: Sequence[OkfDocument], *, scope: st
         body += [scope, ""]
     if not documents:
         body += [
-            f"No paper on this shelf carries a license that permits redistribution. The "
-            f"shelf is kept so the taxonomy still reads the same; the source bundle holds "
-            f"{len(shelf.documents)} paper(s) here.",
+            f"No paper on this topic carries a license that permits redistribution. The "
+            f"topic is kept so the taxonomy still reads the same; the source bundle holds "
+            f"{len(topic.documents)} paper(s) here.",
             "",
             f"[← bundle index](../{INDEX_FILENAME})",
             "",
@@ -230,8 +230,8 @@ def _shelf_index(shelf: OkfShelf, documents: Sequence[OkfDocument], *, scope: st
         f"{len(documents)} paper(s) — {full} read from full text, "
         f"{len(documents) - full} from the abstract only.",
         "",
-        table_row(SHELF_COLUMNS),
-        table_rule(len(SHELF_COLUMNS)),
+        table_row(TOPIC_COLUMNS),
+        table_rule(len(TOPIC_COLUMNS)),
     ]
     for document in documents:
         body.append(
@@ -271,7 +271,7 @@ def _root_index(
         "type": ROOT_INDEX_TYPE,
         "title": title,
         "description": (
-            f"{total} paper(s) across {len(kept)} shelf/shelves — an export of "
+            f"{total} paper(s) across {len(kept)} topic/topics — an export of "
             f"{bundle.path.name} holding {filter_line}."
         ),
     }
@@ -284,23 +284,23 @@ def _root_index(
         f"> An export of a bundle, not a build of one. It holds {filter_line}; "
         f"`{LOG_FILENAME}` describes the run that produced the source.",
         "",
-        "## Shelves",
+        "## Topics",
         "",
         table_row(_ROOT_COLUMNS),
         table_rule(len(_ROOT_COLUMNS)),
     ]
-    for shelf in bundle.shelves:
-        documents = kept[shelf.slug]
+    for topic in bundle.topics:
+        documents = kept[topic.slug]
         full = sum(1 for document in documents if document.full_text)
         body.append(
             table_row(
                 (
-                    f"[{shelf.slug}]({shelf.slug}/{INDEX_FILENAME})",
-                    shelf.title,
+                    f"[{topic.slug}]({topic.slug}/{INDEX_FILENAME})",
+                    topic.title,
                     str(len(documents)),
                     str(full),
                     str(len(documents) - full),
-                    scopes.get(shelf.slug, ""),
+                    scopes.get(topic.slug, ""),
                 )
             )
         )
@@ -336,7 +336,7 @@ def _root_index(
 
 
 def _catalog(bundle: OkfBundle, kept: dict[str, list[OkfDocument]]) -> str:
-    """The source catalog, filtered to the retained files, in shelf order.
+    """The source catalog, filtered to the retained files, in topic order.
 
     Filtered rather than rebuilt: the catalog carries `unmapped_vocab`, which is
     deliberately not in frontmatter and so cannot be recovered from the documents.
@@ -391,7 +391,7 @@ def _descriptor(
     for name, key in ((LOG_FILENAME, "log"), (CHARTER_FILENAME, "charter")):
         if (bundle.path / name).exists():
             payload[key] = name
-    payload["domains"] = {shelf.slug: shelf.title or shelf.slug for shelf in bundle.shelves}
+    payload["domains"] = {topic.slug: topic.title or topic.slug for topic in bundle.topics}
     payload["documents"] = total
     for key in ("tool", "tool_version", "charter_digest", "built_on", "stale_after",
                 "verified_by"):
@@ -413,11 +413,11 @@ def _n_cell(document: OkfDocument) -> str:
 
 
 def _key_predictors(document: OkfDocument) -> str:
-    """The shelf table's last column, read back out of the document's own table."""
+    """The topic table's last column, read back out of the document's own table."""
     rows = markdown_table(document.section(_PREDICTORS_SECTION) or "")
     names = [row.get(_PREDICTOR_NAME, "") for row in rows]
     names = [name for name in names if name]
-    shown = names[:SHELF_PREDICTORS]
+    shown = names[:TOPIC_PREDICTORS]
     if not shown:
         return NONE_CELL
     extra = len(names) - len(shown)
@@ -425,13 +425,13 @@ def _key_predictors(document: OkfDocument) -> str:
 
 
 def _scopes(bundle: OkfBundle) -> dict[str, str]:
-    """Each shelf's scope, from the charter where there is one.
+    """Each topic's scope, from the charter where there is one.
 
-    The charter rather than the shelf index because a shelf with no scope gets a
+    The charter rather than the topic index because a topic with no scope gets a
     generated description — "N paper(s) on X" — and N is the source's count, which is the
     one number a filtered export must not repeat.
     """
-    taxonomy = bundle.charter.get("shelf_taxonomy")
+    taxonomy = bundle.charter.get("topic_taxonomy")
     if isinstance(taxonomy, list):
         return {
             str(entry.get("slug") or ""): inline(str(entry.get("scope") or ""))
@@ -439,9 +439,9 @@ def _scopes(bundle: OkfBundle) -> dict[str, str]:
             if isinstance(entry, dict)
         }
     return {
-        shelf.slug: inline(str(shelf.index.fields.get("description") or ""))
-        for shelf in bundle.shelves
-        if shelf.index is not None
+        topic.slug: inline(str(topic.index.fields.get("description") or ""))
+        for topic in bundle.topics
+        if topic.index is not None
     }
 
 

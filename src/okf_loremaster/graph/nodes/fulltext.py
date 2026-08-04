@@ -10,7 +10,7 @@ are the point:
   prompt per call, would let the two drift and correct extractions would start reporting
   as fabricated.
 - **The checkpoint stays a sane size.** LangGraph re-serializes state after every
-  super-step, and a shelf of 200 unbudgeted full texts is tens of megabytes rewritten
+  super-step, and a topic of 200 unbudgeted full texts is tens of megabytes rewritten
   repeatedly.
 
 Most of any corpus is not open access, so an abstract-only source is an ordinary
@@ -51,7 +51,7 @@ SECTION_PRIORITY = (
 
 
 async def fulltext_node(state: RunState, deps: Deps) -> dict[str, Any]:
-    shelves = state.get("shelves") or {}
+    topics = state.get("topics") or {}
     by_pmid = {candidate.pmid: candidate for candidate in state.get("unique") or []}
     warnings = list(state.get("warnings") or [])
     # A resumed or re-queried run keeps what it already fetched. Retrieval is the slow
@@ -61,7 +61,7 @@ async def fulltext_node(state: RunState, deps: Deps) -> dict[str, Any]:
     with span(deps, NODE) as report:
         todo = [
             by_pmid[pmid]
-            for pmids in shelves.values()
+            for pmids in topics.values()
             for pmid in pmids
             if pmid not in texts and pmid in by_pmid
         ]

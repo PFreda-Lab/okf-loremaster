@@ -40,7 +40,7 @@ MAX_WARNINGS = 12
 def signoff_view(
     records: Sequence[ConceptRecord],
     *,
-    shelves: dict[str, list[str]],
+    topics: dict[str, list[str]],
     verification: VerificationSummary | None,
     warnings: Sequence[str],
 ) -> list[RenderableType]:
@@ -54,7 +54,7 @@ def signoff_view(
         )
         return view
 
-    view.append(_shelf_table(records, shelves))
+    view.append(_topic_table(records, topics))
     view.extend(_verification(verification))
     view.extend(_warnings(warnings))
     view.extend(_specimen(records))
@@ -81,13 +81,13 @@ class ConsoleReviewer:
         self,
         records: Sequence[ConceptRecord],
         *,
-        shelves: dict[str, list[str]],
+        topics: dict[str, list[str]],
         verification: VerificationSummary | None,
         warnings: Sequence[str],
     ) -> Signoff:
         console = self._console
         for item in signoff_view(
-            records, shelves=shelves, verification=verification, warnings=warnings
+            records, topics=topics, verification=verification, warnings=warnings
         ):
             console.print(item)
 
@@ -110,20 +110,20 @@ class ConsoleReviewer:
 # --- what a reviewer looks at ----------------------------------------------
 
 
-def _shelf_table(records: Sequence[ConceptRecord], shelves: dict[str, list[str]]) -> Table:
-    by_shelf: dict[str, list[ConceptRecord]] = {slug: [] for slug in shelves}
+def _topic_table(records: Sequence[ConceptRecord], topics: dict[str, list[str]]) -> Table:
+    by_topic: dict[str, list[ConceptRecord]] = {slug: [] for slug in topics}
     for record in records:
-        by_shelf.setdefault(record.domain, []).append(record)
+        by_topic.setdefault(record.domain, []).append(record)
 
     table = Table(title="what would be written", title_style="bold")
-    table.add_column("shelf", style="cyan", no_wrap=True)
+    table.add_column("topic", style="cyan", no_wrap=True)
     table.add_column("papers", justify="right")
     table.add_column("full text", justify="right", style="dim")
     table.add_column("predictor rows", justify="right")
     table.add_column("null findings", justify="right")
     table.add_column("permissive", justify="right", style="dim")
 
-    for slug, items in by_shelf.items():
+    for slug, items in by_topic.items():
         full = sum(1 for r in items if r.text_basis is TextBasis.FULL_TEXT)
         rows = sum(len(r.extraction.predictors) for r in items)
         nulls = sum(1 for r in items if r.extraction.reports_null_findings)

@@ -135,25 +135,40 @@ class ConfirmScreen(ModalScreen[bool]):
 
 
 class TuiPause:
-    """`ui.pauses.Pause`, answered by a modal instead of a prompt."""
+    """`ui.pauses.Pause`, answered by a modal instead of a prompt.
 
-    def __init__(self, app: LoremasterApp) -> None:
+    `interactive=False` is an autonomous run watched full screen: the same view goes to
+    the log pane instead of a modal, so what a modal would have shown is still on record
+    and nothing waits for a keypress.
+    """
+
+    def __init__(self, app: LoremasterApp, *, interactive: bool = True) -> None:
         self._app = app
+        self._interactive = interactive
 
     async def charter(self, charter: Charter) -> PauseDecision:
-        proceed = await self._app.confirm(
+        return await self._decide(
             charter_view(charter),
             question="Proceed with this charter?",
             no="Stop and edit charter.yaml",
         )
-        return PauseDecision(proceed=proceed, reason="" if proceed else "declined at pause")
 
     async def retrieve(self, state: RunState, *, estimate: SpendEstimate | None) -> PauseDecision:
         pool = list(state.get("pool") or [])
-        proceed = await self._app.confirm(
+        return await self._decide(
             retrieve_view(state, estimate=estimate),
             question=f"Screen these {len(pool)} papers?",
         )
+
+    async def _decide(
+        self, view: list[RenderableType], *, question: str, no: str = "Stop"
+    ) -> PauseDecision:
+        if not self._interactive:
+            for item in view:
+                self._app.log_view(item)
+            self._app.log_view(f"{question} — continuing without asking")
+            return PauseDecision(proceed=True)
+        proceed = await self._app.confirm(view, question=question, no=no)
         return PauseDecision(proceed=proceed, reason="" if proceed else "declined at pause")
 
 
@@ -172,14 +187,14 @@ class TuiReviewer:
         self,
         records: Sequence[ConceptRecord],
         *,
-        shelves: dict[str, list[str]],
+        topics: dict[str, list[str]],
         verification: VerificationSummary | None,
         warnings: Sequence[str],
     ) -> Signoff:
         if not records:
             return Signoff.declined("no records")
         view = signoff_view(
-            records, shelves=shelves, verification=verification, warnings=warnings
+            records, topics=topics, verification=verification, warnings=warnings
         )
         view.append(signoff_caption(self._signer, len(records)))
         approved = await self._app.confirm(
@@ -276,7 +291,7 @@ class LoremasterApp(App[None]):
                 settings=self._settings,
                 transport=self._transport,
                 attach=self._subscribe,
-                pause=TuiPause(self),
+                pause=TuiPause(self, interactive=self._options.interactive),
                 reviewer=self._reviewer(),
             )
         except asyncio.CancelledError:
@@ -330,6 +345,10 @@ class LoremasterApp(App[None]):
             ConfirmScreen(view, question=question, yes=yes, no=no, default=default)
         )
         return bool(answer)
+
+    def log_view(self, item: RenderableType) -> None:
+        """Send to the log pane what a modal would have shown, on an autonomous run."""
+        self._write(item)
 
     # --- quitting ----------------------------------------------------------
 

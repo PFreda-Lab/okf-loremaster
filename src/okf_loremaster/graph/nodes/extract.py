@@ -1,4 +1,4 @@
-"""The extract node: one DEEP reading per paper.
+"""The extract node: one reasoning-tier reading per paper.
 
 One call per paper, for the same reason as `screen`: a batched call returns rows whose
 alignment to the input is the model's to get right, and here a misaligned row would
@@ -10,7 +10,7 @@ fields and a lost one costs a paper that was probably being excluded anyway; an
 extraction is the entire content of a bundle file, the call that produced it is the most
 expensive in the pipeline, and `SchemaError.hint` names the field that was wrong — which
 a model will usually supply when told. Once, not twice: a second failure is a model that
-cannot satisfy the schema, and paying a third DEEP call to confirm it is waste.
+cannot satisfy the schema, and paying a third reasoning-tier call to confirm it is waste.
 
 The source text is not built here. It arrives from `fulltext` already budgeted and
 already the exact string `verification` will check against, and is passed through
@@ -48,7 +48,7 @@ async def extract_node(state: RunState, deps: Deps) -> dict[str, Any]:
     if charter is None:
         raise RuntimeError("extract reached without a charter — the graph is wired wrong")
 
-    shelves = state.get("shelves") or {}
+    topics = state.get("topics") or {}
     texts = state.get("texts") or {}
     warnings = list(state.get("warnings") or [])
     # Keyed by PMID so a resumed run pays only for what it has not extracted.
@@ -57,14 +57,14 @@ async def extract_node(state: RunState, deps: Deps) -> dict[str, Any]:
     with span(deps, NODE) as report:
         todo = [
             (slug, texts[pmid])
-            for slug, pmids in shelves.items()
+            for slug, pmids in topics.items()
             for pmid in pmids
             if pmid not in extractions and pmid in texts
         ]
         for pmid, extraction in await _extract_all(deps, charter, todo, warnings):
             extractions[pmid] = extraction
 
-        wanted = sum(len(pmids) for pmids in shelves.values())
+        wanted = sum(len(pmids) for pmids in topics.values())
         report["summary"] = f"{len(extractions)} of {wanted} paper(s) extracted"
 
     return {"extractions": extractions, "warnings": warnings}
@@ -76,7 +76,7 @@ async def _extract_all(
     todo: list[tuple[str, PaperText]],
     warnings: list[str],
 ) -> list[tuple[str, Extraction]]:
-    """Every paper at once, bounded by the router's DEEP semaphore."""
+    """Every paper at once, bounded by the router's reasoning-tier semaphore."""
     if not todo:
         return []
     if deps.router is None:
@@ -85,14 +85,14 @@ async def _extract_all(
         deps.warn(NODE, note)
         return []
 
-    # One context per shelf, built once. Papers on a shelf are extracted back to back,
+    # One context per topic, built once. Papers on a topic are extracted back to back,
     # so a byte-identical prefix across them is what a provider's prompt cache can
     # charge for once instead of on every call in the most expensive node here.
     contexts = {
         slug: extract_context(
             task=charter.task or charter.prompt,
             outcome=charter.outcome,
-            shelf=slug,
+            topic=slug,
             scope=_scope(charter, slug),
             vocabularies=list(charter.vocabularies),
         )
@@ -137,7 +137,7 @@ async def _extract_one(
     for attempt in (1, 2):
         try:
             result = await deps.router.complete(
-                Role.DEEP,
+                Role.REASONING,
                 messages,
                 node=NODE,
                 max_tokens=MAX_EXTRACTION_TOKENS,
@@ -163,10 +163,10 @@ async def _extract_one(
 
 
 def _scope(charter: Charter, slug: str) -> str:
-    shelf = charter.shelf(slug)
-    if shelf is None:
+    topic = charter.topic(slug)
+    if topic is None:
         return ""
-    return shelf.scope or shelf.title
+    return topic.scope or topic.title
 
 
 def _report(

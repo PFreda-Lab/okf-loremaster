@@ -26,8 +26,8 @@ def _router(
 ) -> tuple[Router, EventBus]:
     settings = settings_factory(
         model_fast="gateway/deployment",
-        model_mid="gateway/deployment",
-        model_deep="gateway/deployment",
+        model_balanced="gateway/deployment",
+        model_reasoning="gateway/deployment",
         api_key="k",
         **overrides,
     )
@@ -52,7 +52,7 @@ async def test_unknown_model_is_unpriced_not_free(settings_factory: Any) -> None
     router, bus = _router(settings_factory)
     queue = bus.subscribe()
 
-    result = await router.complete(Role.DEEP, MESSAGES, node="extract")
+    result = await router.complete(Role.REASONING, MESSAGES, node="extract")
 
     assert result.usd is None, "an unpriceable call must not report a number"
     assert router.ledger.unpriced_calls == 1
@@ -66,9 +66,9 @@ async def test_unknown_model_is_unpriced_not_free(settings_factory: Any) -> None
 
 
 async def test_price_override_produces_a_real_figure(settings_factory: Any) -> None:
-    router, _ = _router(settings_factory, price_deep_in=15.0, price_deep_out=75.0)
+    router, _ = _router(settings_factory, price_reasoning_in=15.0, price_reasoning_out=75.0)
 
-    result = await router.complete(Role.DEEP, MESSAGES, node="extract")
+    result = await router.complete(Role.REASONING, MESSAGES, node="extract")
 
     assert result.usd is not None
     assert result.usd > 0.0
@@ -79,11 +79,11 @@ async def test_price_override_produces_a_real_figure(settings_factory: Any) -> N
 
 
 async def test_half_priced_run_is_reported_as_such(settings_factory: Any) -> None:
-    """FAST priced, DEEP not: the total must admit that part of it is missing."""
+    """FAST priced, REASONING not: the total must admit that part of it is missing."""
     router, _ = _router(settings_factory, price_fast_in=0.8, price_fast_out=4.0)
 
     await router.complete(Role.FAST, MESSAGES, node="screen")
-    await router.complete(Role.DEEP, MESSAGES, node="extract")
+    await router.complete(Role.REASONING, MESSAGES, node="extract")
 
     rendered = router.ledger.format_usd()
     assert rendered.startswith("$")
@@ -197,10 +197,10 @@ async def test_ledger_totals_split_by_role(settings_factory: Any) -> None:
 
     await router.complete(Role.FAST, MESSAGES, node="screen")
     await router.complete(Role.FAST, MESSAGES, node="screen")
-    await router.complete(Role.DEEP, MESSAGES, node="extract")
+    await router.complete(Role.REASONING, MESSAGES, node="extract")
 
     assert router.ledger.by_role[Role.FAST].calls == 2
-    assert router.ledger.by_role[Role.DEEP].calls == 1
-    assert router.ledger.by_role[Role.MID].calls == 0
+    assert router.ledger.by_role[Role.REASONING].calls == 1
+    assert router.ledger.by_role[Role.BALANCED].calls == 0
     assert router.ledger.calls == 3
     assert router.ledger.tokens == router.ledger.prompt_tokens + router.ledger.completion_tokens

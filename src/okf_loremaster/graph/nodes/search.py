@@ -1,6 +1,6 @@
 """The search node: plan queries, run them, and fetch what they returned.
 
-Planning is judgment and goes to the MID model; everything after it is code. The model
+Planning is judgment and goes to the balanced-tier model; everything after it is code. The model
 proposes concepts and boolean structure, and `queries.with_filters` adds the language
 and date filters afterward so that every query in a plan carries identical ones. A dry
 run skips the model entirely and uses `queries.deterministic_plan`, which is what makes
@@ -17,10 +17,10 @@ queries is fetched once and arrives already merged, carrying all four provenance
 its best rank among them.
 
 **A second round adds to the corpus rather than replacing it.** LangGraph's state
-channels are last-value-wins, so `candidates`, `executed` and `query_shelf` are merged
+channels are last-value-wins, so `candidates`, `executed` and `query_topic` are merged
 with what the first round left behind — otherwise a re-query round aimed at two thin
-shelves would return holding only those two shelves' papers. The plan for that round is
-`queries.gap_plan`, built in code from the curator's own account of what each shelf
+topics would return holding only those two topics' papers. The plan for that round is
+`queries.gap_plan`, built in code from the curator's own account of what each topic
 lacks; no second planning call is made.
 """
 
@@ -68,12 +68,12 @@ async def search_node(state: RunState, deps: Deps) -> dict[str, Any]:
 
     prior_executed = list(state.get("executed") or [])
     prior_candidates = list(state.get("candidates") or [])
-    query_shelf = dict(state.get("query_shelf") or {})
+    query_topic = dict(state.get("query_topic") or {})
     rounds = int(state.get("rounds") or 0)
 
     with span(deps, NODE) as report:
         plan = await _plan(deps, charter, state, warnings)
-        query_shelf.update({q.term: q.shelf for q in plan.queries})
+        query_topic.update({q.term: q.topic for q in plan.queries})
 
         executed, hits = await _execute(deps, plan, warnings)
         found = await _fetch(deps, hits)
@@ -92,7 +92,7 @@ async def search_node(state: RunState, deps: Deps) -> dict[str, Any]:
     return {
         "plan": plan,
         "executed": [*prior_executed, *executed],
-        "query_shelf": query_shelf,
+        "query_topic": query_topic,
         "candidates": candidates,
         "rounds": rounds + 1,
         "warnings": warnings,
@@ -130,7 +130,7 @@ async def _plan(deps: Deps, charter: Charter, state: RunState, warnings: list[st
         # deliberate: it produces no new candidates, curation finds nothing to change,
         # and the run ends — rather than re-running round one's searches at full cost
         # to retrieve exactly the corpus already in hand.
-        deps.progress(NODE, f"re-query round: {len(gap.queries)} query/queries for thin shelves")
+        deps.progress(NODE, f"re-query round: {len(gap.queries)} query/queries for thin topics")
         return gap
 
     if deps.router is None:
@@ -144,9 +144,9 @@ async def _plan(deps: Deps, charter: Charter, state: RunState, warnings: list[st
                 task=charter.task or charter.prompt,
                 population=charter.population,
                 outcome=charter.outcome,
-                shelves=[
-                    (shelf.slug, shelf.scope, list(shelf.seed_terms))
-                    for shelf in charter.shelf_taxonomy
+                topics=[
+                    (topic.slug, topic.scope, list(topic.seed_terms))
+                    for topic in charter.topic_taxonomy
                 ],
                 max_queries=deps.max_queries,
             ),
@@ -154,7 +154,7 @@ async def _plan(deps: Deps, charter: Charter, state: RunState, warnings: list[st
     ]
     try:
         result = await deps.router.complete(
-            Role.MID,
+            Role.BALANCED,
             messages,
             node=NODE,
             max_tokens=2048,
@@ -174,9 +174,9 @@ async def _plan(deps: Deps, charter: Charter, state: RunState, warnings: list[st
 
 
 def _finalize(planned: QueryPlan, charter: Charter, deps: Deps, warnings: list[str]) -> QueryPlan:
-    """Apply the charter's filters, drop duplicates, and check the shelf slugs.
+    """Apply the charter's filters, drop duplicates, and check the topic slugs.
 
-    A planner that names a shelf the charter does not have is worth surfacing rather
+    A planner that names a topic the charter does not have is worth surfacing rather
     than failing on: the query is still valid, it just loses its quota affinity.
     """
     known = set(charter.slugs)
@@ -185,11 +185,11 @@ def _finalize(planned: QueryPlan, charter: Charter, deps: Deps, warnings: list[s
     for query in planned.queries:
         if not query.term.strip():
             continue
-        if query.shelf and query.shelf not in known:
-            note = f"planner named unknown shelf {query.shelf!r}; the query keeps no shelf affinity"
+        if query.topic and query.topic not in known:
+            note = f"planner named unknown topic {query.topic!r}; the query keeps no topic affinity"
             warnings.append(note)
             deps.warn(NODE, note)
-            query = query.model_copy(update={"shelf": ""})
+            query = query.model_copy(update={"topic": ""})
         term = queries.with_filters(query.term, charter)
         if term in seen:
             continue
@@ -271,7 +271,7 @@ def _report_empty(deps: Deps, executed: list[ExecutedQuery], warnings: list[str]
         )
     else:
         note = (
-            f"{len(empty)} of {len(executed)} queries returned no hits; their shelves "
+            f"{len(empty)} of {len(executed)} queries returned no hits; their topics "
             "will be thin or empty. The seed terms are searched as exact phrases"
         )
     warnings.append(note)

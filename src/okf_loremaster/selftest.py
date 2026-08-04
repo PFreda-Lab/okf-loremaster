@@ -38,10 +38,10 @@ FAKE_MODEL = "gateway/custom-deployment-name"
 _DEMO_PRICES = {
     "price_fast_in": 0.80,
     "price_fast_out": 4.00,
-    "price_mid_in": 3.00,
-    "price_mid_out": 15.00,
-    "price_deep_in": 15.00,
-    "price_deep_out": 75.00,
+    "price_balanced_in": 3.00,
+    "price_balanced_out": 15.00,
+    "price_reasoning_in": 15.00,
+    "price_reasoning_out": 75.00,
 }
 
 
@@ -50,8 +50,8 @@ def _settings(*, priced: bool) -> Settings:
     so this is unaffected by whatever the user has in their own .env."""
     overrides: dict[str, Any] = {
         "model_fast": FAKE_MODEL,
-        "model_mid": FAKE_MODEL,
-        "model_deep": FAKE_MODEL,
+        "model_balanced": FAKE_MODEL,
+        "model_reasoning": FAKE_MODEL,
         "api_key": "selftest",
         "api_base": None,
         "max_usd": None,
@@ -104,9 +104,9 @@ async def _one_pass(*, priced: bool, live: bool | None, verbose: int, console: C
     label = "with price overrides" if priced else "no price overrides"
     bus.emit(RunStarted(run_id=f"selftest-{'priced' if priced else 'unpriced'}", prompt=label))
 
-    await _node(router, bus, name="charter", role=Role.DEEP, calls=1, summary="3 shelves")
+    await _node(router, bus, name="charter", role=Role.REASONING, calls=1, summary="3 topics")
     await _node(flaky, bus, name="screen", role=Role.FAST, calls=6, summary="6 screened")
-    await _node(router, bus, name="extract", role=Role.DEEP, calls=3, summary="3 concepts")
+    await _node(router, bus, name="extract", role=Role.REASONING, calls=3, summary="3 concepts")
 
     rendered = router.ledger.format_usd()
     bus.emit(

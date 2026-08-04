@@ -14,7 +14,7 @@ import pytest
 
 from okf_loremaster import queries
 from okf_loremaster.clients import Clients
-from okf_loremaster.schemas import Charter, Shelf
+from okf_loremaster.schemas import Charter, Topic
 
 CASSETTE = Path(__file__).parent / "fixtures" / "ncbi.jsonl"
 
@@ -34,9 +34,9 @@ def charter(**overrides: object) -> Charter:
         "task": "predict a measured outcome after a procedure in adults",
         "population": "adults",
         "outcome": "measured outcome",
-        "shelf_taxonomy": [
-            Shelf(slug="first", title="First", scope="s", seed_terms=["alpha", "alpha timing"]),
-            Shelf(slug="second", title="Second", scope="s", seed_terms=["beta"]),
+        "topic_taxonomy": [
+            Topic(slug="first", title="First", scope="s", seed_terms=["alpha", "alpha timing"]),
+            Topic(slug="second", title="Second", scope="s", seed_terms=["beta"]),
         ],
         "vocabularies": ["icd10"],
     }
@@ -84,15 +84,15 @@ def test_a_keyphrase_is_capped_so_the_phrase_search_can_match() -> None:
 # --- the deterministic plan -------------------------------------------------
 
 
-def test_deterministic_plan_covers_every_shelf() -> None:
+def test_deterministic_plan_covers_every_topic() -> None:
     plan = queries.deterministic_plan(charter())
-    assert {q.shelf for q in plan.queries} >= {"first", "second"}
+    assert {q.topic for q in plan.queries} >= {"first", "second"}
 
 
 def test_deterministic_plan_anchors_on_outcome_and_population() -> None:
     plan = queries.deterministic_plan(charter())
     assert plan.queries[0].term.startswith('("measured outcome"[tiab] AND "adults"[tiab])')
-    assert plan.queries[0].shelf == ""
+    assert plan.queries[0].topic == ""
 
 
 def test_deterministic_plan_falls_back_to_the_prompt_with_no_taxonomy() -> None:
@@ -105,8 +105,8 @@ def test_deterministic_plan_falls_back_to_the_prompt_with_no_taxonomy() -> None:
 
 def test_deterministic_plan_respects_its_cap() -> None:
     many = charter(
-        shelf_taxonomy=[
-            Shelf(slug=f"s{i}", title=f"S{i}", scope="s", seed_terms=[f"term{i}"])
+        topic_taxonomy=[
+            Topic(slug=f"s{i}", title=f"S{i}", scope="s", seed_terms=[f"term{i}"])
             for i in range(10)
         ]
     )
@@ -115,9 +115,9 @@ def test_deterministic_plan_respects_its_cap() -> None:
 
 def test_deterministic_plan_drops_duplicate_terms() -> None:
     twins = charter(
-        shelf_taxonomy=[
-            Shelf(slug="one", title="One", scope="s", seed_terms=["same"]),
-            Shelf(slug="two", title="Two", scope="s", seed_terms=["same"]),
+        topic_taxonomy=[
+            Topic(slug="one", title="One", scope="s", seed_terms=["same"]),
+            Topic(slug="two", title="Two", scope="s", seed_terms=["same"]),
         ]
     )
     terms = [q.term for q in queries.deterministic_plan(twins).queries]

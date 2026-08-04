@@ -51,20 +51,20 @@ restatement of the request matches nothing at all.
 4. `inclusion` / `exclusion` — short criteria a screener can apply to a title and \
 abstract alone. Four or fewer each. Say nothing you would not be able to check from an \
 abstract.
-5. `shelf_taxonomy` — between 4 and 8 shelves that together cover the request and do \
+5. `topic_taxonomy` — between 4 and 8 topics that together cover the request and do \
 not overlap. Each needs:
    - `slug`: lowercase, hyphenated, 2-64 characters, unique. It becomes a directory \
 name.
    - `title`: how a reader would name the topic.
    - `scope`: one line saying what belongs here and what does not.
-   - `seed_terms`: 3-6 concepts a literature search for this shelf would use. Concepts, \
+   - `seed_terms`: 3-6 concepts a literature search for this topic would use. Concepts, \
 not query syntax — no field tags, no boolean operators, no quotation marks.
 6. `vocabularies` — the coding or classification systems in which findings from this \
 literature would be recorded, lowercased, as bare keys.
 
 On the taxonomy: divide by the kind of evidence a reader would go looking for, not by \
-publication type or study design. A shelf that would hold two papers is not a shelf; a \
-shelf that would hold half the corpus is two shelves.
+publication type or study design. A topic that would hold two papers is not a topic; a \
+topic that would hold half the corpus is two topics.
 
 On `vocabularies`: this list is the one thing here that fails silently. It is chosen \
 before any paper has been read and it decides what every later extraction is permitted \
@@ -94,14 +94,14 @@ QUERY_PLAN_SYSTEM = """\
 You are planning PubMed searches for a literature review. Return a single JSON object \
 and nothing else.
 
-Produce one query per shelf in the charter's taxonomy, plus one or two broad queries \
+Produce one query per topic in the charter's taxonomy, plus one or two broad queries \
 covering the request as a whole. Between 6 and 12 in total.
 
 Each query needs:
   - `term`: the PubMed query string.
   - `rationale`: one line saying what it is for. This is shown to a human before \
 anything is spent.
-  - `shelf`: the slug of the shelf it is meant to fill, or an empty string for a broad \
+  - `topic`: the slug of the topic it is meant to fill, or an empty string for a broad \
 query.
 
 Query syntax rules, all of which matter:
@@ -132,7 +132,7 @@ def query_plan_user(
     task: str,
     population: str,
     outcome: str,
-    shelves: list[tuple[str, str, list[str]]],
+    topics: list[tuple[str, str, list[str]]],
     max_queries: int,
 ) -> str:
     """The query-planning request, assembled from the charter.
@@ -146,8 +146,8 @@ def query_plan_user(
         lines.append(f"Population: {population}")
     if outcome:
         lines.append(f"Outcome: {outcome}")
-    lines += ["", "Shelves to cover:"]
-    for slug, scope, seeds in shelves:
+    lines += ["", "Topics to cover:"]
+    for slug, scope, seeds in topics:
         seed_text = "; ".join(seeds) if seeds else "no seed terms given"
         lines.append(f"  - {slug}: {scope or 'no scope given'} [seeds: {seed_text}]")
     lines += ["", f"Return at most {max_queries} queries."]
@@ -161,14 +161,14 @@ Return a single JSON object and nothing else.
 Fields:
   - `include`: true if the paper reports something this review could use as evidence.
   - `relevance`: 0 unrelated, 1 tangential, 2 relevant, 3 directly on point.
-  - `shelf`: the slug of the shelf it belongs on, copied exactly from the list below. \
+  - `topic`: the slug of the topic it belongs on, copied exactly from the list below. \
 Empty string if none of them fits.
   - `reason`: one clause, fifteen words or fewer.
   - `confidence`: "high", "medium" or "low" — how sure you are of `include`, not how \
 strong the paper is.
 
 `include` and `relevance` are separate answers and both are used. A paper excluded at \
-relevance 2 or 3 is the first one reconsidered if a shelf later comes up short, so an \
+relevance 2 or 3 is the first one reconsidered if a topic later comes up short, so an \
 honest relevance on an excluded paper is worth as much as an inclusion. Do not collapse \
 them into each other: relevance 3 with `include` false is the normal answer for a paper \
 squarely on topic that fails an exclusion criterion.
@@ -186,7 +186,7 @@ def screen_context(
     outcome: str,
     inclusion: list[str],
     exclusion: list[str],
-    shelves: list[tuple[str, str]],
+    topics: list[tuple[str, str]],
 ) -> str:
     """The review's terms, prefixed to every screening call.
 
@@ -203,11 +203,11 @@ def screen_context(
     for label, items in (("Include", inclusion), ("Exclude", exclusion)):
         for item in items:
             lines.append(f"{label}: {item}")
-    lines += ["", "Shelves:"]
-    if shelves:
-        lines += [f"  - {slug}: {scope}" for slug, scope in shelves]
+    lines += ["", "Topics:"]
+    if topics:
+        lines += [f"  - {slug}: {scope}" for slug, scope in topics]
     else:
-        lines.append("  (none — leave `shelf` empty)")
+        lines.append("  (none — leave `topic` empty)")
     return "\n".join(lines)
 
 
@@ -221,44 +221,44 @@ def screen_user(*, context: str, paper: str) -> str:
 
 
 CURATE_SYSTEM = """\
-You are curating one shelf of a literature review. Unlike the screener, you see every \
-paper proposed for this shelf at once. Return a single JSON object and nothing else:
+You are curating one topic of a literature review. Unlike the screener, you see every \
+paper proposed for this topic at once. Return a single JSON object and nothing else:
 
   {"decisions": [{"pmid": "<id>", "keep": true, "rationale": "<one clause>"}],
-   "missing": "<what the shelf still lacks>"}
+   "missing": "<what the topic still lacks>"}
 
 Give one decision per paper offered, with its `pmid` copied exactly as given.
 
-Keep a paper when it belongs on this shelf specifically, not merely somewhere in the \
-review. Seeing the shelf whole is what lets you notice what the screener could not: \
+Keep a paper when it belongs on this topic specifically, not merely somewhere in the \
+review. Seeing the topic whole is what lets you notice what the screener could not: \
 prefer the paper reporting a usable finding over the one that only mentions the topic, \
 prefer the primary report over a narrative review of it, and where several papers report \
 the same result from the same cohort, keep the fullest one.
 
-The shelf's floor and ceiling are given below. Neither is a quota to fill. Keeping a \
-paper that does not belong is worse than a thin shelf: a shortfall is refilled by a \
-further, broader search, while a padded shelf is never questioned again. Ordering and \
+The topic's floor and ceiling are given below. Neither is a quota to fill. Keeping a \
+paper that does not belong is worse than a thin topic: a shortfall is refilled by a \
+further, broader search, while a padded topic is never questioned again. Ordering and \
 trimming to the ceiling happen afterward in code, so do not rank, and do not stop at the \
 ceiling — judge each paper on its own.
 
-`missing` is what this shelf still lacks, written as the topics a further literature \
+`missing` is what this topic still lacks, written as the topics a further literature \
 search should look for. It is turned into another query, so name concepts, not \
 complaints: "<concept a>, <concept b>", never "not enough good papers". Empty string \
-when the shelf is in good shape.\
+when the topic is in good shape.\
 """
 
 
 def curate_user(
     *,
     task: str,
-    shelf: str,
+    topic: str,
     scope: str,
     seed_terms: list[str],
     floor: int,
     ceiling: int,
     papers: list[tuple[str, str, int, str]],
 ) -> str:
-    """One shelf's curation request.
+    """One topic's curation request.
 
     `papers` is `(pmid, title, relevance, screener's reason)`. The screener's own note
     travels with each paper because it is already paid for and it says what the title
@@ -267,7 +267,7 @@ def curate_user(
     lines = [
         f"Review question: {task}",
         "",
-        f"Shelf: {shelf}",
+        f"Topic: {topic}",
         f"Scope: {scope or 'no scope given'}",
     ]
     if seed_terms:
@@ -275,7 +275,7 @@ def curate_user(
     lines += [
         f"Holds between {floor} and {ceiling} papers.",
         "",
-        f"Papers proposed for this shelf ({len(papers)}):",
+        f"Papers proposed for this topic ({len(papers)}):",
     ]
     for pmid, title, relevance, reason in papers:
         note = f" — screener: {reason}" if reason else ""
@@ -348,14 +348,14 @@ def extract_context(
     *,
     task: str,
     outcome: str,
-    shelf: str,
+    topic: str,
     scope: str,
     vocabularies: list[str],
 ) -> str:
-    """The review's terms, prefixed to every extraction call on one shelf.
+    """The review's terms, prefixed to every extraction call on one topic.
 
-    Assembled per shelf rather than per paper, for the same caching reason as
-    `screen_context`: papers on a shelf are extracted back to back, so a byte-identical
+    Assembled per topic rather than per paper, for the same caching reason as
+    `screen_context`: papers on a topic are extracted back to back, so a byte-identical
     prefix across them is the shape a provider's prompt cache can charge once for.
 
     `vocabularies` is the charter's list and nothing else. It is the only place this
@@ -367,7 +367,7 @@ def extract_context(
         lines.append(f"Outcome of interest: {outcome}")
     lines += [
         "",
-        f"Shelf: {shelf}",
+        f"Topic: {topic}",
         f"Scope: {scope or 'no scope given'}",
         "",
     ]

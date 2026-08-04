@@ -14,8 +14,8 @@ Four deterministic steps per paper, in this order:
 4. **Assembly** — bibliographic fields read from the PubMed record, license and text
    basis from the retrieval, provenance stamped here.
 
-A paper with no extraction is dropped from its shelf here rather than left as a shelf
-entry with no file behind it. That can take a shelf under the floor curation worked to
+A paper with no extraction is dropped from its topic here rather than left as a topic
+entry with no file behind it. That can take a topic under the floor curation worked to
 meet, which is worth saying out loud: the shortfall is ours, not the literature's, and
 the warning says so.
 """
@@ -54,7 +54,7 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
     if charter is None:
         raise RuntimeError("reconcile reached without a charter — the graph is wired wrong")
 
-    shelves = {slug: list(pmids) for slug, pmids in (state.get("shelves") or {}).items()}
+    topics = {slug: list(pmids) for slug, pmids in (state.get("topics") or {}).items()}
     texts = state.get("texts") or {}
     extractions = state.get("extractions") or {}
     by_pmid = {candidate.pmid: candidate for candidate in state.get("unique") or []}
@@ -68,7 +68,7 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
         trimmed_papers = 0
         unmapped_keys: set[str] = set()
 
-        for slug, pmids in shelves.items():
+        for slug, pmids in topics.items():
             kept: list[str] = []
             for pmid in pmids:
                 extraction = extractions.get(pmid)
@@ -89,7 +89,7 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
                 unmapped_keys.update(unmapped)
                 records.append(record)
                 kept.append(pmid)
-            shelves[slug] = kept
+            topics[slug] = kept
 
         _report(
             deps,
@@ -103,7 +103,7 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
 
     return {
         "records": records,
-        "shelves": shelves,
+        "topics": topics,
         "verification": summary,
         "warnings": warnings,
     }
@@ -166,7 +166,7 @@ def _reconcile_one(
 def _provenance(deps: Deps) -> str:
     """`generated.by`, naming the model that actually did the reading."""
     try:
-        model = deps.settings.model_for(Role.DEEP) if deps.router is not None else ""
+        model = deps.settings.model_for(Role.REASONING) if deps.router is not None else ""
     except ConfigError:
         model = ""
     return f"okf-loremaster/extract/{model}" if model else "okf-loremaster/extract"
@@ -232,7 +232,7 @@ def _report(
     if dropped:
         note = (
             f"{len(dropped)} paper(s) had no usable extraction and were dropped from "
-            f"their shelf, so shelf counts are below what curation kept: "
+            f"their topic, so topic counts are below what curation kept: "
             f"{', '.join(dropped[:MAX_EXAMPLES])}"
         )
         warnings.append(note)

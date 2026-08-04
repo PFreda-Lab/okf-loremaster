@@ -1,7 +1,7 @@
 """Length budgets, and the pure functions that enforce them.
 
 A concept file exists to be read by an agent that is holding a dozen of them at once.
-Left alone, an extraction model writes a page per paper, and a shelf of forty becomes
+Left alone, an extraction model writes a page per paper, and a topic of forty becomes
 something no reader — human or otherwise — will get through. So every free-text field
 has a ceiling.
 

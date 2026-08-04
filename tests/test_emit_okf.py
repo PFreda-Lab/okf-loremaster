@@ -65,7 +65,7 @@ async def test_the_golden_bundle_passes_the_hard_gate(
     assert report.errors == (), report.lines()
     assert report.ok
     assert report.documents == TARGET
-    assert report.shelves == len(TOPICS)
+    assert report.topics == len(TOPICS)
 
     # And the run reached the same verdict in-graph, over the same code path.
     assert run.state["validated"] is True
@@ -136,21 +136,21 @@ async def test_both_parsers_see_the_same_document(
             assert set(strict["generated"]) == {"by", "at"}
 
 
-async def test_the_key_is_domain_it_equals_the_folder_and_shelf_never_appears(
+async def test_the_key_is_domain_it_equals_the_folder_and_topic_never_appears(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """"Shelf" is the human word. A file carrying both keys is shelved by whichever one
+    """"Topic" is the human word. A file carrying both keys is filed by whichever one
     the reader happens to prefer, which is a bundle that reorganizes itself per tool."""
     _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
     parsed = read_bundle(bundle)
 
     for document in parsed.documents():
         assert document.domain == document.path.parent.name
-        assert "shelf" not in document.fields
-    for shelf in parsed.shelves:
-        assert shelf.index is not None
-        assert shelf.index.domain == shelf.slug
-        assert "shelf" not in shelf.index.fields
+        assert "topic" not in document.fields
+    for topic in parsed.topics:
+        assert topic.index is not None
+        assert topic.index.domain == topic.slug
+        assert "topic" not in topic.index.fields
 
     # The root sits in no domain folder, so it must not claim one.
     assert parsed.index is not None
@@ -286,7 +286,7 @@ class StubReviewer:
         self,
         records: Any,
         *,
-        shelves: dict[str, list[str]],
+        topics: dict[str, list[str]],
         verification: VerificationSummary | None,
         warnings: Any,
     ) -> Signoff:
@@ -351,7 +351,7 @@ async def test_a_declined_sign_off_still_emits_the_bundle_unverified(
 ) -> None:
     """Declining is not a failure. Refusing to emit would punish the reviewer for
     reading carefully, and the files are simply written at the tier they earned."""
-    attach(monkeypatch, Signoff.declined("the delta shelf is thin"))
+    attach(monkeypatch, Signoff.declined("the delta topic is thin"))
     run, bundle = await golden(settings_factory, tmp_path, monkeypatch, review=True)
 
     assert run.state.get("verified_by", "") == ""
@@ -362,7 +362,7 @@ async def test_a_declined_sign_off_still_emits_the_bundle_unverified(
 
     declined = [note for note in run.warnings if "sign-off was not given" in note]
     assert len(declined) == 1
-    assert "the delta shelf is thin" in declined[0]
+    assert "the delta topic is thin" in declined[0]
     assert validate_bundle(bundle).ok
 
 

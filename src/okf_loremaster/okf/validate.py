@@ -8,11 +8,11 @@ The checks divide cleanly, and the division is the design:
 
 **Errors are things that break a consumer.** A missing `domain`, a `domain` that does
 not equal its folder, a document that will not parse, a section that moved. AFCE
-resolves a document three ways and shelves it by folder; every one of these makes a
+resolves a document three ways and files it by folder; every one of these makes a
 document silently unreachable or misfiled rather than visibly broken, which is why they
 are checked here rather than trusted to the writer.
 
-**Warnings are things that make a bundle worse without making it wrong.** A shelf that
+**Warnings are things that make a bundle worse without making it wrong.** A topic that
 retained nothing, a document with no tags — AFCE's retrieval haystack is title, tags and
 journal, so an untagged document is findable only by its title. And the vocabulary
 aggregate: an extraction that wanted a key the charter never listed is not an error, it
@@ -117,7 +117,7 @@ class Finding:
 class BundleReport:
     path: Path
     documents: int = 0
-    shelves: int = 0
+    topics: int = 0
     findings: tuple[Finding, ...] = ()
 
     @property
@@ -135,7 +135,7 @@ class BundleReport:
 
     def summary(self) -> str:
         state = "passes" if self.ok else f"fails with {len(self.errors)} error(s)"
-        detail = f"{self.documents} document(s) across {self.shelves} shelf/shelves"
+        detail = f"{self.documents} document(s) across {self.topics} topic/topics"
         note = f", {len(self.warnings)} warning(s)" if self.warnings else ""
         return f"{detail}; {state}{note}"
 
@@ -152,7 +152,7 @@ def validate_bundle(path: Path, *, embed_model: str = "") -> BundleReport:
         findings.append(Finding(Severity.ERROR, f"could not be read: {why}", bad_path))
 
     _check_root(bundle, findings)
-    _check_shelves(bundle, findings)
+    _check_topics(bundle, findings)
     for document in bundle.documents():
         _check_document(document, findings)
     _check_catalog(bundle, findings)
@@ -165,7 +165,7 @@ def validate_bundle(path: Path, *, embed_model: str = "") -> BundleReport:
     return BundleReport(
         path=path,
         documents=bundle.document_count,
-        shelves=len(bundle.shelves),
+        topics=len(bundle.topics),
         findings=tuple(findings),
     )
 
@@ -183,9 +183,9 @@ def _check_root(bundle: OkfBundle, findings: list[Finding]) -> None:
                 bundle.path,
             )
         )
-    if not bundle.shelves:
+    if not bundle.topics:
         findings.append(
-            Finding(Severity.ERROR, "no shelf directories — the bundle holds nothing", bundle.path)
+            Finding(Severity.ERROR, "no topic directories — the bundle holds nothing", bundle.path)
         )
     if not bundle.has_catalog:
         findings.append(Finding(Severity.ERROR, f"no {CATALOG_FILENAME}", bundle.path))
@@ -207,37 +207,37 @@ def _check_root(bundle: OkfBundle, findings: list[Finding]) -> None:
         )
 
 
-def _check_shelves(bundle: OkfBundle, findings: list[Finding]) -> None:
-    for shelf in bundle.shelves:
-        if shelf.index is None:
+def _check_topics(bundle: OkfBundle, findings: list[Finding]) -> None:
+    for topic in bundle.topics:
+        if topic.index is None:
             findings.append(
-                Finding(Severity.ERROR, f"shelf has no {INDEX_FILENAME}", shelf.path)
+                Finding(Severity.ERROR, f"topic has no {INDEX_FILENAME}", topic.path)
             )
-        elif shelf.index.domain != shelf.slug:
+        elif topic.index.domain != topic.slug:
             findings.append(
                 Finding(
                     Severity.ERROR,
-                    f"index declares domain {shelf.index.domain!r} but sits in {shelf.slug!r}",
-                    shelf.index.path,
+                    f"index declares domain {topic.index.domain!r} but sits in {topic.slug!r}",
+                    topic.index.path,
                 )
             )
-        if not shelf.documents:
+        if not topic.documents:
             findings.append(
                 Finding(
                     Severity.WARNING,
-                    "shelf retained no papers — present and empty, which is a claim about "
+                    "topic retained no papers — present and empty, which is a claim about "
                     "the literature rather than a missing folder",
-                    shelf.path,
+                    topic.path,
                 )
             )
         stray = sorted(
             p.name
-            for p in shelf.path.glob("*.md")
+            for p in topic.path.glob("*.md")
             if p.name in RESERVED_FILENAMES and p.name != INDEX_FILENAME
         )
         for name in stray:
             findings.append(
-                Finding(Severity.ERROR, f"{name} is reserved and cannot be a document", shelf.path)
+                Finding(Severity.ERROR, f"{name} is reserved and cannot be a document", topic.path)
             )
 
 
@@ -254,14 +254,14 @@ def _check_document(document: OkfDocument, findings: list[Finding]) -> None:
     if not document.title:
         fail("no `title` — it is required, and it is most of the search surface")
     if not document.domain:
-        fail("no `domain` — it is required, and it is how the document is shelved")
-    elif document.domain != document.shelf:
-        fail(f"declares domain {document.domain!r} but sits in {document.shelf!r}")
+        fail("no `domain` — it is required, and it is how the document is filed")
+    elif document.domain != document.topic:
+        fail(f"declares domain {document.domain!r} but sits in {document.topic!r}")
 
-    # The naming trap. "Shelf" is the human word; the key is `domain`, and a file
-    # carrying both would be shelved by whichever one the reader happened to prefer.
-    if "shelf" in document.fields:
-        fail("carries a `shelf` key — the frontmatter key is `domain`")
+    # The naming trap. "Topic" is the human word; the key is `domain`, and a file
+    # carrying both would be filed by whichever one the reader happened to prefer.
+    if "topic" in document.fields:
+        fail("carries a `topic` key — the frontmatter key is `domain`")
 
     if not document.tags:
         warn(
@@ -363,7 +363,7 @@ def _check_catalog(bundle: OkfBundle, findings: list[Finding]) -> None:
     catalog_path = bundle.path / CATALOG_FILENAME
     listed = {str(row.get("file") or "") for row in bundle.catalog}
     listed.discard("")
-    present = {f"{doc.shelf}/{doc.filename}" for doc in bundle.documents()}
+    present = {f"{doc.topic}/{doc.filename}" for doc in bundle.documents()}
 
     for missing in sorted(present - listed):
         findings.append(
@@ -378,7 +378,7 @@ def _check_catalog(bundle: OkfBundle, findings: list[Finding]) -> None:
 
 def _check_links(bundle: OkfBundle, findings: list[Finding]) -> None:
     """Every relative link inside the bundle must resolve."""
-    documents = [bundle.index, *(shelf.index for shelf in bundle.shelves), *bundle.documents()]
+    documents = [bundle.index, *(topic.index for topic in bundle.topics), *bundle.documents()]
     for document in documents:
         if document is None:
             continue

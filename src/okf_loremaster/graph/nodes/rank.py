@@ -5,7 +5,7 @@ so it has to be reproducible: the same corpus and charter must yield the same po
 
 Both selections are computed and both are kept. The pure relevance top-N is not used
 for anything downstream — it exists so `selection_diff` can say what MMR and the
-per-shelf quota actually changed on this corpus, which `--dry-run` prints. A
+per-topic quota actually changed on this corpus, which `--dry-run` prints. A
 diversification pass nobody can see the effect of is indistinguishable from one that
 silently does nothing.
 
@@ -30,7 +30,7 @@ NODE = "rank"
 async def rank_node(state: RunState, deps: Deps) -> dict[str, Any]:
     candidates: list[Candidate] = list(state.get("unique") or [])
     charter = state.get("charter")
-    query_shelf: dict[str, str] = dict(state.get("query_shelf") or {})
+    query_topic: dict[str, str] = dict(state.get("query_topic") or {})
     warnings = list(state.get("warnings") or [])
 
     with span(deps, NODE) as report:
@@ -44,11 +44,11 @@ async def rank_node(state: RunState, deps: Deps) -> dict[str, Any]:
         pure = scored[: deps.pool_size]
         pool = quota_select(
             scored,
-            query_shelf=query_shelf,
+            query_topic=query_topic,
             pool_size=deps.pool_size,
             lambda_=deps.mmr_lambda,
         )
-        comparison = selection_diff(pure, pool, query_shelf=query_shelf)
+        comparison = selection_diff(pure, pool, query_topic=query_topic)
 
         deps.progress(NODE, comparison.summary())
         report["summary"] = (

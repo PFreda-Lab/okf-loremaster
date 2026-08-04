@@ -4,9 +4,9 @@ Separate from `pauses.py` because nothing here asks anything: a pause is a decis
 surface and this is a report. The two would otherwise grow into one module that both
 blocks and summarizes, and the summary is the part that later steps keep adding to.
 
-The shelf table is the first place a person sees whether the run worked. A shelf at its
+The topic table is the first place a person sees whether the run worked. A topic at its
 floor with a `missing` line beside it is a finding about the literature, not a defect,
-and it is printed as such — the alternative is a bundle whose thin shelves are only
+and it is printed as such — the alternative is a bundle whose thin topics are only
 discoverable by browsing it.
 """
 
@@ -20,34 +20,34 @@ from rich.table import Table
 
 from okf_loremaster.graph.state import RunState
 
-__all__ = ["render_bundle", "render_extraction", "render_shelves"]
+__all__ = ["render_bundle", "render_extraction", "render_topics"]
 
 # Warnings printed in full. A structurally broken run can accumulate one per document,
 # and a wall of them is a wall nobody reads; the rest are in the bundle's own log.
 MAX_WARNINGS = 12
 
 
-def render_shelves(console: Console, state: RunState) -> None:
+def render_topics(console: Console, state: RunState) -> None:
     """Print the final placement, and what came up short."""
-    shelves = dict(state.get("shelves") or {})
-    if not shelves:
+    topics = dict(state.get("topics") or {})
+    if not topics:
         return
 
     charter = state.get("charter")
-    floor = charter.shelf_min if charter is not None else 0
-    ceiling = charter.shelf_max if charter is not None else 0
-    titles = {shelf.slug: shelf.title for shelf in charter.shelf_taxonomy} if charter else {}
+    floor = charter.topic_min if charter is not None else 0
+    ceiling = charter.topic_max if charter is not None else 0
+    titles = {topic.slug: topic.title for topic in charter.topic_taxonomy} if charter else {}
     curation = state.get("curation")
-    gaps = {gap.shelf: gap for gap in (curation.gaps if curation is not None else [])}
+    gaps = {gap.topic: gap for gap in (curation.gaps if curation is not None else [])}
 
     console.rule("[bold]curated[/bold]")
-    table = Table(title=f"shelves ({floor}-{ceiling} papers each)", title_style="bold")
-    table.add_column("shelf", style="cyan", no_wrap=True)
+    table = Table(title=f"topics ({floor}-{ceiling} papers each)", title_style="bold")
+    table.add_column("topic", style="cyan", no_wrap=True)
     table.add_column("title", overflow="fold")
     table.add_column("papers", justify="right")
     table.add_column("still missing", overflow="fold", style="dim")
 
-    for slug, pmids in shelves.items():
+    for slug, pmids in topics.items():
         gap = gaps.get(slug)
         count = str(len(pmids))
         if gap is not None and gap.shortfall > 0:
@@ -59,7 +59,7 @@ def render_shelves(console: Console, state: RunState) -> None:
             escape(gap.missing) if gap is not None else "",
         )
 
-    kept = sum(len(pmids) for pmids in shelves.values())
+    kept = sum(len(pmids) for pmids in topics.values())
     table.add_section()
     table.add_row("total", "", str(kept), "")
     console.print(table)
@@ -67,7 +67,7 @@ def render_shelves(console: Console, state: RunState) -> None:
     rounds = int(state.get("rounds") or 1)
     if rounds > 1:
         console.print(
-            f"[dim]  {rounds} search rounds: a shelf came up short and was refilled[/dim]"
+            f"[dim]  {rounds} search rounds: a topic came up short and was refilled[/dim]"
         )
 
     short = [slug for slug, gap in gaps.items() if gap.shortfall > 0]

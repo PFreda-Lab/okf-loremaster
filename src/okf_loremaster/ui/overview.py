@@ -4,7 +4,7 @@ Separate from `okf/overview.py` for the reason every renderer in this package is
 from what it renders: the counting has to be testable without a terminal, and the reader
 has to stay importable by anything that wants the numbers rather than the picture.
 
-The order is the order someone reads it in: where and how big, then the shelves, then
+The order is the order someone reads it in: where and how big, then the topics, then
 what the corpus is made of, then the run behind it. Verification gets its own line rather
 than a column, because "of 412 predictor rows, 388 carry a magnitude and 6 read
 `unverified`" is the sentence that says how quotable this bundle is, and a number in a
@@ -39,7 +39,7 @@ def render_overview(console: Console, overview: BundleOverview) -> None:
     if overview.resource_id:
         console.print(f"[dim]resource id[/dim]  {escape(overview.resource_id)}")
 
-    _render_shelves(console, overview)
+    _render_topics(console, overview)
     _render_corpus(console, overview)
     _render_designs(console, overview)
     _render_vocabularies(console, overview)
@@ -48,30 +48,30 @@ def render_overview(console: Console, overview: BundleOverview) -> None:
     _render_problems(console, overview)
 
 
-def _render_shelves(console: Console, overview: BundleOverview) -> None:
-    if not overview.shelves:
-        console.print("[yellow]![/yellow]  no shelves — the bundle holds nothing")
+def _render_topics(console: Console, overview: BundleOverview) -> None:
+    if not overview.topics:
+        console.print("[yellow]![/yellow]  no topics — the bundle holds nothing")
         return
 
-    table = Table(title="shelves", title_style="bold")
-    table.add_column("shelf", style="cyan", no_wrap=True)
+    table = Table(title="topics", title_style="bold")
+    table.add_column("topic", style="cyan", no_wrap=True)
     table.add_column("title", overflow="fold")
     table.add_column("papers", justify="right")
     table.add_column("full text", justify="right")
     table.add_column("predictors", justify="right")
     table.add_column("permissive", justify="right")
 
-    for shelf in overview.shelves:
-        count = str(shelf.documents)
-        if not shelf.documents:
+    for topic in overview.topics:
+        count = str(topic.documents)
+        if not topic.documents:
             count = f"[yellow]{count}[/yellow]"
         table.add_row(
-            shelf.slug,
-            escape(shelf.title),
+            topic.slug,
+            escape(topic.title),
             count,
-            str(shelf.full_text),
-            str(shelf.predictors),
-            str(shelf.exportable),
+            str(topic.full_text),
+            str(topic.predictors),
+            str(topic.exportable),
         )
     table.add_section()
     table.add_row(

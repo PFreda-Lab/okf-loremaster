@@ -11,26 +11,26 @@ from okf_loremaster.config import ConfigError, Role, Settings, env_file_candidat
 
 
 def test_role_binding(settings_factory: Any) -> None:
-    settings = settings_factory(model_fast="a", model_mid="b", model_deep="c")
+    settings = settings_factory(model_fast="a", model_balanced="b", model_reasoning="c")
     assert settings.model_for(Role.FAST) == "a"
-    assert settings.model_for(Role.MID) == "b"
-    assert settings.model_for(Role.DEEP) == "c"
+    assert settings.model_for(Role.BALANCED) == "b"
+    assert settings.model_for(Role.REASONING) == "c"
 
 
 def test_unbound_role_names_the_variable(settings_factory: Any) -> None:
-    settings = settings_factory(model_fast="a", model_mid="b")
+    settings = settings_factory(model_fast="a", model_balanced="b")
     with pytest.raises(ConfigError) as excinfo:
-        settings.model_for(Role.DEEP)
+        settings.model_for(Role.REASONING)
     # The whole point of the error is that it tells you what to set.
-    assert "OKF_LOREMASTER_MODEL_DEEP" in str(excinfo.value)
+    assert "OKF_LOREMASTER_MODEL_REASONING" in str(excinfo.value)
 
 
 def test_missing_variables_are_listed(settings_factory: Any) -> None:
     settings = settings_factory()
     missing = settings.missing_for_llm()
     assert "OKF_LOREMASTER_MODEL_FAST" in missing
-    assert "OKF_LOREMASTER_MODEL_MID" in missing
-    assert "OKF_LOREMASTER_MODEL_DEEP" in missing
+    assert "OKF_LOREMASTER_MODEL_BALANCED" in missing
+    assert "OKF_LOREMASTER_MODEL_REASONING" in missing
     assert "ANTHROPIC_API_KEY" in missing
 
     with pytest.raises(ConfigError) as excinfo:
@@ -48,21 +48,21 @@ def test_api_key_accepts_either_spelling(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_half_configured_price_counts_as_unpriced(settings_factory: Any) -> None:
     """An input price with no output price would silently undercount every call."""
-    settings = settings_factory(price_deep_in=15.0)
-    assert settings.price_for(Role.DEEP) == (None, None)
-    assert Role.DEEP in settings.unpriced_roles()
+    settings = settings_factory(price_reasoning_in=15.0)
+    assert settings.price_for(Role.REASONING) == (None, None)
+    assert Role.REASONING in settings.unpriced_roles()
 
 
 def test_fully_configured_price_resolves(settings_factory: Any) -> None:
-    settings = settings_factory(price_deep_in=15.0, price_deep_out=75.0)
-    assert settings.price_for(Role.DEEP) == (15.0, 75.0)
-    assert Role.DEEP not in settings.unpriced_roles()
+    settings = settings_factory(price_reasoning_in=15.0, price_reasoning_out=75.0)
+    assert settings.price_for(Role.REASONING) == (15.0, 75.0)
+    assert Role.REASONING not in settings.unpriced_roles()
 
 
 def test_concurrency_defaults_descend_with_cost(settings_factory: Any) -> None:
     settings = settings_factory()
-    assert settings.concurrency_for(Role.FAST) >= settings.concurrency_for(Role.MID)
-    assert settings.concurrency_for(Role.MID) >= settings.concurrency_for(Role.DEEP)
+    assert settings.concurrency_for(Role.FAST) >= settings.concurrency_for(Role.BALANCED)
+    assert settings.concurrency_for(Role.BALANCED) >= settings.concurrency_for(Role.REASONING)
 
 
 @pytest.mark.parametrize(

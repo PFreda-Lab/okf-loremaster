@@ -4,11 +4,11 @@
 It reads the same prompt the real model would: which node is asking is told by the
 system message, and what it is being asked about is parsed back out of the user
 message. A test therefore writes a policy — "include everything about alpha; the delta
-shelf is missing its rescue cohort" — rather than a transcript of replies in order,
+topic is missing its rescue cohort" — rather than a transcript of replies in order,
 which would break the moment concurrency reordered two calls.
 
 Parsing the prompt rather than being handed the subject is the point. A change to
-`prompts.py` that dropped the shelf slug, the offered PMIDs or the paper text out of a
+`prompts.py` that dropped the topic slug, the offered PMIDs or the paper text out of a
 call fails here, loudly, instead of passing against a scripted reply that no longer
 corresponds to anything the node sent.
 """
@@ -33,7 +33,7 @@ from okf_loremaster.prompts import (
 # The four shapes this reads back out of a prompt, each written by `prompts.py`.
 _PAPER = re.compile(r"\n\nPaper:\n\n(.*)$", re.DOTALL)
 _SOURCE = re.compile(r"\n\nSource:\n\n(.*)$", re.DOTALL)
-_SHELF = re.compile(r"^Shelf: (\S+)$", re.MULTILINE)
+_TOPIC = re.compile(r"^Topic: (\S+)$", re.MULTILINE)
 _OFFERED = re.compile(r"^ +- (\d+) \[relevance (\d)\]", re.MULTILINE)
 
 # What the default extractor reads back out of a paper. Written against the shape a
@@ -48,7 +48,7 @@ _COHORT = re.compile(r"cohort of (?P<n>\d+) adults")
 
 # A paper's title and abstract -> the fields of one `ScreenVerdict`.
 ScreenFn = Callable[[str], dict[str, Any]]
-# A shelf slug and the PMIDs offered to it -> the fields of one `ShelfCuration`.
+# A topic slug and the PMIDs offered to it -> the fields of one `TopicCuration`.
 CurateFn = Callable[[str, list[str]], dict[str, Any]]
 # The source text a paper was read from -> the fields of one `Extraction`.
 ExtractFn = Callable[[str], dict[str, Any]]
@@ -58,7 +58,7 @@ def verdict(
     *,
     include: bool,
     relevance: int,
-    shelf: str = "",
+    topic: str = "",
     reason: str = "screened",
     confidence: str = "medium",
 ) -> dict[str, Any]:
@@ -66,7 +66,7 @@ def verdict(
     return {
         "include": include,
         "relevance": relevance,
-        "shelf": shelf,
+        "topic": topic,
         "reason": reason,
         "confidence": confidence,
     }
@@ -160,7 +160,7 @@ class ScriptedLLM:
     """Answers the judgment nodes from rules, and records what it was asked.
 
     The records are what most assertions are actually about — that no paper was screened
-    twice across two rounds, that a second round re-curated only the shelf that came up
+    twice across two rounds, that a second round re-curated only the topic that came up
     short — none of which is visible in the run state afterward.
     """
 
@@ -170,21 +170,21 @@ class ScriptedLLM:
     plan: Sequence[dict[str, str]] = ()
     # Defaulted because most tests are not about extraction and would otherwise all have
     # to say so. The default is a faithful reading, so a run that reaches `extract`
-    # produces a bundle rather than a shelf of dropped papers.
+    # produces a bundle rather than a topic of dropped papers.
     extract: ExtractFn = supported
 
     screened: list[str] = field(default_factory=list)
     curated: list[str] = field(default_factory=list)
     extracted: list[str] = field(default_factory=list)
-    # Shelf slug to the PMIDs offered on each call for it, one list per call.
+    # Topic slug to the PMIDs offered on each call for it, one list per call.
     offers: dict[str, list[list[str]]] = field(default_factory=dict)
     plans: int = 0
 
     def completion(self) -> FakeCompletion:
         return FakeCompletion(replies=self._reply)
 
-    def calls_for(self, shelf: str) -> int:
-        return self.curated.count(shelf)
+    def calls_for(self, topic: str) -> int:
+        return self.curated.count(topic)
 
     # --- dispatch ----------------------------------------------------------
 
@@ -234,13 +234,13 @@ class ScriptedLLM:
         raise AssertionError("extract_user no longer puts the paper under a `Source:` header")
 
     def _curate(self, user: str) -> str:
-        shelf = _SHELF.search(user)
-        if shelf is None:
-            raise AssertionError("curate_user no longer names the shelf it is asking about")
+        topic = _TOPIC.search(user)
+        if topic is None:
+            raise AssertionError("curate_user no longer names the topic it is asking about")
         offered = [match.group(1) for match in _OFFERED.finditer(user)]
         if not offered:
             raise AssertionError("curate_user offered no papers; the node called for nothing")
-        slug = shelf.group(1)
+        slug = topic.group(1)
         self.curated.append(slug)
         self.offers.setdefault(slug, []).append(offered)
         return json.dumps(self.curate(slug, offered))

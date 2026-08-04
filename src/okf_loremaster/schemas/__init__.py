@@ -1,7 +1,7 @@
 """Every typed object that moves between graph nodes.
 
 Nothing in this package names a disease, a specialty, a drug, a lab, a registry, a
-shelf, or a vocabulary key. Shelf slugs and vocabulary keys are strings decided by the
+topic, or a vocabulary key. Topic slugs and vocabulary keys are strings decided by the
 charter at runtime, which is what makes the same code serve any cohort.
 `tests/test_domain_agnostic.py` scans `src/` and fails if that stops being true.
 """
@@ -16,12 +16,12 @@ from okf_loremaster.schemas.candidates import (
     ScoredCandidate,
 )
 from okf_loremaster.schemas.charter import (
-    DEFAULT_SHELF_MAX,
-    DEFAULT_SHELF_MIN,
     DEFAULT_TARGET_PAPERS,
-    MAX_SHELVES,
+    DEFAULT_TOPIC_MAX,
+    DEFAULT_TOPIC_MIN,
+    MAX_TOPICS,
     Charter,
-    Shelf,
+    Topic,
 )
 from okf_loremaster.schemas.common import (
     Confidence,
@@ -62,7 +62,7 @@ from okf_loremaster.schemas.manifest import (
     BundleCounts,
     CostSummary,
     RunManifest,
-    ShelfSummary,
+    TopicSummary,
 )
 from okf_loremaster.schemas.parse import (
     SchemaError,
@@ -74,23 +74,23 @@ from okf_loremaster.schemas.screening import (
     CurationDecision,
     CurationResult,
     ScreenVerdict,
-    ShelfCuration,
-    ShelfGap,
+    TopicCuration,
+    TopicGap,
 )
 
 __all__ = [
     "DEFAULT_FRESHNESS_DAYS",
-    "DEFAULT_SHELF_MAX",
-    "DEFAULT_SHELF_MIN",
     "DEFAULT_TARGET_PAPERS",
+    "DEFAULT_TOPIC_MAX",
+    "DEFAULT_TOPIC_MIN",
     "MAX_BODY_WORDS",
     "MAX_BOTTOM_LINE_SENTENCES",
     "MAX_CAVEAT_SENTENCES",
     "MAX_DESCRIPTION_CHARS",
     "MAX_PREDICTOR_ROWS",
-    "MAX_SHELVES",
     "MAX_SOURCE_CHARS",
     "MAX_TAGS",
+    "MAX_TOPICS",
     "NONE_REPORTED",
     "BundleCounts",
     "Candidate",
@@ -114,13 +114,13 @@ __all__ = [
     "SchemaError",
     "ScoredCandidate",
     "ScreenVerdict",
-    "Shelf",
-    "ShelfCuration",
-    "ShelfGap",
-    "ShelfSummary",
     "Slug",
     "SourceRef",
     "TextBasis",
+    "Topic",
+    "TopicCuration",
+    "TopicGap",
+    "TopicSummary",
     "Verification",
     "VerificationSummary",
     "filename_token",

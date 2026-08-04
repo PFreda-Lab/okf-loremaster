@@ -22,8 +22,8 @@ class Role(StrEnum):
     """Model tiers. Nodes ask for a role; config decides which model serves it."""
 
     FAST = "fast"
-    MID = "mid"
-    DEEP = "deep"
+    BALANCED = "balanced"
+    REASONING = "reasoning"
 
 
 class ConfigError(RuntimeError):
@@ -68,8 +68,8 @@ class Settings(BaseSettings):
     # --- LLM routing -------------------------------------------------------
     # Passed verbatim to LiteLLM, so any provider it supports works.
     model_fast: str = ""
-    model_mid: str = ""
-    model_deep: str = ""
+    model_balanced: str = ""
+    model_reasoning: str = ""
 
     # Credentials are conventionally unprefixed, so accept both spellings.
     api_key: str = Field(
@@ -82,8 +82,8 @@ class Settings(BaseSettings):
     )
 
     concurrency_fast: int = 8
-    concurrency_mid: int = 4
-    concurrency_deep: int = 2
+    concurrency_balanced: int = 4
+    concurrency_reasoning: int = 2
     max_retries: int = 4
     request_timeout: float = 120.0
 
@@ -92,10 +92,10 @@ class Settings(BaseSettings):
     # is the normal case behind a gateway or a custom deployment name.
     price_fast_in: float | None = None
     price_fast_out: float | None = None
-    price_mid_in: float | None = None
-    price_mid_out: float | None = None
-    price_deep_in: float | None = None
-    price_deep_out: float | None = None
+    price_balanced_in: float | None = None
+    price_balanced_out: float | None = None
+    price_reasoning_in: float | None = None
+    price_reasoning_out: float | None = None
 
     max_usd: float | None = None
 
@@ -138,8 +138,8 @@ class Settings(BaseSettings):
     def model_for(self, role: Role) -> str:
         model = {
             Role.FAST: self.model_fast,
-            Role.MID: self.model_mid,
-            Role.DEEP: self.model_deep,
+            Role.BALANCED: self.model_balanced,
+            Role.REASONING: self.model_reasoning,
         }[role]
         if not model:
             raise ConfigError(
@@ -152,8 +152,8 @@ class Settings(BaseSettings):
         """(input, output) USD per 1M tokens, or (None, None) if not fully set."""
         pair = {
             Role.FAST: (self.price_fast_in, self.price_fast_out),
-            Role.MID: (self.price_mid_in, self.price_mid_out),
-            Role.DEEP: (self.price_deep_in, self.price_deep_out),
+            Role.BALANCED: (self.price_balanced_in, self.price_balanced_out),
+            Role.REASONING: (self.price_reasoning_in, self.price_reasoning_out),
         }[role]
         # A half-configured price would silently undercount, so require both.
         if pair[0] is None or pair[1] is None:
@@ -163,8 +163,8 @@ class Settings(BaseSettings):
     def concurrency_for(self, role: Role) -> int:
         return {
             Role.FAST: self.concurrency_fast,
-            Role.MID: self.concurrency_mid,
-            Role.DEEP: self.concurrency_deep,
+            Role.BALANCED: self.concurrency_balanced,
+            Role.REASONING: self.concurrency_reasoning,
         }[role]
 
     # --- Preflight ---------------------------------------------------------
@@ -175,8 +175,8 @@ class Settings(BaseSettings):
         for role in Role:
             if not {
                 Role.FAST: self.model_fast,
-                Role.MID: self.model_mid,
-                Role.DEEP: self.model_deep,
+                Role.BALANCED: self.model_balanced,
+                Role.REASONING: self.model_reasoning,
             }[role]:
                 missing.append(f"{ENV_PREFIX}MODEL_{role.value.upper()}")
         if not self.api_key:

@@ -27,7 +27,7 @@ __all__ = [
     "slugify",
 ]
 
-# Shelf slugs and the `domain` frontmatter key. Lowercase, digits, single hyphens,
+# Topic slugs and the `domain` frontmatter key. Lowercase, digits, single hyphens,
 # no leading or trailing hyphen — because the slug is also a directory name and must
 # survive a case-insensitive filesystem, a URL, and a YAML scalar unquoted.
 SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
@@ -152,7 +152,7 @@ def is_export_safe(license_text: str) -> bool:
 
 
 def slugify(text: str) -> str:
-    """Fold arbitrary text into a `Slug`, for a shelf folder name.
+    """Fold arbitrary text into a `Slug`, for a topic folder name.
 
     Returns `""` for input with no alphanumeric content, which callers must handle
     rather than write a directory named `-`.
@@ -165,7 +165,7 @@ def filename_token(text: str) -> str:
     """Fold a name into a filename component, keeping its capitalization.
 
     Used for the author half of `<pmid>_<Author>.md`. Case is preserved because the
-    filename is what an agent sees in a shelf index and cites back at us, and
+    filename is what an agent sees in a topic index and cites back at us, and
     `33745404_Ferrari-Silva.md` is legible in a way the lowercased form is not.
     Everything outside `[A-Za-z0-9]` becomes a hyphen, so the result is safe on a
     case-insensitive filesystem and inside a URL alike.

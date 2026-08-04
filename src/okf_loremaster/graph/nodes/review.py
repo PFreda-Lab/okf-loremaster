@@ -34,7 +34,7 @@ async def review_node(state: RunState, deps: Deps) -> dict[str, Any]:
     with span(deps, NODE) as report:
         signoff = await reviewer.sign_off(
             records,
-            shelves=dict(state.get("shelves") or {}),
+            topics=dict(state.get("topics") or {}),
             verification=state.get("verification"),
             warnings=warnings,
         )

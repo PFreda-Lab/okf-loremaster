@@ -29,7 +29,7 @@ import re
 from collections.abc import Collection, Sequence
 
 from okf_loremaster.clients.eutils import ESearchResult
-from okf_loremaster.schemas import Charter, ExecutedQuery, PlannedQuery, QueryPlan, ShelfGap
+from okf_loremaster.schemas import Charter, ExecutedQuery, PlannedQuery, QueryPlan, TopicGap
 
 __all__ = [
     "ALL_FIELDS",
@@ -54,7 +54,7 @@ ALL_FIELDS = "[All Fields]"
 MAX_PHRASE_WORDS = 4
 
 # Concepts ORed into one gap query. Past this the clause matches on the weakest term in
-# it, and a shelf gets refilled with whatever that term happened to catch.
+# it, and a topic gets refilled with whatever that term happened to catch.
 MAX_GAP_TERMS = 6
 
 # Ordinary English function words. Nothing clinical, nothing project-specific.
@@ -179,14 +179,14 @@ def deterministic_plan(charter: Charter, *, max_queries: int = 12) -> QueryPlan:
             PlannedQuery(term=base, rationale="the charter's outcome and population")
         )
 
-    for shelf in charter.shelf_taxonomy:
-        facet = or_group(shelf.seed_terms[:4]) or tiab(shelf.title)
+    for topic in charter.topic_taxonomy:
+        facet = or_group(topic.seed_terms[:4]) or tiab(topic.title)
         term = f"{base} AND {facet}" if base else facet
         queries.append(
-            PlannedQuery(term=term, rationale=f"seeds the {shelf.slug} shelf", shelf=shelf.slug)
+            PlannedQuery(term=term, rationale=f"seeds the {topic.slug} topic", topic=topic.slug)
         )
 
-    if not charter.shelf_taxonomy:
+    if not charter.topic_taxonomy:
         # No taxonomy to fan out over, so widen on the prompt's own phrases instead.
         for candidate in keyphrases(charter.task or charter.prompt)[2:6]:
             term = f"{base} AND {tiab(candidate)}" if base else tiab(candidate)
@@ -207,20 +207,20 @@ def deterministic_plan(charter: Charter, *, max_queries: int = 12) -> QueryPlan:
 
 def gap_plan(
     charter: Charter,
-    gaps: Sequence[ShelfGap],
+    gaps: Sequence[TopicGap],
     *,
     already: Collection[str] = (),
     max_queries: int = 12,
 ) -> QueryPlan:
-    """Queries for the shelves curation could not fill. No model call.
+    """Queries for the topics curation could not fill. No model call.
 
-    The judgment has already been made and paid for: `ShelfGap.missing` is the curator's
-    own account of what its shelf lacks, written as search concepts because the prompt
+    The judgment has already been made and paid for: `TopicGap.missing` is the curator's
+    own account of what its topic lacks, written as search concepts because the prompt
     asks for them that way. Turning that into syntax is code, like every other query
     here.
 
     Broader than the round that came up short, in a specific way — the population anchor
-    is dropped and the curator's phrases are ORed in beside the shelf's own seeds. A
+    is dropped and the curator's phrases are ORed in beside the topic's own seeds. A
     query already in `already` is skipped rather than run twice, so a plan that comes
     back empty is the honest answer that there is nothing new to ask, and the caller can
     stop instead of paying for a round that would return what it already has.
@@ -237,8 +237,8 @@ def gap_plan(
     for gap in gaps:
         if gap.shortfall <= 0:
             continue
-        shelf = charter.shelf(gap.shelf)
-        seeds = list(shelf.seed_terms) if shelf is not None else []
+        topic = charter.topic(gap.topic)
+        seeds = list(topic.seed_terms) if topic is not None else []
         facet = or_group([*keyphrases(gap.missing), *seeds][:MAX_GAP_TERMS])
         if not facet:
             continue
@@ -249,8 +249,8 @@ def gap_plan(
         planned.append(
             PlannedQuery(
                 term=term,
-                rationale=f"refills the {gap.shelf} shelf, {gap.shortfall} short",
-                shelf=gap.shelf,
+                rationale=f"refills the {gap.topic} topic, {gap.shortfall} short",
+                topic=gap.topic,
             )
         )
     return QueryPlan(queries=planned[:max_queries])

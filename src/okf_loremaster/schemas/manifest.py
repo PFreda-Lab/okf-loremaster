@@ -21,7 +21,7 @@ __all__ = [
     "BundleCounts",
     "CostSummary",
     "RunManifest",
-    "ShelfSummary",
+    "TopicSummary",
 ]
 
 # How long a literature bundle stays current enough to rely on without a rebuild.
@@ -30,12 +30,12 @@ __all__ = [
 DEFAULT_FRESHNESS_DAYS = 180
 
 
-class ShelfSummary(Model):
+class TopicSummary(Model):
     slug: str
     title: str = ""
     papers: int = 0
     # Split out because the two are different grades of evidence and the ratio is the
-    # single most useful quality number for a shelf.
+    # single most useful quality number for a topic.
     full_text: int = 0
     abstract_only: int = 0
 
@@ -111,7 +111,7 @@ class RunManifest(Model):
     models: dict[str, str] = Field(default_factory=dict)
 
     counts: BundleCounts = Field(default_factory=BundleCounts)
-    shelves: list[ShelfSummary] = Field(default_factory=list)
+    topics: list[TopicSummary] = Field(default_factory=list)
     queries: list[ExecutedQuery] = Field(default_factory=list)
     cost: CostSummary = Field(default_factory=CostSummary)
 

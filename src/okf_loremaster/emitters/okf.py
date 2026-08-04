@@ -14,12 +14,12 @@ extractor's own words and no check ever touched it, while a stripped magnitude a
 leaves digits behind.
 
 **Nothing is deleted.** Writing over an existing bundle warns and overwrites the files it
-owns; a stale shelf directory from an earlier taxonomy is reported, not removed. A tool
+owns; a stale topic directory from an earlier taxonomy is reported, not removed. A tool
 that tidies up a directory it was pointed at is a tool that eventually tidies up the
 wrong one.
 
-**An empty shelf still gets a directory and an index** saying so. An absent shelf and a
-shelf that retained nothing are different claims about the literature, and collapsing
+**An empty topic still gets a directory and an index** saying so. An absent topic and a
+topic that retained nothing are different claims about the literature, and collapsing
 them loses the more interesting one.
 
 **Verbatim quotes go below the table, numbered against its `#` column.** A quote is a
@@ -52,7 +52,7 @@ from okf_loremaster.okf.layout import (
     PREDICTOR_COLUMNS,
     QUOTE_LEAD,
     ROOT_INDEX_TYPE,
-    SHELF_INDEX_TYPE,
+    TOPIC_INDEX_TYPE,
     UNVERIFIED_CELL,
 )
 from okf_loremaster.okf.markdown import facts, inline, table_row, table_rule
@@ -69,8 +69,8 @@ from okf_loremaster.schemas import (
 from okf_loremaster.verification import quantities_in
 
 __all__ = [
-    "SHELF_COLUMNS",
-    "SHELF_PREDICTORS",
+    "TOPIC_COLUMNS",
+    "TOPIC_PREDICTORS",
     "BundleWrite",
     "body_for",
     "catalog_row",
@@ -80,7 +80,7 @@ __all__ = [
     "frontmatter_for",
     "log_markdown",
     "root_index",
-    "shelf_index",
+    "topic_index",
     "write_bundle",
 ]
 
@@ -91,11 +91,11 @@ MAX_AUTHORS = 6
 LOG_TYPE = "Build Log"
 
 _NULL_COLUMNS = ("#", "Predictor", "Outcome", "Detail")
-SHELF_COLUMNS = ("pmid", "title", "design", "n", "key predictors")
+TOPIC_COLUMNS = ("pmid", "title", "design", "n", "key predictors")
 
-# How many predictor names the shelf index shows per paper. A browse table, not a
+# How many predictor names the topic index shows per paper. A browse table, not a
 # summary: enough to tell two papers apart, short enough that the column stays a column.
-SHELF_PREDICTORS = 3
+TOPIC_PREDICTORS = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,7 +104,7 @@ class BundleWrite:
 
     path: Path
     documents: int = 0
-    shelves: int = 0
+    topics: int = 0
     files: tuple[Path, ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -117,7 +117,7 @@ def write_bundle(
     manifest: RunManifest,
     log: str = "",
 ) -> BundleWrite:
-    """Write a whole bundle: documents, shelf indexes, root index, catalog, descriptor."""
+    """Write a whole bundle: documents, topic indexes, root index, catalog, descriptor."""
     warnings: list[str] = []
     written: list[Path] = []
 
@@ -129,35 +129,35 @@ def write_bundle(
         )
     path.mkdir(parents=True, exist_ok=True)
 
-    shelved = _by_shelf(records, charter)
-    for slug, shelf_records in shelved.items():
+    grouped = _by_topic(records, charter)
+    for slug, topic_records in grouped.items():
         directory = path / slug
         directory.mkdir(parents=True, exist_ok=True)
-        for record in shelf_records:
+        for record in topic_records:
             written.append(_write(directory / record.filename, document_for(record)))
         written.append(
-            _write(directory / INDEX_FILENAME, shelf_index(slug, shelf_records, charter=charter))
+            _write(directory / INDEX_FILENAME, topic_index(slug, topic_records, charter=charter))
         )
 
-    for stale in _stale_directories(path, shelved):
+    for stale in _stale_directories(path, grouped):
         warnings.append(
-            f"{stale.name}/ is not a shelf in this charter and was left in place — "
+            f"{stale.name}/ is not a topic in this charter and was left in place — "
             f"delete it by hand if it is from an earlier taxonomy"
         )
 
-    written.append(_write(path / INDEX_FILENAME, root_index(shelved, charter=charter,
+    written.append(_write(path / INDEX_FILENAME, root_index(grouped, charter=charter,
                                                             manifest=manifest)))
     written.append(
         _write(
             path / CATALOG_FILENAME,
             "".join(
                 json.dumps(catalog_row(record), ensure_ascii=False, sort_keys=True) + "\n"
-                for shelf_records in shelved.values()
-                for record in shelf_records
+                for topic_records in grouped.values()
+                for record in topic_records
             ),
         )
     )
-    written.append(_write(path / DESCRIPTOR_FILENAME, descriptor(shelved, charter=charter,
+    written.append(_write(path / DESCRIPTOR_FILENAME, descriptor(grouped, charter=charter,
                                                                  manifest=manifest)))
     written.append(_write(path / LOG_FILENAME, log or log_markdown(charter, manifest)))
     # Written here as well as by the run directory, so the descriptor's charter pointer
@@ -166,8 +166,8 @@ def write_bundle(
 
     return BundleWrite(
         path=path,
-        documents=sum(len(items) for items in shelved.values()),
-        shelves=len(shelved),
+        documents=sum(len(items) for items in grouped.values()),
+        topics=len(grouped),
         files=tuple(written),
         warnings=tuple(warnings),
     )
@@ -178,22 +178,22 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def _by_shelf(
+def _by_topic(
     records: Sequence[ConceptRecord], charter: Charter
 ) -> dict[str, list[ConceptRecord]]:
-    """Charter order first, then any shelf a record claims that the charter does not.
+    """Charter order first, then any topic a record claims that the charter does not.
 
-    An empty shelf keeps its entry. A record on an unknown shelf keeps its file rather
+    An empty topic keeps its entry. A record on an unknown topic keeps its file rather
     than being dropped: the file is real evidence and the taxonomy is the thing that
     drifted.
     """
-    shelved: dict[str, list[ConceptRecord]] = {shelf.slug: [] for shelf in charter.shelf_taxonomy}
+    grouped: dict[str, list[ConceptRecord]] = {topic.slug: [] for topic in charter.topic_taxonomy}
     for record in records:
-        shelved.setdefault(record.domain, []).append(record)
-    return shelved
+        grouped.setdefault(record.domain, []).append(record)
+    return grouped
 
 
-def _stale_directories(path: Path, shelved: Mapping[str, list[ConceptRecord]]) -> list[Path]:
+def _stale_directories(path: Path, grouped: Mapping[str, list[ConceptRecord]]) -> list[Path]:
     if not path.exists():
         return []
     return sorted(
@@ -201,7 +201,7 @@ def _stale_directories(path: Path, shelved: Mapping[str, list[ConceptRecord]]) -
         for item in path.iterdir()
         if item.is_dir()
         and not item.name.startswith((".", "_"))
-        and item.name not in shelved
+        and item.name not in grouped
     )
 
 
@@ -408,14 +408,14 @@ def _vocabulary(extraction: Extraction) -> str:
 # --- indexes ----------------------------------------------------------------
 
 
-def shelf_index(
+def topic_index(
     slug: str, records: Sequence[ConceptRecord], *, charter: Charter
 ) -> str:
-    shelf = charter.shelf(slug)
-    title = shelf.title if shelf is not None else slug
-    scope = shelf.scope if shelf is not None else ""
+    topic = charter.topic(slug)
+    title = topic.title if topic is not None else slug
+    scope = topic.scope if topic is not None else ""
     fields: dict[str, Any] = {
-        "type": SHELF_INDEX_TYPE,
+        "type": TOPIC_INDEX_TYPE,
         "title": title,
         "description": scope or f"{len(records)} paper(s) on {title}.",
         "domain": slug,
@@ -427,7 +427,7 @@ def shelf_index(
         body += [scope, ""]
     if not records:
         body += [
-            "No papers were retained on this shelf. The searches ran and the screener "
+            "No papers were retained on this topic. The searches ran and the screener "
             "saw candidates; none survived curation.",
             "",
             f"[← bundle index](../{INDEX_FILENAME})",
@@ -440,8 +440,8 @@ def shelf_index(
         f"{len(records)} paper(s) — {full} read from full text, "
         f"{len(records) - full} from the abstract only.",
         "",
-        table_row(SHELF_COLUMNS),
-        table_rule(len(SHELF_COLUMNS)),
+        table_row(TOPIC_COLUMNS),
+        table_rule(len(TOPIC_COLUMNS)),
     ]
     for record in records:
         body.append(
@@ -462,7 +462,7 @@ def shelf_index(
 
 
 def _key_predictors(record: ConceptRecord) -> str:
-    names = [row.predictor for row in record.extraction.predictors[:SHELF_PREDICTORS]]
+    names = [row.predictor for row in record.extraction.predictors[:TOPIC_PREDICTORS]]
     extra = len(record.extraction.predictors) - len(names)
     if not names:
         return NONE_CELL
@@ -470,34 +470,34 @@ def _key_predictors(record: ConceptRecord) -> str:
 
 
 def root_index(
-    shelved: Mapping[str, list[ConceptRecord]], *, charter: Charter, manifest: RunManifest
+    grouped: Mapping[str, list[ConceptRecord]], *, charter: Charter, manifest: RunManifest
 ) -> str:
-    total = sum(len(items) for items in shelved.values())
+    total = sum(len(items) for items in grouped.values())
     title = charter.task or charter.prompt
     fields: dict[str, Any] = {
         "type": ROOT_INDEX_TYPE,
         "title": title,
         "description": (
-            f"{total} paper(s) across {len(shelved)} shelf/shelves, built from PubMed "
+            f"{total} paper(s) across {len(grouped)} topic/topics, built from PubMed "
             f"and PMC by {manifest.tool_version or 'okf-loremaster'}."
         ),
     }
 
-    body = [f"# {title}", "", inline(charter.prompt), "", "## Shelves", ""]
-    body.append(table_row(("shelf", "title", "papers", "full text", "abstract only", "scope")))
+    body = [f"# {title}", "", inline(charter.prompt), "", "## Topics", ""]
+    body.append(table_row(("topic", "title", "papers", "full text", "abstract only", "scope")))
     body.append(table_rule(6))
-    for slug, records in shelved.items():
-        shelf = charter.shelf(slug)
+    for slug, records in grouped.items():
+        topic = charter.topic(slug)
         full = sum(1 for record in records if record.text_basis is TextBasis.FULL_TEXT)
         body.append(
             table_row(
                 (
                     f"[{slug}]({slug}/{INDEX_FILENAME})",
-                    shelf.title if shelf is not None else "",
+                    topic.title if topic is not None else "",
                     str(len(records)),
                     str(full),
                     str(len(records) - full),
-                    shelf.scope if shelf is not None else "",
+                    topic.scope if topic is not None else "",
                 )
             )
         )
@@ -509,8 +509,8 @@ def root_index(
             ("Outcome", charter.outcome),
             ("Vocabularies", ", ".join(charter.vocabularies) or "none"),
             ("Languages", ", ".join(charter.languages) or "any"),
-            ("Target", f"{charter.target_papers} papers, {charter.shelf_min}"
-                       f"-{charter.shelf_max} per shelf"),
+            ("Target", f"{charter.target_papers} papers, {charter.topic_min}"
+                       f"-{charter.topic_max} per topic"),
             ("From", str(charter.min_year) if charter.min_year else ""),
             ("Full charter", f"[{CHARTER_FILENAME}]({CHARTER_FILENAME})"),
         ]
@@ -627,18 +627,18 @@ def log_markdown(charter: Charter, manifest: RunManifest, *, verification: str =
     return render(fields) + "\n" + "\n".join(body)
 
 
-def _shelf_title(charter: Charter, slug: str) -> str:
-    """The human name of a shelf, falling back to its slug.
+def _topic_title(charter: Charter, slug: str) -> str:
+    """The human name of a topic, falling back to its slug.
 
-    A shelf can be in the bundle without being in the charter — an extraction may place a
+    A topic can be in the bundle without being in the charter — an extraction may place a
     paper on a domain nobody planned — so the lookup has to survive a miss.
     """
-    shelf = charter.shelf(slug)
-    return shelf.title if shelf is not None else slug
+    topic = charter.topic(slug)
+    return topic.title if topic is not None else slug
 
 
 def descriptor(
-    shelved: Mapping[str, list[ConceptRecord]], *, charter: Charter, manifest: RunManifest
+    grouped: Mapping[str, list[ConceptRecord]], *, charter: Charter, manifest: RunManifest
 ) -> str:
     """`resource_descriptor.yaml` — what a consumer reads before opening anything."""
     payload: dict[str, Any] = {
@@ -646,15 +646,15 @@ def descriptor(
         "id": manifest.run_id,
         "name": charter.task or charter.prompt,
         "description": (
-            f"{sum(len(items) for items in shelved.values())} curated papers from PubMed "
-            f"and PMC, shelved into {len(shelved)} domains."
+            f"{sum(len(items) for items in grouped.values())} curated papers from PubMed "
+            f"and PMC, grouped into {len(grouped)} domains."
         ),
         "index": INDEX_FILENAME,
         "catalog": CATALOG_FILENAME,
         "log": LOG_FILENAME,
         "charter": CHARTER_FILENAME,
-        "domains": {slug: _shelf_title(charter, slug) for slug in shelved},
-        "documents": sum(len(items) for items in shelved.values()),
+        "domains": {slug: _topic_title(charter, slug) for slug in grouped},
+        "documents": sum(len(items) for items in grouped.values()),
         "tool": "okf-loremaster",
         "tool_version": manifest.tool_version or __version__,
         "charter_digest": manifest.charter_digest,

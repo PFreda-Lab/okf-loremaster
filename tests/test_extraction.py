@@ -10,7 +10,7 @@ in kind:
 - `extract` is the most expensive call in the pipeline, so what it does with a reply it
   cannot parse — repair once, then drop the paper and say so — is worth pinning exactly.
 - `reconcile` runs four deterministic steps in an order that matters, and drops papers
-  from shelves that curation worked to fill. Silence there would be a lie about the run.
+  from topics that curation worked to fill. Silence there would be a lie about the run.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from fake_ncbi import (
 from graph_runs import charter_for, node_deps
 
 # One open-access paper and one PMC declines to serve. Both from the `alpha` topic, so a
-# charter shelf slug is the same word in every state below.
+# charter topic slug is the same word in every state below.
 OPEN = "10000"
 CLOSED = "10002"
 
@@ -72,7 +72,7 @@ def candidate_for(pmid: str) -> Candidate:
 def retrieval_state(*pmids: str) -> RunState:
     return {
         "charter": charter_for(),
-        "shelves": {"alpha": list(pmids)},
+        "topics": {"alpha": list(pmids)},
         "unique": [candidate_for(pmid) for pmid in pmids],
     }
 
@@ -200,7 +200,7 @@ def extract_state(*pmids: str, text: str | None = None) -> RunState:
     """A state that starts where `fulltext` left off."""
     return {
         "charter": charter_for(),
-        "shelves": {"alpha": list(pmids)},
+        "topics": {"alpha": list(pmids)},
         "unique": [candidate_for(pmid) for pmid in pmids],
         "texts": {
             pmid: PaperText(
@@ -260,7 +260,7 @@ async def test_a_reply_that_never_parses_drops_the_paper_after_exactly_one_retry
     settings_factory: Any, tmp_path: Path
 ) -> None:
     """Once, not twice. A second failure is a model that cannot satisfy the schema, and
-    a third DEEP call to confirm that is the most expensive way to learn nothing."""
+    a third reasoning-tier call to confirm that is the most expensive way to learn nothing."""
     model = scripted(failing(99))
 
     async with node_deps(settings_factory, tmp_path, scripted=model) as deps:
@@ -272,7 +272,7 @@ async def test_a_reply_that_never_parses_drops_the_paper_after_exactly_one_retry
     warnings = update["warnings"]
     assert any(OPEN in note and "did not parse" in note for note in warnings)
     # Every paper failed, so the bundle is not a reading of the literature and the run
-    # says so in as many words rather than emitting a confident-looking empty shelf.
+    # says so in as many words rather than emitting a confident-looking empty topic.
     assert any("more than half the extractions failed" in note for note in warnings)
 
 
@@ -368,10 +368,10 @@ async def test_a_vocabulary_key_the_charter_did_not_list_is_kept_out_of_frontmat
     assert any("snomed" in note and "did not list" in note for note in update["warnings"])
 
 
-async def test_a_paper_with_no_extraction_leaves_its_shelf_and_is_named(
+async def test_a_paper_with_no_extraction_leaves_its_topic_and_is_named(
     settings_factory: Any, tmp_path: Path
 ) -> None:
-    """A shelf entry with no file behind it is a broken link in the emitted bundle. The
+    """A topic entry with no file behind it is a broken link in the emitted bundle. The
     shortfall this causes is ours rather than the literature's, and the warning says so."""
     state = extract_state(OPEN, CLOSED)
     state["extractions"] = {OPEN: read_of(OPEN)}
@@ -379,7 +379,7 @@ async def test_a_paper_with_no_extraction_leaves_its_shelf_and_is_named(
     async with node_deps(settings_factory, tmp_path) as deps:
         update = await reconcile_node(state, deps)
 
-    assert update["shelves"] == {"alpha": [OPEN]}
+    assert update["topics"] == {"alpha": [OPEN]}
     assert [record.pmid for record in update["records"]] == [OPEN]
     assert any(CLOSED in note and "no usable extraction" in note for note in update["warnings"])
 

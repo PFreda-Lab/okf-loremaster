@@ -1,4 +1,4 @@
-"""Scoring, diversification, and the per-shelf quota. All code, no judgment.
+"""Scoring, diversification, and the per-topic quota. All code, no judgment.
 
 Ranking decides which candidates reach the screener, and screening is the single
 largest cost in a run. It is deterministic on purpose: the same corpus and the same
@@ -6,18 +6,18 @@ charter must produce the same pool, or nothing downstream is reproducible.
 
 Two things happen beyond sorting by relevance, and both fix the same failure. Pure
 relevance rank returns the *same paper* several times over — a well-covered topic
-produces a cluster of near-identical reviews — and it lets one prolific shelf crowd out
-the rest, because a shelf whose queries match ten thousand papers fills the pool before
-a shelf whose queries match two hundred gets a look in.
+produces a cluster of near-identical reviews — and it lets one prolific topic crowd out
+the rest, because a topic whose queries match ten thousand papers fills the pool before
+a topic whose queries match two hundred gets a look in.
 
 - **MMR** trades a little relevance for coverage, so a cluster contributes its best
   member rather than its first six.
-- **The per-shelf quota** reserves capacity for every shelf before the pool is filled.
+- **The per-topic quota** reserves capacity for every topic before the pool is filled.
 
-No paper has been assigned a shelf at this point — screening does that. What is
-available is which *query* found it, and each planned query names the shelf it was
+No paper has been assigned a topic at this point — screening does that. What is
+available is which *query* found it, and each planned query names the topic it was
 written for. That is the affinity used here, and it is enough: the point is to stop one
-shelf's searches monopolizing the pool, not to pre-empt the screener's judgment.
+topic's searches monopolizing the pool, not to pre-empt the screener's judgment.
 
 `selection_diff` exists so the effect is visible rather than asserted. `--dry-run`
 prints it.
@@ -45,10 +45,10 @@ __all__ = [
     "relevance",
     "score_all",
     "selection_diff",
-    "shelf_affinity",
     "similarity",
     "text_tokens",
     "tokens",
+    "topic_affinity",
 ]
 
 # Relevance versus diversity. 0.7 keeps rank dominant while still breaking up clusters;
@@ -198,7 +198,7 @@ def text_tokens(text: str) -> frozenset[str]:
 
     Shared so that everything comparing two pieces of text in this package tokenizes
     them identically — a candidate against a candidate here, a candidate against a
-    shelf's own description in the curate node.
+    topic's own description in the curate node.
     """
     return frozenset(
         t for t in _TOKEN.findall(text.lower()) if len(t) > 2 and t not in _TOKEN_STOPWORDS
@@ -266,34 +266,34 @@ def mmr_order(
     return selected
 
 
-# --- per-shelf quota --------------------------------------------------------
+# --- per-topic quota --------------------------------------------------------
 
 
-def shelf_affinity(candidate: Candidate, query_shelf: Mapping[str, str]) -> str:
-    """Which shelf's queries found this paper. `""` when none of them targeted a shelf.
+def topic_affinity(candidate: Candidate, query_topic: Mapping[str, str]) -> str:
+    """Which topic's queries found this paper. `""` when none of them targeted a topic.
 
-    A paper found by several shelves' queries is attributed to the first in the
+    A paper found by several topics' queries is attributed to the first in the
     charter's own order, so the mapping is total and stable rather than dependent on
     which search happened to finish first.
     """
-    found = {query_shelf.get(term, "") for term in candidate.found_by}
-    for shelf in query_shelf.values():
-        if shelf and shelf in found:
-            return shelf
+    found = {query_topic.get(term, "") for term in candidate.found_by}
+    for topic in query_topic.values():
+        if topic and topic in found:
+            return topic
     return ""
 
 
 def quota_select(
     scored: Sequence[ScoredCandidate],
     *,
-    query_shelf: Mapping[str, str],
+    query_topic: Mapping[str, str],
     pool_size: int,
     lambda_: float = DEFAULT_LAMBDA,
 ) -> list[ScoredCandidate]:
-    """Fill the pool shelf by shelf, then top it up from whatever is left over.
+    """Fill the pool topic by topic, then top it up from whatever is left over.
 
-    Unused quota is not wasted: a shelf whose queries returned twenty papers releases
-    the rest of its share back to the pool. The reservation protects a thin shelf from
+    Unused quota is not wasted: a topic whose queries returned twenty papers releases
+    the rest of its share back to the pool. The reservation protects a thin topic from
     being crowded out; it does not hold capacity empty on its behalf.
     """
     if pool_size <= 0 or not scored:
@@ -301,7 +301,7 @@ def quota_select(
 
     groups: dict[str, list[ScoredCandidate]] = {}
     for item in scored:
-        groups.setdefault(shelf_affinity(item.candidate, query_shelf), []).append(item)
+        groups.setdefault(topic_affinity(item.candidate, query_topic), []).append(item)
 
     quota = max(1, math.ceil(pool_size / len(groups)))
     taken: list[ScoredCandidate] = []
@@ -319,7 +319,7 @@ def quota_select(
 
 # --- making the effect visible ----------------------------------------------
 
-# What a paper with no shelf-targeted query behind it is called in the printed table.
+# What a paper with no topic-targeted query behind it is called in the printed table.
 UNASSIGNED = "(unassigned)"
 
 
@@ -332,8 +332,8 @@ class SelectionComparison(Model):
 
     pure: list[str] = Field(default_factory=list)
     diversified: list[str] = Field(default_factory=list)
-    pure_by_shelf: dict[str, int] = Field(default_factory=dict)
-    diversified_by_shelf: dict[str, int] = Field(default_factory=dict)
+    pure_by_topic: dict[str, int] = Field(default_factory=dict)
+    diversified_by_topic: dict[str, int] = Field(default_factory=dict)
 
     @property
     def added(self) -> list[str]:
@@ -351,12 +351,12 @@ class SelectionComparison(Model):
         return len(self.added)
 
     @property
-    def shelves_helped(self) -> list[str]:
-        """Shelves holding more of the pool than pure relevance would have left them."""
+    def topics_helped(self) -> list[str]:
+        """Topics holding more of the pool than pure relevance would have left them."""
         return sorted(
-            shelf
-            for shelf, count in self.diversified_by_shelf.items()
-            if count > self.pure_by_shelf.get(shelf, 0)
+            topic
+            for topic, count in self.diversified_by_topic.items()
+            if count > self.pure_by_topic.get(topic, 0)
         )
 
     def summary(self) -> str:
@@ -368,10 +368,10 @@ class SelectionComparison(Model):
                 "below the pool size, so every one was retained either way"
             )
         share = self.changed / len(self.diversified) * 100 if self.diversified else 0.0
-        helped = ", ".join(self.shelves_helped) or "none"
+        helped = ", ".join(self.topics_helped) or "none"
         return (
             f"{self.changed} of {len(self.diversified)} ({share:.0f}%) papers are in the "
-            f"pool only because of MMR and the per-shelf quota; shelves gaining share: {helped}"
+            f"pool only because of MMR and the per-topic quota; topics gaining share: {helped}"
         )
 
 
@@ -379,20 +379,20 @@ def selection_diff(
     pure: Sequence[ScoredCandidate],
     diversified: Sequence[ScoredCandidate],
     *,
-    query_shelf: Mapping[str, str],
+    query_topic: Mapping[str, str],
 ) -> SelectionComparison:
     """Compare the two selections over the same scored pool."""
 
-    def by_shelf(items: Sequence[ScoredCandidate]) -> dict[str, int]:
+    def by_topic(items: Sequence[ScoredCandidate]) -> dict[str, int]:
         counts: dict[str, int] = {}
         for item in items:
-            shelf = shelf_affinity(item.candidate, query_shelf) or UNASSIGNED
-            counts[shelf] = counts.get(shelf, 0) + 1
+            topic = topic_affinity(item.candidate, query_topic) or UNASSIGNED
+            counts[topic] = counts.get(topic, 0) + 1
         return dict(sorted(counts.items()))
 
     return SelectionComparison(
         pure=[item.pmid for item in pure],
         diversified=[item.pmid for item in diversified],
-        pure_by_shelf=by_shelf(pure),
-        diversified_by_shelf=by_shelf(diversified),
+        pure_by_topic=by_topic(pure),
+        diversified_by_topic=by_topic(diversified),
     )

@@ -1,13 +1,13 @@
 """The charter node: turn a prompt into the run's terms of reference.
 
-One DEEP call, and the most consequential one in the graph — everything downstream is
+One reasoning-tier call, and the most consequential one in the graph — everything downstream is
 scoped by what it decides. Three paths reach the same place:
 
 - `--charter charter.yaml` supplies one, and no model is called at all.
 - A dry run without a charter builds a skeleton from the prompt alone, so that
   `--dry-run` can still plan real queries against real hit counts without spending
   anything. The skeleton has no taxonomy, and says so.
-- Otherwise the DEEP model drafts one.
+- Otherwise the reasoning-tier model drafts one.
 
 The prompt is never read back from the model's reply. A charter records what the user
 asked for, and a paraphrase of the request is not the request.
@@ -47,7 +47,7 @@ async def charter_node(state: RunState, deps: Deps) -> dict[str, Any]:
             charter = _skeleton(prompt)
             source = "skeleton"
             note = (
-                "no charter and no model calls allowed, so this run has no shelf taxonomy; "
+                "no charter and no model calls allowed, so this run has no topic taxonomy; "
                 "pass --charter charter.yaml to plan the real queries"
             )
             warnings.append(note)
@@ -63,7 +63,7 @@ async def charter_node(state: RunState, deps: Deps) -> dict[str, Any]:
             deps.warn(NODE, problem)
 
         report["summary"] = (
-            f"{source}: {len(charter.shelf_taxonomy)} shelves, "
+            f"{source}: {len(charter.topic_taxonomy)} topics, "
             f"{len(charter.vocabularies)} vocabularies"
         )
 
@@ -84,7 +84,7 @@ def _skeleton(prompt: str) -> Charter:
 
 
 async def _draft(deps: Deps, prompt: str, override: list[str]) -> Charter:
-    """One DEEP call, plus at most one repair attempt.
+    """One reasoning-tier call, plus at most one repair attempt.
 
     The repair exists because a charter is expensive to lose: the reply is long, and a
     single missing field would otherwise cost the whole call. Past one attempt the reply
@@ -96,7 +96,7 @@ async def _draft(deps: Deps, prompt: str, override: list[str]) -> Charter:
         {"role": "user", "content": charter_user(prompt, vocab_override=override)},
     ]
     result = await deps.router.complete(
-        Role.DEEP,
+        Role.REASONING,
         messages,
         node=NODE,
         max_tokens=4096,
@@ -107,7 +107,7 @@ async def _draft(deps: Deps, prompt: str, override: list[str]) -> Charter:
     except SchemaError as exc:
         deps.warn(NODE, f"charter reply needed repair: {exc}")
         retry = await deps.router.complete(
-            Role.DEEP,
+            Role.REASONING,
             [
                 *messages,
                 {"role": "assistant", "content": result.text},
@@ -146,8 +146,8 @@ def _apply_overrides(
     if override:
         updated.vocabularies = list(override)
     updated.target_papers = deps.target_papers
-    updated.shelf_min = deps.shelf_min
-    updated.shelf_max = deps.shelf_max
+    updated.topic_min = deps.topic_min
+    updated.topic_max = deps.topic_max
     if not updated.generated_by:
         updated.generated_by = _generated_by(deps)
     if updated.generated_at is None:
@@ -161,7 +161,7 @@ def _generated_by(deps: Deps) -> str:
     if deps.router is None:
         return "okf-loremaster/charter/none"
     try:
-        model = deps.settings.model_for(Role.DEEP)
+        model = deps.settings.model_for(Role.REASONING)
     except Exception:
         model = "unknown"
     return f"okf-loremaster/charter/{model}"

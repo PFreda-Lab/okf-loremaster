@@ -318,17 +318,17 @@ async def test_the_bundle_points_at_its_index_and_the_index_at_its_bundle(
     assert (result.path / index_side["source_bundle"]).resolve() == bundle.resolve()
 
 
-async def test_the_store_is_a_sibling_of_the_bundle_and_not_a_shelf_inside_it(
+async def test_the_store_is_a_sibling_of_the_bundle_and_not_a_topic_inside_it(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`read_bundle` treats every directory at the root as a shelf. An index inside would
-    validate as a shelf holding no papers, forever."""
+    """`read_bundle` treats every directory at the root as a topic. An index inside would
+    validate as a topic holding no papers, forever."""
     bundle, _, result = await indexed(settings_factory, tmp_path, monkeypatch)
 
     assert result.path.parent == bundle.parent
     assert result.path.name == f"{bundle.name}.chroma"
     assert bundle not in result.path.parents
-    assert result.path.name not in {shelf.slug for shelf in read_bundle(bundle).shelves}
+    assert result.path.name not in {topic.slug for topic in read_bundle(bundle).topics}
 
 
 def test_an_unresolved_revision_is_reported_rather_than_guessed(tmp_path: Path) -> None:

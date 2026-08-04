@@ -1,9 +1,9 @@
-"""Scoring, MMR and the per-shelf quota.
+"""Scoring, MMR and the per-topic quota.
 
 Ranking decides what the screener sees, which is the largest cost in a run, so the
 properties worth pinning are the ones a refactor could quietly break: that the order is
 total, that MMR trades relevance for spread rather than discarding relevance, and that
-the quota reaches shelves pure rank would never get to.
+the quota reaches topics pure rank would never get to.
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ from okf_loremaster.ranking import (
     relevance,
     score_all,
     selection_diff,
-    shelf_affinity,
     similarity,
     tokens,
+    topic_affinity,
 )
 from okf_loremaster.schemas import Candidate
 
@@ -142,56 +142,56 @@ def test_mmr_at_lambda_one_is_pure_relevance() -> None:
 # --- quota ------------------------------------------------------------------
 
 
-def test_affinity_is_blank_when_no_query_targeted_a_shelf() -> None:
-    assert shelf_affinity(make("1", found_by=["q1"]), {}) == ""
+def test_affinity_is_blank_when_no_query_targeted_a_topic() -> None:
+    assert topic_affinity(make("1", found_by=["q1"]), {}) == ""
 
 
 def test_the_unassigned_group_is_named_in_the_comparison() -> None:
     scored = score_all([make("1"), make("2")], now_year=NOW)
-    diff = selection_diff(scored, scored[:1], query_shelf={})
-    assert diff.pure_by_shelf == {UNASSIGNED: 2}
-    assert diff.diversified_by_shelf == {UNASSIGNED: 1}
+    diff = selection_diff(scored, scored[:1], query_topic={})
+    assert diff.pure_by_topic == {UNASSIGNED: 2}
+    assert diff.diversified_by_topic == {UNASSIGNED: 1}
 
 
 def test_affinity_follows_the_charter_order_not_the_search_order() -> None:
-    # Found by the second shelf's query first, but shelf-a comes first in the mapping.
-    query_shelf = {"qa": "shelf-a", "qb": "shelf-b"}
-    assert shelf_affinity(make("1", found_by=["qb", "qa"]), query_shelf) == "shelf-a"
+    # Found by the second topic's query first, but topic-a comes first in the mapping.
+    query_topic = {"qa": "topic-a", "qb": "topic-b"}
+    assert topic_affinity(make("1", found_by=["qb", "qa"]), query_topic) == "topic-a"
 
 
-def test_quota_reaches_shelves_pure_rank_never_would() -> None:
-    query_shelf = {"qa": "shelf-a", "qb": "shelf-b"}
-    # Every shelf-a paper outranks every shelf-b paper: found by two queries, not one.
+def test_quota_reaches_topics_pure_rank_never_would() -> None:
+    query_topic = {"qa": "topic-a", "qb": "topic-b"}
+    # Every topic-a paper outranks every topic-b paper: found by two queries, not one.
     corpus = [make(f"1{i:02d}", found_by=["qa", "qb"], best_rank=i) for i in range(10)]
     corpus += [make(f"2{i:02d}", found_by=["qb"], best_rank=20 + i) for i in range(10)]
     scored = score_all(corpus, now_year=NOW)
 
     pure = scored[:6]
-    pool = quota_select(scored, query_shelf=query_shelf, pool_size=6)
-    diff = selection_diff(pure, pool, query_shelf=query_shelf)
+    pool = quota_select(scored, query_topic=query_topic, pool_size=6)
+    diff = selection_diff(pure, pool, query_topic=query_topic)
 
-    assert diff.pure_by_shelf.get("shelf-b", 0) == 0
-    assert diff.diversified_by_shelf.get("shelf-b", 0) > 0
+    assert diff.pure_by_topic.get("topic-b", 0) == 0
+    assert diff.diversified_by_topic.get("topic-b", 0) > 0
     assert diff.changed > 0
-    assert "shelf-b" in diff.shelves_helped
+    assert "topic-b" in diff.topics_helped
 
 
 def test_quota_never_exceeds_the_pool_size() -> None:
-    query_shelf = {f"q{i}": f"shelf-{i}" for i in range(4)}
+    query_topic = {f"q{i}": f"topic-{i}" for i in range(4)}
     corpus = [
         make(f"{i}{n:02d}", found_by=[f"q{i}"], best_rank=n) for i in range(4) for n in range(20)
     ]
     scored = score_all(corpus, now_year=NOW)
-    assert len(quota_select(scored, query_shelf=query_shelf, pool_size=17)) == 17
+    assert len(quota_select(scored, query_topic=query_topic, pool_size=17)) == 17
 
 
 def test_a_pool_larger_than_the_corpus_keeps_everything() -> None:
     scored = score_all([make(str(i)) for i in range(5)], now_year=NOW)
-    assert len(quota_select(scored, query_shelf={}, pool_size=50)) == 5
+    assert len(quota_select(scored, query_topic={}, pool_size=50)) == 5
 
 
 def test_selection_diff_reports_no_change_when_there_is_none() -> None:
     scored = score_all([make(str(i)) for i in range(5)], now_year=NOW)
-    diff = selection_diff(scored, scored, query_shelf={})
+    diff = selection_diff(scored, scored, query_topic={})
     assert diff.changed == 0
     assert diff.added == [] and diff.dropped == []

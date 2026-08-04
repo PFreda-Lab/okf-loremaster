@@ -12,7 +12,7 @@ nothing tried; the second says nothing succeeded by another route.
 
 The corpus is `fake_ncbi`: real E-utilities JSON and real PubMed XML over a mock
 transport, so every client parser runs, with a shape chosen to make the effect of MMR
-and the per-shelf quota measurable rather than merely present.
+and the per-topic quota measurable rather than merely present.
 """
 
 from __future__ import annotations
@@ -26,9 +26,9 @@ from rich.console import Console
 
 from okf_loremaster.events import Event, EventBus, LLMCall
 from okf_loremaster.graph.state import RunState
-from okf_loremaster.ranking import shelf_affinity
+from okf_loremaster.ranking import topic_affinity
 from okf_loremaster.run import RunOptions, build_run
-from okf_loremaster.schemas import Charter, Shelf
+from okf_loremaster.schemas import Charter, Topic
 from okf_loremaster.ui.pauses import TOP_TITLES, ConsolePause
 
 from fake_ncbi import TOPICS, FakeNCBI, all_pmids
@@ -36,16 +36,16 @@ from fake_ncbi import TOPICS, FakeNCBI, all_pmids
 PROMPT = "identify predictors of a measured outcome after a procedure in adults"
 
 # Small enough that the quota has to choose. The corpus is 160 papers across four
-# shelves; at the default 800 every paper is retained either way and there is nothing
+# topics; at the default 800 every paper is retained either way and there is nothing
 # to compare.
 POOL_SIZE = 40
 
 
 def charter_for(topics: tuple[str, ...] = TOPICS) -> Charter:
-    """A charter whose shelves map one-to-one onto the fake corpus's topics.
+    """A charter whose topics map one-to-one onto the fake corpus's topics.
 
     Supplied rather than drafted, because a dry run with no charter gets the skeleton —
-    no taxonomy, so no shelf affinity, so nothing for the quota to do. `--charter` is
+    no taxonomy, so no topic affinity, so nothing for the quota to do. `--charter` is
     how a dry run gets a real plan, and the charter node warns when it has to fall back.
     """
     return Charter(
@@ -53,8 +53,8 @@ def charter_for(topics: tuple[str, ...] = TOPICS) -> Charter:
         task=PROMPT,
         population="adults",
         outcome="measured outcome",
-        shelf_taxonomy=[
-            Shelf(slug=topic, title=topic.title(), scope=f"the {topic} facet", seed_terms=[topic])
+        topic_taxonomy=[
+            Topic(slug=topic, title=topic.title(), scope=f"the {topic} facet", seed_terms=[topic])
             for topic in topics
         ],
         vocabularies=["icd10"],
@@ -167,15 +167,15 @@ async def test_without_a_charter_a_dry_run_says_what_it_cannot_do(
     run = await dry_run(settings_factory, tmp_path, monkeypatch)
     charter = run.state["charter"]
     assert charter is not None
-    assert charter.shelf_taxonomy == []
-    assert any("no shelf taxonomy" in warning for warning in run.state["warnings"])
+    assert charter.topic_taxonomy == []
+    assert any("no topic taxonomy" in warning for warning in run.state["warnings"])
     assert run.state["executed"]  # it searched anyway
 
 
 # --- the queries ------------------------------------------------------------
 
 
-async def test_the_plan_covers_every_shelf_and_reports_hit_counts(
+async def test_the_plan_covers_every_topic_and_reports_hit_counts(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = FakeNCBI()
@@ -183,7 +183,7 @@ async def test_the_plan_covers_every_shelf_and_reports_hit_counts(
 
     plan = run.state["plan"]
     assert plan is not None
-    assert {q.shelf for q in plan.queries} == {"", *TOPICS}
+    assert {q.topic for q in plan.queries} == {"", *TOPICS}
     assert len(fake.esearch_terms) == len(plan.queries)
 
     executed = run.state["executed"]
@@ -224,7 +224,7 @@ async def test_mmr_and_the_quota_change_the_retained_set(
     """The step 4 gate's last clause, as a measurement.
 
     The fake corpus is stacked by citation impact, so pure relevance rank leaves the
-    pool lopsided across the four shelves. The quota levels it, and the shelves it helps
+    pool lopsided across the four topics. The quota levels it, and the topics it helps
     are exactly the ones pure rank left short of their share.
     """
     run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
@@ -232,24 +232,24 @@ async def test_mmr_and_the_quota_change_the_retained_set(
     assert comparison is not None
 
     quota = POOL_SIZE // len(TOPICS)
-    pure = comparison.pure_by_shelf
+    pure = comparison.pure_by_topic
     assert max(pure.values()) >= 3 * min(pure.values())  # lopsided before
-    assert set(comparison.diversified_by_shelf.values()) == {quota}  # level after
+    assert set(comparison.diversified_by_topic.values()) == {quota}  # level after
     assert comparison.changed > 0
-    assert comparison.shelves_helped == sorted(s for s, n in pure.items() if n < quota)
+    assert comparison.topics_helped == sorted(s for s, n in pure.items() if n < quota)
 
 
-async def test_the_pool_is_capped_and_shelf_affinity_is_total(
+async def test_the_pool_is_capped_and_topic_affinity_is_total(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
 
     pool = run.state["pool"]
     assert len(pool) == POOL_SIZE
-    query_shelf = run.state["query_shelf"]
-    # Every paper was found by a shelf-targeted query as well as the base one, so none
+    query_topic = run.state["query_topic"]
+    # Every paper was found by a topic-targeted query as well as the base one, so none
     # of them falls into the unassigned group.
-    assert all(shelf_affinity(item.candidate, query_shelf) for item in pool)
+    assert all(topic_affinity(item.candidate, query_topic) for item in pool)
 
 
 async def test_the_run_is_reproducible(
@@ -271,7 +271,7 @@ async def test_the_charter_pause_prints_the_taxonomy_and_the_vocabularies(
 ) -> None:
     run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
 
-    assert "shelf_taxonomy" in run.output
+    assert "topic_taxonomy" in run.output
     assert "vocabularies" in run.output
     assert "--vocab" in run.output  # the override is advertised where it is needed
     for topic in TOPICS:
@@ -296,9 +296,9 @@ async def test_the_retrieve_pause_prints_the_diversification_comparison(
 ) -> None:
     run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
 
-    assert "pool by shelf affinity" in run.output
+    assert "pool by topic affinity" in run.output
     assert "MMR + quota" in run.output
-    assert "only because of MMR and the per-shelf quota" in run.output
+    assert "only because of MMR and the per-topic quota" in run.output
 
 
 async def test_a_dry_run_projects_spend_from_the_real_pool(
@@ -338,10 +338,10 @@ async def test_a_price_override_turns_the_projection_into_a_figure(
         settings_overrides={
             "price_fast_in": 0.8,
             "price_fast_out": 4.0,
-            "price_mid_in": 3.0,
-            "price_mid_out": 15.0,
-            "price_deep_in": 15.0,
-            "price_deep_out": 75.0,
+            "price_balanced_in": 3.0,
+            "price_balanced_out": 15.0,
+            "price_reasoning_in": 15.0,
+            "price_reasoning_out": 75.0,
         },
     )
 
@@ -353,14 +353,28 @@ async def test_a_price_override_turns_the_projection_into_a_figure(
 # --- the pauses themselves --------------------------------------------------
 
 
-def test_yes_and_dry_run_print_everything_and_ask_nothing() -> None:
-    """`--yes` bypasses the question, not the information."""
-    for options in (RunOptions(yes=True), RunOptions(dry_run=True)):
+def test_autonomous_and_dry_run_print_everything_and_ask_nothing() -> None:
+    """An autonomous run bypasses the question, not the information."""
+    for options in (RunOptions(), RunOptions(dry_run=True)):
         from okf_loremaster.run import _pause
 
         pause = _pause(options, None)
         assert isinstance(pause, ConsolePause)
         assert pause._interactive is False
+
+
+def test_interactive_asks_and_a_dry_run_does_not_take_that_away() -> None:
+    """`--interactive` is the only thing that asks, and nothing else overrules it.
+
+    A dry run used to suppress the questions, back when asking was the default and a
+    dry run was opting out of it. Now that asking has to be requested, the request is
+    honored: rehearsing the decisions on a run that costs nothing is the cheapest place
+    to see them, and one rule holds on both the console and the TUI.
+    """
+    from okf_loremaster.run import _pause
+
+    assert _pause(RunOptions(interactive=True), None)._interactive is True
+    assert _pause(RunOptions(interactive=True, dry_run=True), None)._interactive is True
 
 
 async def test_json_output_never_asks_and_never_prints_a_table() -> None:
@@ -375,7 +389,7 @@ async def test_the_pauses_are_not_asked_on_a_dry_run(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
-    assert run.output.count("not asking") == 2  # charter, then retrieve
+    assert run.output.count("continuing without asking") == 2  # charter, then retrieve
 
 
 # --- --vocab ----------------------------------------------------------------

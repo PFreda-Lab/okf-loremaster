@@ -218,20 +218,20 @@ def project_spend(
     if charter_was_generated:
         add(
             "charter",
-            Role.DEEP,
+            Role.REASONING,
             calls=1,
             prompt_tokens=estimate_tokens(CHARTER_SYSTEM) + estimate_tokens(charter.prompt),
             completion_tokens=900,
             basis="one call; the prompt is measured, the reply allowed 900 tokens",
         )
-        shelf_text = " ".join(
-            f"{s.slug} {s.scope} {' '.join(s.seed_terms)}" for s in charter.shelf_taxonomy
+        topic_text = " ".join(
+            f"{s.slug} {s.scope} {' '.join(s.seed_terms)}" for s in charter.topic_taxonomy
         )
         add(
             "search",
-            Role.MID,
+            Role.BALANCED,
             calls=1,
-            prompt_tokens=estimate_tokens(QUERY_PLAN_SYSTEM) + estimate_tokens(shelf_text),
+            prompt_tokens=estimate_tokens(QUERY_PLAN_SYSTEM) + estimate_tokens(topic_text),
             completion_tokens=600,
             basis="one query-planning call over the charter's taxonomy",
         )
@@ -250,7 +250,7 @@ def project_spend(
             outcome=charter.outcome,
             inclusion=list(charter.inclusion),
             exclusion=list(charter.exclusion),
-            shelves=[(s.slug, s.scope or s.title) for s in charter.shelf_taxonomy],
+            topics=[(s.slug, s.scope or s.title) for s in charter.topic_taxonomy],
         )
     )
     if screened:
@@ -268,22 +268,22 @@ def project_spend(
             ),
         )
 
-    # --- curation, one call per shelf ----------------------------------------
+    # --- curation, one call per topic ----------------------------------------
 
-    shelves = max(1, len(charter.shelf_taxonomy))
+    topics = max(1, len(charter.topic_taxonomy))
     included = min(screened, max(target_papers * 2, target_papers))
-    per_shelf = max(1, included // shelves)
+    per_topic = max(1, included // topics)
     title_tokens = (
         sum(estimate_tokens(c.title) for c in pool[:screened]) // screened if screened else 15
     )
     per_paper = title_tokens + CURATE_PER_PAPER_OVERHEAD
     add(
         "curate",
-        Role.MID,
-        calls=shelves,
-        prompt_tokens=shelves * (estimate_tokens(CURATE_SYSTEM) + per_shelf * per_paper),
-        completion_tokens=shelves * per_shelf * CURATE_PER_PAPER_COMPLETION,
-        basis=f"{shelves} shelves, about {per_shelf} paper(s) each at {per_paper} tokens",
+        Role.BALANCED,
+        calls=topics,
+        prompt_tokens=topics * (estimate_tokens(CURATE_SYSTEM) + per_topic * per_paper),
+        completion_tokens=topics * per_topic * CURATE_PER_PAPER_COMPLETION,
+        basis=f"{topics} topics, about {per_topic} paper(s) each at {per_paper} tokens",
     )
 
     # --- extraction, the largest line when full text is available ------------
@@ -305,7 +305,7 @@ def project_spend(
             abstract_tokens * FULL_TEXT_MULTIPLE, MAX_SOURCE_CHARS / CHARS_PER_TOKEN
         )
         per_paper = int(abstract_tokens * (1 - full_text_share) + capped * full_text_share)
-        # The same per-shelf prefix the node builds, measured on the widest shelf so the
+        # The same per-topic prefix the node builds, measured on the widest topic so the
         # projection cannot come in under the run.
         prefix = estimate_tokens(EXTRACT_SYSTEM) + max(
             (
@@ -313,18 +313,18 @@ def project_spend(
                     extract_context(
                         task=charter.task or charter.prompt,
                         outcome=charter.outcome,
-                        shelf=s.slug,
+                        topic=s.slug,
                         scope=s.scope or s.title,
                         vocabularies=list(charter.vocabularies),
                     )
                 )
-                for s in charter.shelf_taxonomy
+                for s in charter.topic_taxonomy
             ),
             default=0,
         )
         add(
             "extract",
-            Role.DEEP,
+            Role.REASONING,
             calls=retained,
             prompt_tokens=retained * (prefix + per_paper),
             completion_tokens=retained * EXTRACT_COMPLETION_ALLOWANCE,
@@ -342,8 +342,8 @@ def project_spend(
         "largest thing it cannot know in advance"
     )
     notes.append(
-        "a re-query round, if a shelf comes up short, adds at most one curation call "
-        "per thin shelf — screening is bounded by the budget above whatever happens"
+        "a re-query round, if a topic comes up short, adds at most one curation call "
+        "per thin topic — screening is bounded by the budget above whatever happens"
     )
     unpriced = [n.node for n in nodes if n.usd is None]
     if unpriced:

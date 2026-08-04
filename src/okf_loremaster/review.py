@@ -9,10 +9,12 @@ it, stated three ways:
 simply written at the tier they have actually earned. Refusing to emit would punish the
 reviewer for reading carefully.
 
-**`--review` cannot be combined with `--yes` or `--json`.** Auto-approving would write
+**`--review` cannot be combined with `--dry-run` or `--json`.** A dry run writes no
+bundle and a machine-readable stream has nobody to ask; signing under either would write
 `by: "human:<id>"` naming a person who never saw the bundle. That is not a weaker
 attestation, it is a false one, and the CLI refuses the combination rather than
-degrading it.
+degrading it. It combines freely with an autonomous run: reading a finished bundle and
+steering the search that produced it are separate decisions.
 
 **The signer is named, not assumed.** `OKF_LOREMASTER_REVIEWER_ID` when set, the OS
 login otherwise. A signature that says only "a human" identifies nobody.
@@ -83,7 +85,7 @@ class Reviewer(Protocol):
         self,
         records: Sequence[ConceptRecord],
         *,
-        shelves: dict[str, list[str]],
+        topics: dict[str, list[str]],
         verification: VerificationSummary | None,
         warnings: Sequence[str],
     ) -> Signoff: ...
@@ -100,7 +102,7 @@ class NoReview:
         self,
         records: Sequence[ConceptRecord],
         *,
-        shelves: dict[str, list[str]],
+        topics: dict[str, list[str]],
         verification: VerificationSummary | None,
         warnings: Sequence[str],
     ) -> Signoff:

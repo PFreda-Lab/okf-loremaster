@@ -98,14 +98,14 @@ async def test_a_retained_document_is_copied_byte_for_byte(
     export_bundle(bundle, destination)
 
     for document in read_bundle(destination).documents():
-        original = bundle / document.shelf / document.filename
+        original = bundle / document.topic / document.filename
         assert document.path.read_bytes() == original.read_bytes(), document.filename
 
 
-async def test_an_emptied_shelf_keeps_its_directory_and_says_why(
+async def test_an_emptied_topic_keeps_its_directory_and_says_why(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An absent shelf and one nothing survived on are different claims."""
+    """An absent topic and one nothing survived on are different claims."""
     bundle = await built(settings_factory, tmp_path, monkeypatch)
     for path in sorted((bundle / "alpha").glob("*.md")):
         if path.name == INDEX_FILENAME:
@@ -121,8 +121,8 @@ async def test_an_emptied_shelf_keeps_its_directory_and_says_why(
 
     export_bundle(bundle, destination, permissive_only=True)
 
-    shelf = read_bundle(destination).shelves
-    alpha = next(item for item in shelf if item.slug == "alpha")
+    topic = read_bundle(destination).topics
+    alpha = next(item for item in topic if item.slug == "alpha")
     assert alpha.documents == ()
     assert alpha.index is not None
     assert "license that permits redistribution" in alpha.index.body
@@ -155,8 +155,8 @@ async def test_the_export_gets_its_own_id_and_no_vector_pointer(
     assert copied["documents"] == result.documents
     assert copied["omitted"] == result.omitted_count
     assert "vectors" not in copied
-    # The taxonomy survives whole, including a shelf that kept nothing.
-    assert set(copied["domains"]) == {shelf.slug for shelf in read_bundle(bundle).shelves}
+    # The taxonomy survives whole, including a topic that kept nothing.
+    assert set(copied["domains"]) == {topic.slug for topic in read_bundle(bundle).topics}
 
 
 async def test_the_catalog_is_filtered_rather_than_rebuilt(
@@ -218,7 +218,7 @@ async def test_a_non_empty_destination_is_refused_before_anything_is_written(
 async def test_an_export_into_its_own_source_is_refused(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """It would be read back as a shelf of the bundle it came from."""
+    """It would be read back as a topic of the bundle it came from."""
     bundle = await built(settings_factory, tmp_path, monkeypatch)
 
     with pytest.raises(ValueError, match="is inside"):
@@ -268,7 +268,7 @@ async def test_a_flag_that_disagrees_with_its_license_is_excluded_and_named(
 
     result = export_bundle(bundle, destination, permissive_only=True)
 
-    assert not (destination / edited.shelf / edited.filename).exists()
+    assert not (destination / edited.topic / edited.filename).exists()
     assert any(edited.filename in note for note in result.warnings)
 
 
@@ -314,7 +314,7 @@ async def test_inspect_counts_what_is_on_disk_not_what_the_run_believed(
 
     assert overview.documents == TARGET
     assert overview.catalog_rows == TARGET
-    assert sum(shelf.documents for shelf in overview.shelves) == TARGET
+    assert sum(topic.documents for topic in overview.topics) == TARGET
     assert overview.full_text + overview.abstract_only == TARGET
     assert 0 < overview.exportable < TARGET
     assert overview.predictors > 0
@@ -357,7 +357,7 @@ async def test_inspect_prints_the_summary_and_exits_zero(
     assert result.exit_code == 0, result.output
     # Substrings that survive Rich's highlighter, which styles `row(s)` as a call and
     # splits it with escape codes. Asserting on those would be asserting on a theme.
-    for expected in ("shelves", "corpus", "median reported sample size", "effect sizes"):
+    for expected in ("topics", "corpus", "median reported sample size", "effect sizes"):
         assert expected in result.output, expected
     assert "no vector index" in result.output  # this run built none
 

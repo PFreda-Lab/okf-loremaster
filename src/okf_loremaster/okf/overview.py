@@ -7,7 +7,7 @@ that was just built, which is the only version of this command worth having.
 
 Two sources, deliberately:
 
-**The catalog is the spine.** Shelf sizes, designs, sample sizes and tags come from
+**The catalog is the spine.** Topic sizes, designs, sample sizes and tags come from
 `_catalog.jsonl`, because that is the file a downstream consumer reads and summarizing
 something other than what it sees would be summarizing the wrong thing. When the catalog
 disagrees with the disk, that is reported rather than reconciled.
@@ -38,7 +38,7 @@ from okf_loremaster.okf.layout import (
 )
 from okf_loremaster.okf.reader import OkfBundle, fact_list, markdown_table, read_bundle
 
-__all__ = ["BundleOverview", "ShelfOverview", "read_overview"]
+__all__ = ["BundleOverview", "TopicOverview", "read_overview"]
 
 _PREDICTORS_SECTION = BODY_SECTIONS[1]
 _NULLS_SECTION = BODY_SECTIONS[2]
@@ -51,7 +51,7 @@ TOP_VOCABULARIES = 12
 
 
 @dataclass(frozen=True, slots=True)
-class ShelfOverview:
+class TopicOverview:
     slug: str
     title: str
     documents: int = 0
@@ -72,7 +72,7 @@ class BundleOverview:
     name: str = ""
     resource_id: str = ""
     documents: int = 0
-    shelves: tuple[ShelfOverview, ...] = ()
+    topics: tuple[TopicOverview, ...] = ()
 
     # From the documents.
     full_text: int = 0
@@ -120,16 +120,16 @@ def read_overview(path: Path) -> BundleOverview:
     bundle = read_bundle(path)
     notes: list[str] = []
 
-    shelves: list[ShelfOverview] = []
+    topics: list[TopicOverview] = []
     full_text = exportable = untagged = 0
     predictors = with_effect = unverified = reporting_nulls = 0
     vocabulary: Counter[str] = Counter()
 
-    for shelf in bundle.shelves:
-        shelf_full = shelf_export = shelf_rows = 0
-        for document in shelf.documents:
+    for topic in bundle.topics:
+        topic_full = topic_export = topic_rows = 0
+        for document in topic.documents:
             rows = markdown_table(document.section(_PREDICTORS_SECTION) or "")
-            shelf_rows += len(rows)
+            topic_rows += len(rows)
             for row in rows:
                 effect = row.get(_EFFECT, "").strip()
                 if effect == UNVERIFIED_CELL:
@@ -142,22 +142,22 @@ def read_overview(path: Path) -> BundleOverview:
             # for a fact list are code strings — a count that reads "A00A00A00".
             vocabulary.update(fact_list(document.section(_VOCABULARY_SECTION) or "").keys())
             if document.full_text:
-                shelf_full += 1
+                topic_full += 1
             if document.export_safe:
-                shelf_export += 1
+                topic_export += 1
             if not document.tags:
                 untagged += 1
-        predictors += shelf_rows
-        full_text += shelf_full
-        exportable += shelf_export
-        shelves.append(
-            ShelfOverview(
-                slug=shelf.slug,
-                title=shelf.title or shelf.slug,
-                documents=len(shelf.documents),
-                full_text=shelf_full,
-                exportable=shelf_export,
-                predictors=shelf_rows,
+        predictors += topic_rows
+        full_text += topic_full
+        exportable += topic_export
+        topics.append(
+            TopicOverview(
+                slug=topic.slug,
+                title=topic.title or topic.slug,
+                documents=len(topic.documents),
+                full_text=topic_full,
+                exportable=topic_export,
+                predictors=topic_rows,
             )
         )
 
@@ -167,7 +167,7 @@ def read_overview(path: Path) -> BundleOverview:
         name=_name(bundle),
         resource_id=str(bundle.descriptor.get("id") or ""),
         documents=bundle.document_count,
-        shelves=tuple(shelves),
+        topics=tuple(topics),
         full_text=full_text,
         exportable=exportable,
         untagged=untagged,
@@ -202,10 +202,10 @@ def _from_catalog(
         ]
     else:
         listed = {str(row.get("file") or "") for row in bundle.catalog}
-        present = {f"{document.shelf}/{document.filename}" for document in bundle.documents()}
+        present = {f"{document.topic}/{document.filename}" for document in bundle.documents()}
         if listed != present:
             notes.append(
-                f"{CATALOG_FILENAME} and the shelves disagree about "
+                f"{CATALOG_FILENAME} and the topics disagree about "
                 f"{len(listed ^ present)} file(s) — run `okf-loremaster validate` for which"
             )
         designs = Counter(str(row.get("design") or "").strip() for row in bundle.catalog)

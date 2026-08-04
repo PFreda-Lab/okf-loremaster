@@ -16,7 +16,7 @@ through `delta`.
 
 One more shape, for the conditional re-query edge: a slice of `delta` that no ordinary
 query returns. Only a query carrying `UNLOCK_PHRASE` finds it, and that phrase can only
-reach a query by way of a curator saying its shelf is missing that topic. So "the second
+reach a query by way of a curator saying its topic is missing that topic. So "the second
 round found papers the first could not" is a measurement here rather than an assumption
 — and a re-query edge that silently re-ran the first round's searches would come back
 with nothing new and fail the test.

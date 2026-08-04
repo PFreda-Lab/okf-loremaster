@@ -120,8 +120,8 @@ def init(
         name = f"{ENV_PREFIX}MODEL_{role.value.upper()}"
         value = {
             Role.FAST: settings.model_fast,
-            Role.MID: settings.model_mid,
-            Role.DEEP: settings.model_deep,
+            Role.BALANCED: settings.model_balanced,
+            Role.REASONING: settings.model_reasoning,
         }[role]
         table.add_row(role.value, value if value else f"[red]unset[/red] ({name})")
 
@@ -189,11 +189,11 @@ def charter(
         str | None, typer.Option("--vocab", help="Comma-separated vocabularies; overrides charter.")
     ] = None,
     target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 180,
-    shelf_min: Annotated[int, typer.Option(help="Minimum papers per shelf.")] = 8,
-    shelf_max: Annotated[int, typer.Option(help="Maximum papers per shelf.")] = 40,
+    topic_min: Annotated[int, typer.Option(help="Minimum papers per topic.")] = 8,
+    topic_max: Annotated[int, typer.Option(help="Maximum papers per topic.")] = 40,
     verbose: Annotated[int, typer.Option("-v", "--verbose", count=True, help="Verbosity.")] = 0,
 ) -> None:
-    """Draft a charter — shelf taxonomy, vocabularies, query plan — without building."""
+    """Draft a charter — topic taxonomy, vocabularies, query plan — without building."""
     from okf_loremaster.run import draft_charter, parse_vocab
     from okf_loremaster.ui.pauses import render_charter
 
@@ -204,8 +204,8 @@ def charter(
                 out=out,
                 vocab=parse_vocab(vocab),
                 target_papers=target_papers,
-                shelf_min=shelf_min,
-                shelf_max=shelf_max,
+                topic_min=topic_min,
+                topic_max=topic_max,
                 console=console,
                 verbose=verbose,
             )
@@ -233,8 +233,8 @@ def build(
     pool_size: Annotated[int, typer.Option(help="Candidate pool before screening.")] = 800,
     screen_budget: Annotated[int, typer.Option(help="Max abstracts sent to the screener.")] = 400,
     target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 180,
-    shelf_min: Annotated[int, typer.Option(help="Minimum papers per shelf.")] = 8,
-    shelf_max: Annotated[int, typer.Option(help="Maximum papers per shelf.")] = 40,
+    topic_min: Annotated[int, typer.Option(help="Minimum papers per topic.")] = 8,
+    topic_max: Annotated[int, typer.Option(help="Maximum papers per topic.")] = 40,
     max_rounds: Annotated[
         int, typer.Option(help="Search rounds, including the first. 1 disables re-query.", min=1)
     ] = 2,
@@ -245,7 +245,12 @@ def build(
         bool, typer.Option("--index/--no-index", help="Build the vector index.")
     ] = False,
     review: Annotated[bool, typer.Option("--review", help="Human sign-off before emit.")] = False,
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation pauses.")] = False,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            "--interactive", "-i", help="Stop at the charter and the pool, and ask before going on."
+        ),
+    ] = False,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Plan and cost the run. Makes zero LLM calls.")
     ] = False,
@@ -258,7 +263,7 @@ def build(
     from okf_loremaster.curation import MAX_ROUNDS
     from okf_loremaster.run import RunOptions, build_run, parse_vocab, require_textual
     from okf_loremaster.ui.plain import rich_enabled
-    from okf_loremaster.ui.summary import render_bundle, render_extraction, render_shelves
+    from okf_loremaster.ui.summary import render_bundle, render_extraction, render_topics
 
     if tui and json_out:
         # Refused rather than degraded: a full-screen app writes escape sequences over
@@ -273,15 +278,14 @@ def build(
         console.print("[red]--index cannot be combined with --dry-run[/red] — a dry run "
                       "writes no bundle to index.")
         raise typer.Exit(code=1)
-    if review and (yes or dry_run or json_out):
-        # Not a usability nicety. `--yes` auto-approves, `--json` has nobody to ask, and
-        # a dry run writes no bundle — signing under any of them would stamp
-        # `verified: human:<id>` on work no human looked at, which is the one claim in
-        # the format that has to be true.
+    if review and (dry_run or json_out):
+        # Not a usability nicety. `--json` has nobody to ask and a dry run writes no
+        # bundle — signing under either would stamp `verified: human:<id>` on work no
+        # human looked at, which is the one claim in the format that has to be true.
+        # `--review` is independent of `--interactive`: signing off on a finished bundle
+        # and steering the search are different moments, and either can be wanted alone.
         blocking = ", ".join(
-            flag
-            for flag, on in (("--yes", yes), ("--dry-run", dry_run), ("--json", json_out))
-            if on
+            flag for flag, on in (("--dry-run", dry_run), ("--json", json_out)) if on
         )
         console.print(
             f"[red]--review cannot be combined with {blocking}[/red] — sign-off has to be "
@@ -319,11 +323,11 @@ def build(
         pool_size=pool_size,
         screen_budget=screen_budget,
         target_papers=target_papers,
-        shelf_min=shelf_min,
-        shelf_max=shelf_max,
+        topic_min=topic_min,
+        topic_max=topic_max,
         max_rounds=max_rounds,
         vocab=parse_vocab(vocab),
-        yes=yes,
+        interactive=interactive,
         review=review,
         index=index,
         dry_run=dry_run,
@@ -343,7 +347,7 @@ def build(
 
     if json_out:
         return
-    render_shelves(console, state)
+    render_topics(console, state)
     render_extraction(console, state)
     render_bundle(console, state)
     console.print(f"[dim]run directory[/dim]  {directory}")
@@ -463,7 +467,7 @@ def export(
 
     console.print(
         f"[green]wrote[/green] {result.path}  [dim]{result.documents} document(s) across "
-        f"{result.shelves} shelf/shelves[/dim]"
+        f"{result.topics} topic/topics[/dim]"
     )
     if result.permissive_only:
         console.print(
@@ -479,7 +483,7 @@ def export(
 def inspect(
     bundle: Annotated[Path, typer.Argument(help="Bundle directory to summarize.")],
 ) -> None:
-    """Summarize a bundle: shelf sizes, designs, coverage, cost."""
+    """Summarize a bundle: topic sizes, designs, coverage, cost."""
     from okf_loremaster.okf.overview import read_overview
     from okf_loremaster.ui.overview import render_overview
 

@@ -28,8 +28,8 @@ from okf_loremaster.schemas import (
     ConceptRecord,
     CostSummary,
     RunManifest,
-    ShelfSummary,
     TextBasis,
+    TopicSummary,
 )
 
 __all__ = ["emit_okf_node", "manifest_for"]
@@ -64,7 +64,7 @@ async def emit_okf_node(state: RunState, deps: Deps) -> dict[str, Any]:
             warnings.append(warning)
             deps.warn(NODE, warning)
         report["summary"] = (
-            f"{result.documents} document(s) across {result.shelves} shelf/shelves "
+            f"{result.documents} document(s) across {result.topics} topic/topics "
             f"-> {directory}"
         )
 
@@ -100,7 +100,7 @@ def manifest_for(
         finished_at=finished,
         models=_models(deps),
         counts=_counts(state, records),
-        shelves=_shelves(charter, records),
+        topics=_topics(charter, records),
         queries=list(state.get("executed") or []),
         cost=_cost(deps),
         stale_after=None,
@@ -140,18 +140,18 @@ def _counts(state: RunState, records: list[ConceptRecord]) -> BundleCounts:
     )
 
 
-def _shelves(charter: Charter, records: list[ConceptRecord]) -> list[ShelfSummary]:
-    grouped: dict[str, list[ConceptRecord]] = {shelf.slug: [] for shelf in charter.shelf_taxonomy}
+def _topics(charter: Charter, records: list[ConceptRecord]) -> list[TopicSummary]:
+    grouped: dict[str, list[ConceptRecord]] = {topic.slug: [] for topic in charter.topic_taxonomy}
     for record in records:
         grouped.setdefault(record.domain, []).append(record)
-    summaries: list[ShelfSummary] = []
+    summaries: list[TopicSummary] = []
     for slug, items in grouped.items():
-        shelf = charter.shelf(slug)
+        topic = charter.topic(slug)
         full = sum(1 for record in items if record.text_basis is TextBasis.FULL_TEXT)
         summaries.append(
-            ShelfSummary(
+            TopicSummary(
                 slug=slug,
-                title=shelf.title if shelf is not None else "",
+                title=topic.title if topic is not None else "",
                 papers=len(items),
                 full_text=full,
                 abstract_only=len(items) - full,

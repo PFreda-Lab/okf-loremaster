@@ -33,9 +33,9 @@ from okf_loremaster.events import EventBus, NodeFinished, NodeStarted, Progress,
 from okf_loremaster.llm.router import Router
 from okf_loremaster.ranking import DEFAULT_LAMBDA, SelectionComparison
 from okf_loremaster.schemas import (
-    DEFAULT_SHELF_MAX,
-    DEFAULT_SHELF_MIN,
     DEFAULT_TARGET_PAPERS,
+    DEFAULT_TOPIC_MAX,
+    DEFAULT_TOPIC_MIN,
     Candidate,
     Charter,
     ConceptRecord,
@@ -81,9 +81,9 @@ class RunState(TypedDict, total=False):
     # Search rounds completed. Bounded by `curation.MAX_ROUNDS`; incremented by the
     # search node, which is the node the bound is about.
     rounds: int
-    # Filtered query term to the shelf slug it was written for. The ranker's only
-    # source of shelf affinity before screening assigns one.
-    query_shelf: dict[str, str]
+    # Filtered query term to the topic slug it was written for. The ranker's only
+    # source of topic affinity before screening assigns one.
+    query_topic: dict[str, str]
     candidates: list[Candidate]
 
     # dedupe
@@ -101,9 +101,9 @@ class RunState(TypedDict, total=False):
 
     # curate
     curation: CurationResult | None
-    # The final placement: shelf slug to PMIDs, every charter shelf present even when
+    # The final placement: topic slug to PMIDs, every charter topic present even when
     # empty. What the emitter walks.
-    shelves: dict[str, list[str]]
+    topics: dict[str, list[str]]
 
     # fulltext — keyed by PMID. The whole prompt block each extraction was shown, kept
     # verbatim because `verification` checks the model's numbers against exactly this
@@ -169,8 +169,8 @@ class Deps:
     # Charter fields the user has the last word on, applied by the charter node
     # whether the charter was drafted or supplied.
     target_papers: int = DEFAULT_TARGET_PAPERS
-    shelf_min: int = DEFAULT_SHELF_MIN
-    shelf_max: int = DEFAULT_SHELF_MAX
+    topic_min: int = DEFAULT_TOPIC_MIN
+    topic_max: int = DEFAULT_TOPIC_MAX
     # PubMed ids pulled per query. 200 is enough for a query worth planning and small
     # enough that a badly broadened one cannot flood the pool on its own.
     per_query_retmax: int = 200

@@ -46,7 +46,7 @@ async def test_unpriced_run_never_renders_as_free() -> None:
             NodeStarted(node="extract"),
             LLMCall(
                 node="extract",
-                role="deep",
+                role="reasoning",
                 model="gateway/deployment",
                 prompt_tokens=100,
                 completion_tokens=50,
@@ -75,7 +75,7 @@ async def test_priced_run_shows_the_figure() -> None:
             RunStarted(run_id="r2", prompt="a task"),
             LLMCall(
                 node="extract",
-                role="deep",
+                role="reasoning",
                 model="claude-opus-5",
                 prompt_tokens=1000,
                 completion_tokens=500,
@@ -114,11 +114,11 @@ async def test_non_live_mode_reports_node_boundaries() -> None:
     output = await _render(
         [
             NodeStarted(node="charter"),
-            NodeFinished(node="charter", summary="3 shelves", seconds=1.2),
+            NodeFinished(node="charter", summary="3 topics", seconds=1.2),
         ]
     )
     assert "charter" in output
-    assert "3 shelves" in output
+    assert "3 topics" in output
 
 
 async def test_renderer_subscribes_before_run_starts() -> None:
