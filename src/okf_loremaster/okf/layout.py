@@ -28,10 +28,13 @@ __all__ = [
     "LOG_FILENAME",
     "NONE_CELL",
     "OKF_DIRNAME",
+    "PREDICTORS_FILENAME",
     "PREDICTOR_COLUMNS",
+    "PREDICTOR_INDEX_TYPE",
     "QUOTE_LEAD",
     "RESERVED_FILENAMES",
     "ROOT_INDEX_TYPE",
+    "SITE_COLUMNS",
     "TOPIC_INDEX_TYPE",
     "UNVERIFIED_CELL",
     "VECTORS_DIRNAME",
@@ -44,10 +47,18 @@ LOG_FILENAME = "log.md"
 CATALOG_FILENAME = "_catalog.jsonl"
 DESCRIPTOR_FILENAME = "resource_descriptor.yaml"
 CHARTER_FILENAME = "charter.yaml"
+PREDICTORS_FILENAME = "predictors.md"
 
 # Files at the root of a bundle or a topic that are ours to regenerate, never documents.
 RESERVED_FILENAMES = frozenset(
-    {INDEX_FILENAME, LOG_FILENAME, CATALOG_FILENAME, DESCRIPTOR_FILENAME, CHARTER_FILENAME}
+    {
+        INDEX_FILENAME,
+        LOG_FILENAME,
+        CATALOG_FILENAME,
+        DESCRIPTOR_FILENAME,
+        CHARTER_FILENAME,
+        PREDICTORS_FILENAME,
+    }
 )
 
 # The `type` frontmatter key. Free text as far as the spec is concerned, but the only
@@ -55,6 +66,10 @@ RESERVED_FILENAMES = frozenset(
 DOCUMENT_TYPE = "Literature Evidence"
 ROOT_INDEX_TYPE = "Bundle Index"
 TOPIC_INDEX_TYPE = "Topic Index"
+# `predictors.md`. Carries no `domain`, and cannot: a document's `domain` must equal the
+# folder it sits in, and this one sits at the corpus root beside the folders. That is what
+# keeps a file which cuts across every topic from being read as a paper in none of them.
+PREDICTOR_INDEX_TYPE = "Predictor Index"
 
 # `# ` headings, in this order, in every concept file.
 BODY_SECTIONS = (
@@ -84,6 +99,19 @@ PREDICTOR_COLUMNS = (
     # well-read row from a small unadjusted survey is `high` and `limited`, and a reader
     # who sees only one of the two columns draws the wrong conclusion from either.
     "Strength",
+)
+
+# `predictors.md`, where every row is a pointer rather than a finding. `paper` and `row`
+# come first and together they are the address: the document to open, and the `#` value to
+# find once it is open. Everything after them exists to decide whether to make that trip.
+SITE_COLUMNS = (
+    "paper",
+    "row",
+    "topic",
+    "as measured",
+    "direction",
+    "effect",
+    "strength",
 )
 
 # Introduces the numbered verbatim quotes under a table, keyed to its `#` column. Shared

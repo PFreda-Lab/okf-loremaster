@@ -42,6 +42,7 @@ from okf_loremaster.okf.layout import (
     DISTANCES,
     INDEX_FILENAME,
     LOG_FILENAME,
+    PREDICTORS_FILENAME,
     RESERVED_FILENAMES,
     vector_store_path,
 )
@@ -195,6 +196,35 @@ def _check_root(bundle: OkfBundle, findings: list[Finding]) -> None:
                 bundle.index.path,
             )
         )
+
+    # The same trap, for the one other file at the root that carries frontmatter. A
+    # `domain` here would make `predictors.md` a document whose folder does not exist,
+    # which is what a consumer checking rule 2 — `domain` equals the containing folder —
+    # would reject the whole bundle over. Read directly rather than through the reader,
+    # which only walks the topic folders and so cannot see this file at all.
+    predictors = bundle.path / PREDICTORS_FILENAME
+    if predictors.exists() and "domain" in _root_fields(predictors):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                f"{PREDICTORS_FILENAME} carries a `domain` key, but it cuts across every "
+                f"domain and sits in none",
+                predictors,
+            )
+        )
+
+
+def _root_fields(path: Path) -> dict[str, str]:
+    """Frontmatter of a root-level file, or nothing if it has none we can read.
+
+    A file we cannot parse is not this check's business — the file is derived and a
+    consumer that cannot read it simply does not use it.
+    """
+    try:
+        block, _ = split(path.read_text(encoding="utf-8"))
+    except (FrontmatterError, OSError, UnicodeDecodeError):
+        return {}
+    return parse(block)
 
 
 def _check_topics(bundle: OkfBundle, findings: list[Finding]) -> None:

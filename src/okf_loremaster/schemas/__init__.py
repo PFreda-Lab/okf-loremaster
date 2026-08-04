@@ -76,6 +76,12 @@ from okf_loremaster.schemas.parse import (
     parse_model_with,
     response_format_for,
 )
+from okf_loremaster.schemas.recurrence import (
+    OutcomeGroup,
+    PredictorGroup,
+    PredictorSite,
+    RecurrenceIndex,
+)
 from okf_loremaster.schemas.screening import (
     CurationDecision,
     CurationResult,
@@ -120,11 +126,15 @@ __all__ = [
     "Extraction",
     "Model",
     "NullFinding",
+    "OutcomeGroup",
     "PaperStrength",
     "PaperText",
     "PlannedQuery",
+    "PredictorGroup",
     "PredictorRow",
+    "PredictorSite",
     "QueryPlan",
+    "RecurrenceIndex",
     "RowStrength",
     "RunManifest",
     "SchemaError",

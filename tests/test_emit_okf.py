@@ -28,6 +28,8 @@ from okf_loremaster.okf.layout import (
     DESCRIPTOR_FILENAME,
     INDEX_FILENAME,
     LOG_FILENAME,
+    PREDICTOR_INDEX_TYPE,
+    PREDICTORS_FILENAME,
     UNVERIFIED_CELL,
 )
 from okf_loremaster.okf.reader import fact_list, markdown_table, read_bundle
@@ -83,6 +85,7 @@ async def test_the_bundle_has_every_file_a_consumer_is_promised(
         DESCRIPTOR_FILENAME,
         LOG_FILENAME,
         CHARTER_FILENAME,
+        PREDICTORS_FILENAME,
     ):
         assert (bundle / filename).is_file(), filename
 
@@ -332,6 +335,81 @@ async def test_the_topic_index_lets_a_reader_choose_a_paper_by_strength(
         assert rows, topic.slug
         for row in rows:
             assert row["strength"], f"{topic.slug} {row['pmid']}"
+
+
+# --- the predictor index ----------------------------------------------------
+
+
+async def test_the_predictor_index_is_a_third_kind_of_file_and_not_a_document(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It cuts across every topic, so it sits at the root beside the folders rather than
+    in one of them — and a `domain` key there would make it a document filed in a folder
+    that does not exist, which is the rule a consumer rejects the whole bundle over."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    fields, body = load((bundle / PREDICTORS_FILENAME).read_text(encoding="utf-8"))
+    assert fields["type"] == PREDICTOR_INDEX_TYPE
+    assert fields["title"] and fields["description"]
+    assert "domain" not in fields
+    assert body.strip()
+
+    # And the reader agrees: it is not one of the documents, and no topic gained one.
+    parsed = read_bundle(bundle)
+    assert all(document.path.name != PREDICTORS_FILENAME for document in parsed.documents())
+    assert len(list(parsed.documents())) == TARGET
+
+
+async def test_every_line_of_the_predictor_index_is_an_address_that_resolves(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The property the whole file rests on. An index a reader can use *instead of* the
+    corpus is one that will be, and then the quotes and provenance stop being opened —
+    so every row has to name a file that exists and a row number that is really in it."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    _fields, body = load((bundle / PREDICTORS_FILENAME).read_text(encoding="utf-8"))
+    rows = markdown_table(body)
+    assert rows, "the golden corpus reports one predictor per paper, so it must recur"
+
+    for entry in rows:
+        target = entry["paper"].split("](", 1)[1].rstrip(")")
+        assert (bundle / target).is_file(), target
+        # The `#` column of that paper's own table, which is the second half of the
+        # address: without it a reader lands on a file and not on a finding.
+        document = next(
+            d for d in read_bundle(bundle).documents() if d.path == bundle / target
+        )
+        numbers = {
+            r["#"] for r in markdown_table(document.section("Predictors reported") or "")
+        }
+        assert entry["row"] in numbers, f"{target} has no row {entry['row']}"
+
+
+async def test_the_predictor_index_prints_the_papers_own_words_not_the_cluster_label(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The heading is a lexical guess about a field the reader knows better. What each
+    paper actually wrote has to stay on the page, or the guess cannot be disputed."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    _fields, body = load((bundle / PREDICTORS_FILENAME).read_text(encoding="utf-8"))
+    for entry in markdown_table(body):
+        assert entry["as measured"]
+        assert entry["direction"]
+        assert entry["strength"]
+
+
+async def test_the_descriptor_and_the_root_index_both_point_at_the_predictor_index(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rule 4 searches over documents, so a file that is not one is invisible unless
+    something names it. Both places, because a consumer reads one or the other."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    payload = yaml.safe_load((bundle / DESCRIPTOR_FILENAME).read_text(encoding="utf-8"))
+    assert payload["predictors"] == PREDICTORS_FILENAME
+    assert PREDICTORS_FILENAME in (bundle / INDEX_FILENAME).read_text(encoding="utf-8")
 
 
 # --- the catalog ------------------------------------------------------------

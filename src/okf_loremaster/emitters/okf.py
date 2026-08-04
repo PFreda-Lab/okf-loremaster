@@ -50,18 +50,24 @@ from okf_loremaster.okf.layout import (
     LOG_FILENAME,
     NONE_CELL,
     PREDICTOR_COLUMNS,
+    PREDICTOR_INDEX_TYPE,
+    PREDICTORS_FILENAME,
     QUOTE_LEAD,
     ROOT_INDEX_TYPE,
+    SITE_COLUMNS,
     TOPIC_INDEX_TYPE,
     UNVERIFIED_CELL,
 )
 from okf_loremaster.okf.markdown import facts, inline, table_row, table_rule
+from okf_loremaster.recurrence import MIN_PAPERS, index_predictors
 from okf_loremaster.schemas import (
     Charter,
     ConceptRecord,
     Extraction,
     NullFinding,
+    OutcomeGroup,
     PaperStrength,
+    PredictorGroup,
     PredictorRow,
     RowStrength,
     RunManifest,
@@ -72,6 +78,7 @@ from okf_loremaster.schemas import (
 from okf_loremaster.verification import quantities_in
 
 __all__ = [
+    "CONTESTED",
     "TOPIC_COLUMNS",
     "TOPIC_PREDICTORS",
     "BundleWrite",
@@ -82,6 +89,7 @@ __all__ = [
     "effect_cell",
     "frontmatter_for",
     "log_markdown",
+    "predictor_index",
     "root_index",
     "strength_cell",
     "topic_index",
@@ -103,6 +111,11 @@ TOPIC_COLUMNS = ("pmid", "title", "design", "n", "strength", "key predictors")
 # How many predictor names the topic index shows per paper. A browse table, not a
 # summary: enough to tell two papers apart, short enough that the column stays a column.
 TOPIC_PREDICTORS = 3
+
+# What `predictors.md` prints where papers disagree about the sign of a relationship.
+# A marker rather than an adjudication: the file cannot say which paper is right, and the
+# useful thing it can say is that the reader has to open both.
+CONTESTED = "⚠ contested"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +176,9 @@ def write_bundle(
                 for record in topic_records
             ),
         )
+    )
+    written.append(
+        _write(path / PREDICTORS_FILENAME, predictor_index(records, charter=charter))
     )
     written.append(_write(path / DESCRIPTOR_FILENAME, descriptor(grouped, charter=charter,
                                                                  manifest=manifest)))
@@ -648,12 +664,144 @@ def root_index(
         "",
         "## Files",
         "",
+        f"- [{PREDICTORS_FILENAME}]({PREDICTORS_FILENAME}) — what recurs across the "
+        f"topics, and which row of which paper to read it in",
         f"- [{LOG_FILENAME}]({LOG_FILENAME}) — how this bundle was built",
         f"- `{CATALOG_FILENAME}` — one JSON row per document",
         f"- [{DESCRIPTOR_FILENAME}]({DESCRIPTOR_FILENAME}) — what a consumer reads on attach",
         "",
     ]
     return render(fields) + "\n" + "\n".join(body)
+
+
+def predictor_index(records: Sequence[ConceptRecord], *, charter: Charter) -> str:
+    """`predictors.md` — what recurs across the corpus, and where to read each occurrence.
+
+    The one file in the bundle that cuts across topics. It carries no `domain` key and
+    cannot: a document's `domain` must equal the folder it sits in, and this sits at the
+    root beside the folders rather than in one of them. That is what keeps it from being
+    read as a paper filed nowhere.
+
+    Every row is an address — a document, and the `#` of one row inside it — and nothing
+    is written here that is not also written in a paper's own file. An index that can be
+    read *instead of* the corpus is one that will be, and the quotes, operationalizations
+    and provenance that justify the bundle would stop being opened.
+    """
+    index = index_predictors(records, effect_of=effect_cell)
+    title = f"Predictors — {charter.task or charter.prompt}"
+    fields: dict[str, Any] = {
+        "type": PREDICTOR_INDEX_TYPE,
+        "title": title,
+        "description": (
+            f"{index.predictors} predictor(s) reported by {MIN_PAPERS} or more of the "
+            f"{index.papers} paper(s) in this bundle, each one pointing back at the rows "
+            f"it was read from."
+        ),
+    }
+
+    body = [
+        f"# {title}",
+        "",
+        f"{index.rows:,} predictor row(s) across {index.papers} paper(s). "
+        f"{index.predictors} of them recur across {MIN_PAPERS} or more papers and are "
+        f"listed below. Another {index.once} appear in one paper each and are not listed — "
+        f"that paper's own document already describes them in full, and its topic index "
+        f"points at it.",
+        "",
+        "Every row here is a pointer, not a finding. `paper` is the file to open and "
+        "`row` is the `#` to find in its `# Predictors reported` table, where the "
+        "operationalization, the verbatim quote and the provenance live. Counts say how "
+        "many documents to read, never how established a relationship is — this is a "
+        "curated corpus, so how often something appears is a fact about the curation.",
+        "",
+        f"Grouped by predictor **and** outcome together. One paper can report one "
+        f"exposure against several outcomes in several directions, and only the pairing "
+        f"tells those apart from a disagreement. `{CONTESTED}` marks an outcome where the "
+        f"papers do disagree about the sign.",
+        "",
+    ]
+
+    if not index.groups:
+        body += [
+            f"No predictor is reported by {MIN_PAPERS} or more papers in this bundle. "
+            f"That is a claim about the corpus rather than a missing section: with "
+            f"{index.papers} paper(s) across {len(charter.topic_taxonomy) or 1} topic(s), "
+            f"nothing recurred.",
+            "",
+            f"[← bundle index]({INDEX_FILENAME})",
+            "",
+        ]
+        return render(fields) + "\n" + "\n".join(body)
+
+    for group in index.groups:
+        body += _predictor_section(group)
+
+    body += [f"[← bundle index]({INDEX_FILENAME})", ""]
+    return render(fields) + "\n" + "\n".join(body)
+
+
+def _predictor_section(group: PredictorGroup) -> list[str]:
+    lines = [f"## {inline(group.predictor)}", ""]
+    summary = [
+        f"{group.papers} paper(s)",
+        f"{group.rows} row(s)",
+        f"{len(group.topics)} topic(s): {', '.join(group.topics)}"
+        if group.topics
+        else "no topic",
+    ]
+    lines.append(" · ".join(summary))
+    # The audit trail for the clustering, printed only when it actually merged something.
+    # A merge nobody can see is a merge nobody can dispute, and this is a lexical match
+    # that will occasionally be wrong in a way only a reader who knows the field can spot.
+    if len(group.surface_forms) > 1:
+        lines += ["", "Counted as one: " + " · ".join(f"*{form}*" for form in group.surface_forms)]
+    lines.append("")
+    for outcome in group.outcomes:
+        lines += _outcome_section(outcome)
+    return lines
+
+
+def _outcome_section(outcome: OutcomeGroup) -> list[str]:
+    heading = outcome.outcome or "outcome not recorded"
+    lines = [f"### → {inline(heading)}", ""]
+    # `increases (2)` rather than `2 increases`, so the enum value is printed exactly as
+    # the `Direction` column of the document prints it and a reader can match the two by
+    # eye — and so a count of one does not have to read as "1 increases".
+    counts = " · ".join(
+        f"{direction.value} ({count})" for direction, count in outcome.directions
+    )
+    line = f"{outcome.papers} paper(s) — {counts}"
+    if outcome.contested:
+        line += f"  {CONTESTED}"
+    lines += [line, "", table_row(SITE_COLUMNS), table_rule(len(SITE_COLUMNS))]
+    for site in outcome.sites:
+        lines.append(
+            table_row(
+                (
+                    # Linked on the filename rather than the bare PMID: it names the
+                    # first author as well, which is how a reader recognizes a paper they
+                    # have already opened, and the PMID is still its first token.
+                    f"[{site.file.rsplit('/', 1)[-1].removesuffix('.md')}]({site.file})",
+                    str(site.row),
+                    site.domain,
+                    # The paper's own words for the predictor, plus how it measured it.
+                    # The heading is a cluster label and this is what was actually
+                    # written, which is the difference between a group and a claim.
+                    _as_measured(site.predictor, site.operationalization),
+                    site.direction.value,
+                    site.effect,
+                    strength_cell(site.strength),
+                )
+            )
+        )
+    lines.append("")
+    return lines
+
+
+def _as_measured(predictor: str, operationalization: str) -> str:
+    if not operationalization.strip():
+        return predictor
+    return f"{predictor} — {operationalization}"
 
 
 def log_markdown(charter: Charter, manifest: RunManifest, *, verification: str = "") -> str:
@@ -744,6 +892,10 @@ def descriptor(
         "catalog": CATALOG_FILENAME,
         "log": LOG_FILENAME,
         "charter": CHARTER_FILENAME,
+        # Declared beside the others so a consumer finds it without walking the root. OKF
+        # v0.2 has a reader ignore keys it does not know, so this costs nothing to a
+        # consumer that has never heard of it and saves a directory listing to one that has.
+        "predictors": PREDICTORS_FILENAME,
         "domains": {slug: _topic_title(charter, slug) for slug in grouped},
         "documents": sum(len(items) for items in grouped.values()),
         "tool": "okf-loremaster",

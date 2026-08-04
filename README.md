@@ -23,6 +23,7 @@ bundles/hf-readmission/
 ├── charter.yaml          # what the run decided to look for — edit and rerun from this
 ├── okf/                  # the corpus: markdown, one file per paper
 │   ├── index.md
+│   ├── predictors.md     # what recurs across the topics, and where to read it
 │   ├── _catalog.jsonl
 │   ├── resource_descriptor.yaml
 │   └── <topic>/          # one folder per topic, each with its own index.md
@@ -123,11 +124,58 @@ weighing an abstract-derived claim like a full-text one.
 *(Example content from [PubMed](https://pubmed.ncbi.nlm.nih.gov/33745404/),
 [DOI 10.1080/09540121.2021.1902932](https://doi.org/10.1080/09540121.2021.1902932).)*
 
+### What recurs across the papers
+
+A corpus of documents answers "what does this paper say" well and "which papers say the same thing"
+not at all — that answer is spread across two hundred files, and nobody opens two hundred files to
+find it. So one more file is written at the root. `predictors.md` holds an entry for every predictor
+two or more papers reported — one entry below, with one of its three rows shown:
+
+````markdown
+## Short sleep duration
+
+3 paper(s) · 4 row(s) · 2 topic(s): sleep-and-rest, diet-and-nutrition
+
+Counted as one: *Short sleep duration* · *short sleep durations*
+
+### → Total energy intake
+
+3 paper(s) — increases (2) · decreases (1)  ⚠ contested
+
+| paper | row | topic | as measured | direction | effect | strength |
+|---|---|---|---|---|---|---|
+| [26567190_Dashti](diet-and-nutrition/26567190_Dashti.md) | 3 | diet-and-nutrition | Short sleep duration — <6 h/night, self-report | increases | 1.42 (95% CI 1.10-1.83) | strong 0.81 |
+````
+
+**Every line is an address and nothing else.** `paper` and `row` are the document to open and the
+`#` value to find once it is open; the rest of the row is there to help you decide whether to make
+the trip. Nothing appears here that is not already written in a paper's own file — an index you can
+read *instead of* the corpus is one that will be read instead of the corpus, and then the quotes,
+the operationalizations and the licenses stop being opened at all.
+
+**It is not ranked and it is not scored.** A number combining how good a study is with how often
+something turns up answers neither question, and frequency in a curated corpus is a measurement of
+the curation: diversification and the charter's per-topic floors decide how many times a predictor
+can appear long before the literature gets a say. So the order is how many papers you would have to
+open, and the counts are navigational.
+
+**A predictor is grouped with its outcome, and the merging is timid.** One paper reporting one
+exposure against six outcomes in six directions is six coherent findings; collapsed onto the
+exposure it reads as a paper arguing with itself. `⚠ contested` means papers disagree about the sign
+of *one* relationship — a null beside an effect is not that. Two spellings become one entry only on
+an exact normalized match, or on a qualifier that narrows a phrase without flipping it — so
+`short sleep duration` and `long sleep duration` stay two entries rather than becoming one U-shaped
+contradiction. Every merge prints the forms it absorbed, so you can disagree with it.
+
 ---
 
 ## How a run works
 
 Every stage below is a step inside `build`. There is nothing to run by hand.
+
+The stages are nodes of a [LangGraph](https://langchain-ai.github.io/langgraph/) state graph, and
+the state is checkpointed to SQLite as each one finishes. That is what makes a stopped run
+resumable rather than merely restartable, and it is why `--resume` needs nothing but a run id.
 
 Stages that need a model reach for one of three tiers, marked in the diagram in capitals. The tiers
 are named for the job, not for a vendor: you bind each to whatever model you like in `.env`, and
@@ -183,6 +231,7 @@ flowchart TB
     subgraph r5 ["<span style='font-size:24px'><b>5 · build the bundle and check it</b></span>"]
         direction LR
         emit["<b>emit_okf</b><br/>code<br/>markdown, indexes,<br/>catalog"] --> validate["<b>validate</b><br/>code<br/>the OKF contract,<br/>as a gate"] --> vectors["<b>index_vectors</b><br/>code<br/>embeds the<br/>finished bundle"] --> out(["okf/ and<br/>vectors/"])
+        emit --> recur["<b>predictors.md</b><br/>code<br/>what recurs, as<br/>row addresses"] --> validate
     end
 
     p1 -.-> search
@@ -193,15 +242,15 @@ flowchart TB
     extract <--> cache
 
     linkStyle default stroke-width:3px
-    linkStyle 1,4,11,12,14,15 stroke:#1d4ed8,stroke-width:3px
-    linkStyle 16 stroke:#047857,stroke-width:3px,stroke-dasharray:5 3
+    linkStyle 1,4,13,14,16,17 stroke:#1d4ed8,stroke-width:3px
+    linkStyle 18 stroke:#047857,stroke-width:3px,stroke-dasharray:5 3
     classDef agent fill:#fcd34d,stroke:#b45309,stroke-width:2px,color:#111827
     classDef code fill:#e5e7eb,stroke:#6b7280,color:#111827
     classDef human fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,stroke-dasharray:6 4,color:#111827
     classDef io fill:#a7f3d0,stroke:#047857,color:#111827
     classDef store fill:#d1fae5,stroke:#047857,stroke-width:2px,stroke-dasharray:5 3,color:#111827
     class charter,search,screen,curate,extract agent
-    class dedupe,rank,fulltext,reconcile,emit,validate,vectors code
+    class dedupe,rank,fulltext,reconcile,emit,recur,validate,vectors code
     class p1,p2,review human
     class task,out io
     class cache store
@@ -387,6 +436,7 @@ for any bundle that finished.
 2. **`domain` equals the folder name.** A mismatch is an error, not a silent fix — it is nearly
    always a copy-paste bug, and it hides a paper where nobody looks.
 3. **`index.md` is reserved** at the root and in each topic, and is regenerated. Never a document.
+   So are `predictors.md`, `_catalog.jsonl` and `resource_descriptor.yaml` at the root.
 4. **`title`, `description` and `tags` are the search surface.** Retrieval is fuzzy token matching
    over title + description + tags + journal, so a paper titled "Study 3 final" is unfindable.
    `description` is in there because it states a *finding* rather than a subject.
@@ -402,6 +452,13 @@ for any bundle that finished.
 
 The word for a folder is **topic** in conversation and `domain` in frontmatter. `_catalog.jsonl`
 sits outside a `*.md` walk by design and carries one row per document.
+
+**`predictors.md` is something to look for, never something to expect.** A consumer that has never
+heard of it walks straight past: rule 2 keeps it out of every topic folder, rule 4 keeps it out of
+search, and rule 8 means the `predictors:` key in the descriptor costs nothing to a reader that
+does not know it. One that does know it gets the corpus's cross-topic entry point for free. It is
+the one file in the bundle with no `domain`, and it cannot have one — it cuts across every topic
+and sits in none of them, which the validator enforces rather than assumes.
 
 `tests/test_afce_contract.py` re-implements a consumer from these rules — its own line parser, its
 own resolver, its own matching — and checks a finished bundle against it, rather than reading the
@@ -434,7 +491,7 @@ specifically, so an unsigned bundle is *unverified* rather than merely unannotat
 
 ## Status
 
-Runs end to end and writes a validated bundle. 1,424 tests, none of which touch the network.
+Runs end to end and writes a validated bundle. 1,554 tests, none of which touch the network.
 
 ```bash
 conda run -n okf-loremaster pytest
