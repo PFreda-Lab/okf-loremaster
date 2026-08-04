@@ -73,7 +73,12 @@ async def _enrich(
     try:
         metrics = await deps.clients.icite.metrics([c.pmid for c in candidates], node=NODE)
     except Exception as exc:  # any client failure degrades the same way
-        note = f"iCite unavailable ({type(exc).__name__}); ranking without citation metrics"
+        # The message and not only the type. A TLS trust failure arrives here carrying the
+        # one sentence in the run that says what to do about it, and `HttpError` on its own
+        # throws that away — the degrade is silent about a cause the user can actually fix.
+        # Already redacted: an `HttpError` never carries a credential.
+        detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        note = f"iCite unavailable ({detail}); ranking without citation metrics"
         warnings.append(note)
         deps.warn(NODE, note)
         return candidates
