@@ -112,32 +112,36 @@ weighing an abstract-derived claim like a full-text one.
 Every stage below is a step inside `build`. There is nothing to run by hand.
 
 **Yellow is a decision made by a language model. Gray is ordinary code. Dashed blue only runs when
-you ask for it** — the two pauses need `--interactive`, the sign-off needs `--review`.
+you ask for it** — the two pauses need `--interactive`, the sign-off needs `--review`. The green
+cylinder is the extraction cache: a run you resume, or repeat, pays nothing for a paper it has
+already read.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontSize":"19px","lineColor":"#475569","primaryTextColor":"#111827"}}}%%
 flowchart TB
-    subgraph r1 ["1 · frame the task"]
+    subgraph r1 ["<span style='font-size:24px'><b>1 · frame the task</b></span>"]
         direction LR
         task(["a task, in<br/>plain language"]) --> charter["<b>charter</b><br/>REASONING<br/>topics, scope,<br/>seed terms"] -.-> p1{{"PAUSE 1 · OPTIONAL<br/>only with --interactive<br/>read and edit<br/>the charter"}}
     end
 
-    subgraph r2 ["2 · find candidates"]
+    subgraph r2 ["<span style='font-size:24px'><b>2 · find candidates</b></span>"]
         direction LR
         search["<b>search</b><br/>BALANCED<br/>seed terms into<br/>PubMed queries"] --> dedupe["<b>dedupe</b><br/>code<br/>PMID, DOI,<br/>normalized title"] --> rank["<b>rank</b><br/>code<br/>recency, citations,<br/>diversity"]
     end
 
-    subgraph r3 ["3 · choose what to read — a thin topic sends a second round back to step 2"]
+    subgraph r3 ["<span style='font-size:24px'><b>3 · choose what to read — a thin topic sends a second round back to step 2</b></span>"]
         direction LR
         p2{{"PAUSE 2 · OPTIONAL<br/>only with --interactive<br/>approve the pool<br/>before screening"}} -.-> screen["<b>screen</b><br/>FAST<br/>keep or drop,<br/>and which topic"] --> curate["<b>curate</b><br/>BALANCED<br/>what to keep,<br/>what is missing"]
     end
 
-    subgraph r4 ["4 · read and record"]
+    subgraph r4 ["<span style='font-size:24px'><b>4 · read and record</b></span>"]
         direction LR
         fulltext["<b>fulltext</b><br/>code<br/>license check,<br/>recorded verbatim"] --> extract["<b>extract</b><br/>BALANCED<br/>predictors, nulls,<br/>vocab hints"] --> reconcile["<b>reconcile</b><br/>code<br/>numbers, quotes, codes<br/>re-checked in the text"]
+        cache[("<b>cache</b><br/>on disk<br/>one file per paper,<br/>read back on --resume")]
         review{{"<b>review</b> · OPTIONAL<br/>only with --review<br/>a person signs<br/>the bundle off"}}
     end
 
-    subgraph r5 ["5 · write it out"]
+    subgraph r5 ["<span style='font-size:24px'><b>5 · write it out</b></span>"]
         direction LR
         emit["<b>emit_okf</b><br/>code<br/>markdown, indexes,<br/>catalog"] --> validate["<b>validate</b><br/>code<br/>the OKF contract,<br/>as a gate"] --> vectors["<b>index_vectors</b><br/>code<br/>embeds the<br/>finished bundle"] --> out(["okf/ and<br/>vectors/"])
     end
@@ -147,16 +151,21 @@ flowchart TB
     curate --> fulltext
     reconcile -.-> review
     review -.-> emit
+    extract <--> cache
 
-    linkStyle 1,4,11,12,14,15 stroke:#1d4ed8,stroke-width:2px
+    linkStyle default stroke-width:3px
+    linkStyle 1,4,11,12,14,15 stroke:#1d4ed8,stroke-width:3px
+    linkStyle 16 stroke:#047857,stroke-width:3px,stroke-dasharray:5 3
     classDef agent fill:#fcd34d,stroke:#b45309,stroke-width:2px,color:#111827
     classDef code fill:#e5e7eb,stroke:#6b7280,color:#111827
     classDef human fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,stroke-dasharray:6 4,color:#111827
     classDef io fill:#a7f3d0,stroke:#047857,color:#111827
+    classDef store fill:#d1fae5,stroke:#047857,stroke-width:2px,stroke-dasharray:5 3,color:#111827
     class charter,search,screen,curate,extract agent
     class dedupe,rank,fulltext,reconcile,emit,validate,vectors code
     class p1,p2,review human
     class task,out io
+    class cache store
     style r1 fill:#f8fafc,stroke:#cbd5e1,color:#475569
     style r2 fill:#f8fafc,stroke:#cbd5e1,color:#475569
     style r3 fill:#f8fafc,stroke:#cbd5e1,color:#475569
