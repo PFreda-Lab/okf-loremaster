@@ -27,9 +27,15 @@ Clustering is lexical and deliberately timid. Merging two forms that are not the
 relationship invents an agreement or a disagreement no paper claimed, and it does so
 invisibly; failing to merge two that are leaves two adjacent entries a reader can see and
 join for themselves. So the merge rule is exact normalized match, then one conservative
-pass over phrases that differ only by a qualifier — and never over a qualifier that flips
-the meaning, which is what `_POLARITY` is for. Every merge prints the surface forms it
-absorbed, so any of them can be disputed.
+pass over phrases that differ by exactly one qualifier — never more than one, and never
+one that flips the meaning, which is what `_POLARITY` is for. Every merge prints the
+surface forms it absorbed, so any of them can be disputed.
+
+Both halves of that rule are narrower than they first were, and both were narrowed by
+the same failure on a real corpus: a normalization that discarded too much handed the
+containment pass keys short enough to contain almost anything, and it absorbed three
+unrelated phrases before anything noticed. Normalization that deletes is the dangerous
+kind — what it deletes, no later guard can protect.
 
 Embeddings would cluster better and are not used: `--finalize okf` never builds them, so
 the common path would silently get the worse clustering, and reaching for them here would
@@ -63,10 +69,23 @@ __all__ = ["MIN_PAPERS", "index_predictors", "surface_key"]
 # reporting something is already fully described by that paper's own document.
 MIN_PAPERS = 2
 
-# Parenthetical spans, which in this literature are almost always an abbreviation the
-# paper defined for itself. "Chronic sleep restriction (CSR)" and "chronic sleep
-# restriction" are one phrase, and keeping the initialism makes them two.
-_PARENTHETICAL = re.compile(r"\([^)]*\)")
+# A parenthetical span, and the abbreviations inside one. Only the abbreviation is
+# dropped, and only inside the parentheses.
+#
+# Dropping the whole span was the first attempt and it was wrong in the worst available
+# direction. Papers put two very different things in parentheses: an initialism they
+# defined for themselves — "Chronic sleep restriction (CSR)" — and the cutoff that *is*
+# the variable — "Sleep duration (short, <=6h/d)". Discarding both collapsed the second
+# kind onto a bare `{sleep, duration}` key shared with "SD of sleep duration" and
+# "Sleep duration (>=9h vs 7-9h)", which merged short sleep, long sleep and a
+# variability measure into one entry labeled for whichever was commonest. The qualifier
+# never reached `_POLARITY`, because it had already been deleted.
+#
+# So the initialism goes and the words stay. An initialism is an all-caps run: it may
+# carry digits and hyphens (`HOMA-IR`, `REM`), and a normally capitalized word does not
+# match, because the character after its first letter is lowercase.
+_PARENTHETICAL = re.compile(r"\(([^)]*)\)")
+_ABBREVIATION = re.compile(r"\b[A-Z][A-Z0-9-]*\b")
 
 # Words whose presence changes what a phrase claims rather than merely narrowing it. A
 # qualifier outside this set — "chronic", "maternal", "weekly" — describes the same
@@ -96,13 +115,25 @@ _NOT_A_PLURAL = ("ss", "us", "is", "os", "as")
 def surface_key(text: str) -> frozenset[str]:
     """The token set two phrases are compared on.
 
-    Parentheses dropped, tokenized the way everything else in this package tokenizes
-    (`ranking.text_tokens`, so stopwords and one- and two-character fragments go), then
-    singularized. A set rather than a sequence: "duration of sleep" and "sleep duration"
-    are the same phrase, and word order is not evidence that they are not.
+    Self-defined abbreviations dropped, tokenized the way everything else in this
+    package tokenizes (`ranking.text_tokens`, so stopwords and one- and two-character
+    fragments go), then singularized. A set rather than a sequence: "duration of sleep"
+    and "sleep duration" are the same phrase, and word order is not evidence otherwise.
+
+    The one departure from `text_tokens` is that a two-letter initialism is put back. Its
+    length rule exists for a retrieval index, where a two-character fragment is noise; a
+    predictor name is three or four words long, and in "SD of sleep duration" the two
+    characters carry the entire construct. Dropping them left it indistinguishable from
+    "sleep duration" itself, so a variability measure grouped with the thing it varies.
     """
-    stripped = _PARENTHETICAL.sub(" ", text)
-    return frozenset(_singular(token) for token in text_tokens(stripped))
+    opened = _unabbreviated(text)
+    tokens = {_singular(token) for token in text_tokens(opened)}
+    return frozenset(tokens | {word.lower() for word in _ABBREVIATION.findall(opened) if word[1:]})
+
+
+def _unabbreviated(text: str) -> str:
+    """Parentheses opened, and only the initialisms inside them removed."""
+    return _PARENTHETICAL.sub(lambda m: f" {_ABBREVIATION.sub(' ', m.group(1))} ", text)
 
 
 def _singular(token: str) -> str:
@@ -112,18 +143,37 @@ def _singular(token: str) -> str:
 
 
 def _absorbs(host: frozenset[str], guest: frozenset[str]) -> bool:
-    """Whether `guest` is `host` plus qualifiers that do not change the claim.
+    """Whether `guest` is `host` plus *one* qualifier that does not change the claim.
 
     Containment rather than overlap, because that is the shape the near-duplicates
     actually take: a paper writes the phrase, and the next paper writes the phrase with a
     word in front of it. Overlap would also merge two phrases that share most of their
     words while differing on the one that matters.
+
+    One word, not several. A short key is a subset of a great many longer ones —
+    `{sleep, duration}` contains itself in "apnoea duration during REM sleep" and in
+    "sleep fragmentation without reduction in sleep duration" — and each extra word is
+    another chance that the two phrases stopped being about the same thing. One word is
+    what "the same phrase with a qualifier" actually means, and the cases that need more
+    than one are better left as two adjacent entries a reader can join.
+
+    Two kinds of single word are still refused. A polarity word points the phrase the
+    other way. And an initialism is not a qualifier at all: "SD of sleep duration" is a
+    statistic computed over the variable rather than a narrower reading of it, and the
+    same holds for whatever a given field abbreviates. Only an initialism can leave a
+    token this short in a key — `text_tokens` drops every other two-character fragment —
+    so the length is a reliable test for one without naming any.
     """
     if not host or not guest or host == guest:
         return False
     if not (host < guest or guest < host):
         return False
-    return not (host ^ guest) & _POLARITY
+    difference = host ^ guest
+    if len(difference) > 1:
+        return False
+    if difference & _POLARITY:
+        return False
+    return all(len(token) > 2 for token in difference)
 
 
 @dataclass(slots=True)

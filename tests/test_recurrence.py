@@ -77,6 +77,24 @@ def test_a_papers_own_abbreviation_does_not_split_its_own_phrase() -> None:
     assert surface_key("Chronic sleep restriction (CSR)") == surface_key(
         "chronic sleep restriction"
     )
+    # Digits and hyphens are part of an initialism, and a capitalized ordinary word is not
+    # one — the letter after its first is lowercase.
+    assert surface_key("Insulin resistance (HOMA-IR)") == surface_key("insulin resistance")
+    assert "mediterranean" in surface_key("Diet quality (Mediterranean adherence)")
+
+
+def test_a_cutoff_inside_parentheses_is_the_variable_and_must_not_be_dropped() -> None:
+    """Papers put two unrelated things in parentheses, and only one of them is noise.
+
+    Discarding the whole span was the first rule here, and it deleted the only word that
+    said which end of the axis a row was about: `Sleep duration (short, <=6h/d)` and
+    `Sleep duration (>=9h vs 7-9h)` both fell to a bare `{sleep, duration}`, matched
+    exactly, and merged in the pass that runs before any polarity guard.
+    """
+    assert surface_key("Sleep duration (short, <=6h/d)") == surface_key("Short sleep duration")
+    assert surface_key("Sleep duration (short, <=6h/d)") != surface_key(
+        "Sleep duration (>=9h vs 7-9h)"
+    )
 
 
 def test_an_ending_that_only_looks_plural_survives() -> None:
@@ -125,6 +143,50 @@ def test_a_polarity_qualifier_blocks_the_merge_it_would_otherwise_pass() -> None
         paper("4", row("Heavy alcohol intake")),
     )
     assert sorted(labels(result)) == ["Alcohol intake", "Heavy alcohol intake"]
+
+
+def test_the_same_cutoff_written_two_ways_is_one_predictor() -> None:
+    """The other half of the parenthetical defect, and the half a reader sees. With the
+    qualifier deleted these were not merely mis-merged, they were *both*: a `Sleep
+    duration` entry that had swallowed the long-sleep rows sat directly above a separate
+    `Short sleep duration` entry reporting the same construct."""
+    result = index(
+        paper("1", row("Short sleep duration")),
+        paper("2", row("Sleep duration (short, <=6h/d)")),
+    )
+    assert labels(result) == ["Short sleep duration"]
+    assert set(result.groups[0].surface_forms) == {
+        "Short sleep duration",
+        "Sleep duration (short, <=6h/d)",
+    }
+
+
+def test_a_phrase_is_not_absorbed_by_a_short_one_it_merely_contains() -> None:
+    """Containment is a weak signal when the containing phrase is small, and every extra
+    word is another chance the two stopped being about the same thing. A real corpus put
+    all three of these under one two-token heading."""
+    result = index(
+        paper("1", row("Sleep duration")),
+        paper("2", row("Sleep duration")),
+        paper("3", row("Apnea duration during REM sleep")),
+        paper("4", row("Sleep fragmentation without reduction in sleep duration")),
+    )
+    assert sorted(labels(result)) == ["Sleep duration"]
+    assert result.groups[0].papers == 2
+    assert result.once == 2
+
+
+def test_a_statistic_computed_over_a_variable_is_not_a_narrower_reading_of_it() -> None:
+    """`SD of sleep duration` is a different measurement from sleep duration, and the two
+    letters saying so are exactly the ones a retrieval tokenizer throws away. It reached
+    the corpus as a `Sleep duration` group named for the variability measure."""
+    result = index(
+        paper("1", row("Sleep duration")),
+        paper("2", row("Sleep duration")),
+        paper("3", row("SD of sleep duration")),
+        paper("4", row("SD of sleep duration")),
+    )
+    assert sorted(labels(result)) == ["SD of sleep duration", "Sleep duration"]
 
 
 def test_two_phrases_that_merely_share_words_are_not_merged() -> None:
