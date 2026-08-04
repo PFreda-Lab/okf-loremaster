@@ -282,7 +282,22 @@ def project_spend(
     # --- curation, one call per topic ----------------------------------------
 
     topics = max(1, len(charter.topic_taxonomy))
-    included = min(screened, max(target_papers * 2, target_papers))
+    # `target_papers` is not the number of papers a run keeps. Trimming stops once no
+    # topic is above `topic_min` (`curation.py::_apply_target`), so the taxonomy sets a
+    # floor the target cannot pull a bundle under — and the floor is what priced a real
+    # run. `--target-papers 10` against 8 topics of 8 kept 62 papers and extracted 61,
+    # while this projected 10. Extraction is the dearest node per call, so being six
+    # times short there put the whole estimate five times under what the run spent:
+    # $1.01 projected, $5.04 paid.
+    floor = topics * charter.topic_min
+    kept = max(target_papers, floor)
+    if floor > target_papers:
+        notes.append(
+            f"priced on the taxonomy's floor of {kept} papers ({topics} topics x "
+            f"topic_min {charter.topic_min}), not on target_papers ({target_papers}) — "
+            "when the two disagree the topics win and the bundle comes in over target"
+        )
+    included = min(screened, kept * 2)
     per_topic = max(1, included // topics)
     title_tokens = (
         sum(estimate_tokens(c.title) for c in pool[:screened]) // screened if screened else 15
@@ -299,7 +314,7 @@ def project_spend(
 
     # --- extraction, the largest line when full text is available ------------
 
-    retained = min(target_papers, len(pool)) if pool else target_papers
+    retained = min(kept, len(pool)) if pool else kept
     if retained:
         sample = pool[:retained] if pool else []
         abstract_tokens = (

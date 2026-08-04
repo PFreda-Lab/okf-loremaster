@@ -438,3 +438,56 @@ async def test_the_settled_charter_is_written_even_though_one_was_supplied(
     written = run.charter_yaml()
     assert written.target_papers == 120  # from the flag, not the supplied file
     assert written.generated_by == "okf-loremaster/charter/none"
+
+
+# --- what the projection prices ---------------------------------------------
+
+
+def _projection(settings_factory: Any, *, target: int, topics: int = 8, floor: int = 8) -> Any:
+    """`project_spend` over an empty pool, so only the taxonomy decides the counts.
+
+    No candidates: with none retrieved there is nothing to screen, and extraction falls
+    back to what curation is expected to keep — which is the number under test.
+    """
+    from okf_loremaster.llm.estimate import project_spend
+
+    charter = charter_for(tuple(f"topic-{i}" for i in range(topics))).model_copy(
+        update={"target_papers": target, "topic_min": floor}
+    )
+    return project_spend(
+        charter,
+        settings=settings_factory(model_balanced="m", model_fast="m", model_reasoning="m"),
+        pool=[],
+        screen_budget=400,
+        target_papers=target,
+    )
+
+
+def test_the_projection_prices_the_papers_curation_will_keep_not_the_target(
+    settings_factory: Any,
+) -> None:
+    """Measured against a real run, and this is the whole gap.
+
+    `--target-papers 10` over 8 topics with `topic_min 8` kept 62 papers and extracted
+    61, because trimming stops once no topic is above its floor. The projection priced
+    extraction — the dearest node per call — at 10, and came in at $1.01 against $5.04
+    actually spent. An estimate a human is shown just before deciding whether to pay it
+    is worth more than a fifth of the truth.
+    """
+    estimate = _projection(settings_factory, target=10)
+    extract = next(node for node in estimate.nodes if node.node == "extract")
+
+    assert extract.calls == 64, "8 topics x topic_min 8 is the floor a target cannot undercut"
+    assert any("floor of 64" in note for note in estimate.notes), (
+        "the table shows a number above the requested target, so it has to say why"
+    )
+
+
+def test_a_target_above_the_floor_is_still_the_target(settings_factory: Any) -> None:
+    """The floor is a lower bound, not a replacement. A bundle asked for 200 papers over
+    8 topics is priced at 200, and nothing needs explaining in the notes."""
+    estimate = _projection(settings_factory, target=200)
+    extract = next(node for node in estimate.nodes if node.node == "extract")
+
+    assert extract.calls == 200
+    assert not any("floor of" in note for note in estimate.notes)
