@@ -167,10 +167,14 @@ def repair_hint(exc: ValidationError) -> str:
 def response_format_for(model_cls: type[Model], *, name: str = "") -> dict[str, Any]:
     """A `response_format` payload constraining a reply to this schema.
 
-    Providers differ in what they accept here, and the router sets LiteLLM's
-    `drop_params`, so a provider that does not support schema-constrained output drops
-    the parameter instead of failing the call — which is why `parse_model` still has to
-    handle fences and preamble rather than trusting the constraint.
+    Best effort, never a guarantee — which is why `parse_model` still handles fences and
+    preamble rather than trusting the constraint, and why every prompt asks for a single
+    JSON object in words as well.
+
+    `drop_params` covers a provider that does not support this at all. It does not cover
+    a provider that supports it for accounts other than yours: LiteLLM's capability map
+    answers for the model, the gate is on the workspace, and the parameter sails through
+    to a 400. The router recognizes that refusal and stops sending the constraint.
     """
     return {
         "type": "json_schema",

@@ -44,6 +44,19 @@ _PERMANENT_NAMES = (
     "ContextWindowExceededError",
 )
 
+# Schema-constrained output is gated on the account, not just the model, and LiteLLM's
+# capability map only answers for the model. `drop_params` therefore sees a model that
+# supports `response_format`, passes it through, and a workspace without access gets a
+# 400 instead of a dropped parameter — one node deep, mid-run. Matched narrowly on the
+# provider's own wording: a wider match would silently discard the schema on unrelated
+# bad requests, which is the failure this whole module is written to avoid.
+_SCHEMA_REFUSALS = ("structured_outputs", "structured outputs")
+
+
+def _refuses_schema(exc: BaseException) -> bool:
+    """Whether this failure is the provider declining schema-constrained output."""
+    return any(marker in str(exc).lower() for marker in _SCHEMA_REFUSALS)
+
 
 @lru_cache(maxsize=1)
 def _exception_types() -> tuple[tuple[type[BaseException], ...], tuple[type[BaseException], ...]]:
@@ -196,6 +209,10 @@ class Router:
         }
         self.ledger = CostLedger()
         self._budget_warned = False
+        # Flipped once, by the first call the provider refuses schema-constrained
+        # output for. Every later call omits `response_format` rather than spending
+        # another round trip discovering the same thing.
+        self._schema_refused = False
 
     async def complete(
         self,
@@ -272,7 +289,9 @@ class Router:
     ) -> Any:
         attempts = max(1, self._settings.max_retries)
         last: BaseException | None = None
-        for attempt in range(1, attempts + 1):
+        attempt = 0
+        while attempt < attempts:
+            attempt += 1
             try:
                 return await self._invoke(
                     model=model,
@@ -282,6 +301,27 @@ class Router:
                     response_format=response_format,
                 )
             except BaseException as exc:
+                if (
+                    response_format is not None
+                    and not self._schema_refused
+                    and _refuses_schema(exc)
+                ):
+                    # The request was rejected before the model saw it, so this costs
+                    # nothing and is not the caller's retry to spend. `_schema_refused`
+                    # can only flip once, so this cannot loop.
+                    attempt -= 1
+                    self._schema_refused = True
+                    self._bus.emit(
+                        WarningEvent(
+                            node=node,
+                            message=(
+                                "this workspace does not allow schema-constrained "
+                                "output; asking for JSON in the prompt instead. "
+                                "Replies are parsed and repaired as before."
+                            ),
+                        )
+                    )
+                    continue
                 if not _is_transient(exc) or attempt == attempts:
                     raise
                 last = exc
@@ -320,7 +360,7 @@ class Router:
             kwargs["api_key"] = self._settings.api_key
         if self._settings.api_base:
             kwargs["api_base"] = self._settings.api_base
-        if response_format is not None:
+        if response_format is not None and not self._schema_refused:
             kwargs["response_format"] = response_format
 
         if self._completion_fn is not None:

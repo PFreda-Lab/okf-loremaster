@@ -147,6 +147,92 @@ async def test_retries_are_exhausted_then_raised(settings_factory: Any) -> None:
     assert completion.call_count == 3
 
 
+# --- schema-constrained output ---------------------------------------------
+
+SCHEMA = {"type": "json_schema", "json_schema": {"name": "t", "schema": {"type": "object"}}}
+
+
+def _refusing_completion(replies: tuple[str, ...] = ("{}",)) -> FakeCompletion:
+    """A provider that rejects `response_format` the way a gated workspace does.
+
+    The wording is the provider's own, because that string is what the router matches
+    on. A test that invented a friendlier message would pass while the real one failed.
+    """
+
+    def reply(kwargs: dict[str, Any]) -> str:
+        if "response_format" in kwargs:
+            raise ValueError(
+                'AnthropicException - {"type":"error","error":{"type":'
+                '"invalid_request_error","message":"structured_outputs not supported '
+                'in your workspace."}}'
+            )
+        return replies[0]
+
+    return FakeCompletion(replies=reply)
+
+
+async def test_a_workspace_without_schema_support_falls_back_rather_than_failing(
+    settings_factory: Any,
+) -> None:
+    """The failure this replaces killed a run one node deep, after paying for the first.
+
+    `drop_params` cannot catch it: LiteLLM's capability map answers for the model, and
+    the gate is on the account. Every prompt already says "Return a single JSON object
+    and nothing else", and `parse_model` never trusted the constraint, so the reply is
+    still usable without it.
+    """
+    completion = _refusing_completion()
+    router, bus = _router(settings_factory, completion=completion)
+    queue = bus.subscribe()
+
+    result = await router.complete(Role.FAST, MESSAGES, node="search", response_format=SCHEMA)
+
+    assert result.text == "{}"
+    assert completion.call_count == 2, "one rejected call, then one without the schema"
+    assert "response_format" not in completion.calls[1]
+    warnings = [e for e in _events(bus, queue) if isinstance(e, WarningEvent)]
+    assert len(warnings) == 1, "a silent downgrade is the thing to avoid"
+    assert "schema-constrained" in warnings[0].message
+
+
+async def test_the_refusal_is_learned_once_not_rediscovered_per_call(
+    settings_factory: Any,
+) -> None:
+    """Otherwise every one of a few hundred extractions pays for a rejected round trip."""
+    completion = _refusing_completion()
+    router, _ = _router(settings_factory, completion=completion)
+
+    for _ in range(3):
+        await router.complete(Role.FAST, MESSAGES, node="extract", response_format=SCHEMA)
+
+    assert completion.call_count == 4, "one rejection, then three clean calls"
+    assert all("response_format" not in call for call in completion.calls[1:])
+
+
+async def test_the_fallback_does_not_spend_a_retry(settings_factory: Any) -> None:
+    """The request never reached the model, so it is not one of the caller's attempts.
+
+    With `max_retries=1` a fallback that consumed an attempt would raise instead of
+    recovering — which is the whole failure, moved one line later.
+    """
+    completion = _refusing_completion()
+    router, _ = _router(settings_factory, completion=completion, max_retries=1)
+
+    result = await router.complete(Role.FAST, MESSAGES, node="charter", response_format=SCHEMA)
+
+    assert result.text == "{}"
+
+
+async def test_an_unrelated_bad_request_still_fails_immediately(settings_factory: Any) -> None:
+    """The match is narrow on purpose. A wider one would drop the schema on any 400."""
+    completion = FakeCompletion(fail_times=99, failure=ValueError)
+    router, _ = _router(settings_factory, completion=completion, max_retries=4)
+
+    with pytest.raises(ValueError):
+        await router.complete(Role.FAST, MESSAGES, node="screen", response_format=SCHEMA)
+    assert completion.call_count == 1
+
+
 # --- concurrency and budget ------------------------------------------------
 
 
