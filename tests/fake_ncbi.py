@@ -406,11 +406,15 @@ class FakeNCBI:
     `efetch` covered the whole plan, for instance, rather than one per query.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, finds_nothing: bool = False) -> None:
         self.esearch_terms: list[str] = []
         self.efetch_batches: list[list[str]] = []
         self.icite_batches: list[list[str]] = []
         self.bioc_requests: list[str] = []
+        # PubMed answers a query that matches nothing with a perfectly successful
+        # search of zero results, which is how a whole run once reached the end with
+        # an empty pool and reported a valid bundle.
+        self.finds_nothing = finds_nothing
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -454,6 +458,8 @@ class FakeNCBI:
         withheld slice answers to `UNLOCK_PHRASE` and to nothing else, so a round that
         asks the same questions again retrieves the same corpus again.
         """
+        if self.finds_nothing:
+            return []
         if UNLOCK_PHRASE in term.lower():
             return rescue_pmids()
         named = [index for index, topic in enumerate(TOPICS) if f'"{topic}"[tiab]' in term]

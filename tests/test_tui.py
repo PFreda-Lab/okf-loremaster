@@ -96,10 +96,16 @@ def asking(app: LoremasterApp) -> bool:
 
 
 def log_text(app: LoremasterApp) -> str:
+    """The log pane as it reads on screen.
+
+    Segments are joined within a line, not across lines. A style change starts a new
+    segment, so `[dim]->[/dim] rank` is two of them — splitting on segments would put a
+    newline mid-line and quietly defeat any assertion about a phrase that spans one.
+    """
     from textual.widgets import RichLog
 
     lines = app.query_one("#log", RichLog).lines
-    return "\n".join(segment.text for line in lines for segment in line)
+    return "\n".join("".join(segment.text for segment in line) for line in lines)
 
 
 # --- the panel matches the graph --------------------------------------------
@@ -176,6 +182,112 @@ async def test_an_autonomous_run_logs_the_pauses_instead_of_asking(
 
     assert app.error is None
     assert log.count("continuing without asking") == 2  # charter, then retrieve
+
+
+# --- what a watcher sees while waiting ---------------------------------------
+
+
+async def test_the_log_says_something_before_the_first_event_arrives(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opening the checkpoint and building the clients all happen before `RunStarted`.
+
+    On a real run the first node is the charter — one reasoning-tier call for a long
+    reply — so an app that writes nothing until a node finishes shows an empty pane for
+    the longest stretch of the run, at the point a watcher has the least evidence that
+    anything is working.
+    """
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert "starting" in log_text(app)
+        await settle(pilot, lambda: asking(app))
+        await pilot.press("q")
+
+
+async def test_a_node_is_logged_when_it_starts_and_not_only_when_it_finishes(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pane says what is running now; the log is what gets read afterward."""
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path, interactive=False)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: app.outcome is not None)
+        log = log_text(app)
+        await pilot.press("q")
+
+    for node in ("charter", "search", "dedupe", "rank"):
+        assert f"-> {node}" in log
+
+
+async def test_a_progress_line_with_no_counter_is_shown_without_asking_for_verbose(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A counted tick belongs in the pipeline pane, where it overwrites itself.
+
+    An uncounted one is a node saying what it is about to do, there are fewer than ten
+    of them in a whole run, and they are exactly what someone waiting wants to read.
+    `verbose` is 0 here, which is how the user runs it.
+    """
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path, interactive=False)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: app.outcome is not None)
+        log = log_text(app)
+        await pilot.press("q")
+
+    assert app._options.verbose == 0
+    assert "rank: citation metrics for" in log
+
+
+# --- getting the run out of the terminal --------------------------------------
+
+
+async def test_the_log_is_kept_as_text_so_it_can_be_pasted_rather_than_photographed(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full-screen app's output is not in the scrollback, and is gone when it closes.
+
+    Selecting on screen works and is now advertised, but it goes through a clipboard
+    escape the terminal is free to ignore, and it cannot reach lines the pane has already
+    scrolled past. The file can.
+    """
+    from okf_loremaster.run import TRANSCRIPT_FILENAME
+
+    monkeypatch.setattr(
+        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
+    )
+    app, _ = tui_run(settings_factory, tmp_path, interactive=False)
+
+    async with app.run_test() as pilot:
+        await settle(pilot, lambda: app.outcome is not None)
+        await pilot.press("q")
+
+    assert app.outcome is not None
+    written = (app.outcome[1] / TRANSCRIPT_FILENAME).read_text(encoding="utf-8")
+    assert app.run_id in written
+    assert "-> rank" in written
+    assert "\x1b[" not in written, "written to be pasted, so no color codes"
+
+
+def test_copying_a_selection_is_in_the_footer_where_it_can_be_found() -> None:
+    """Textual has selected on drag and copied on ctrl+c since 7.0, bound with
+    `show=False`. Undiscoverable is the same as missing when the reason the log pane
+    exists is that a warning can be quoted somewhere else."""
+    copies = [b for b in LoremasterApp.BINDINGS if getattr(b, "action", "") == "screen.copy_text"]
+
+    assert copies, "nothing in the footer says a selection can be copied"
+    assert all(b.show for b in copies)
 
 
 async def test_declining_the_charter_stops_the_run_without_failing_it(

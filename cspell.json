@@ -1,10 +1,9 @@
 {
   "version": "0.2",
   "language": "en-US",
-  "comment": "en-US only, deliberately. British spellings must stay flagged - see CLAUDE.md.",
+  "comment": "en-US only, deliberately - British spellings must stay flagged. Editor config only: nothing in the package, the tests or any hook reads this file. Words here are the package's own vocabulary; words needed only by gitignored local notes belong in .vscode/settings.json instead.",
   "words": [
     "AFCE",
-    "atcs",
     "bioc",
     "browsability",
     "browsable",
@@ -14,9 +13,7 @@
     "datestamped",
     "dedup",
     "dedupe",
-    "docstrings",
     "efetch",
-    "elink",
     "embedders",
     "esearch",
     "esummary",
@@ -37,7 +34,6 @@
     "mesh",
     "mypy",
     "ncbi",
-    "nlmcatalog",
     "okf",
     "onnxruntime",
     "operationalization",
@@ -45,7 +41,6 @@
     "platformdirs",
     "pmid",
     "pmids",
-    "posthog",
     "pubmed",
     "pubmedbert",
     "pubtator",
@@ -55,13 +50,8 @@
     "rapidfuzz",
     "respx",
     "ruff",
-    "sentencetransformers",
-    "tarjan",
-    "tenacity",
     "tiab",
-    "tiktoken",
-    "typer",
-    "unmapped"
+    "typer"
   ],
   "ignorePaths": [
     "bundles/**",

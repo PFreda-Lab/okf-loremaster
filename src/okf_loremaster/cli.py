@@ -77,6 +77,7 @@ def _report_outputs(directory: Path) -> None:
     is never shown is a path nobody knows to copy.
     """
     from okf_loremaster.okf.layout import okf_bundle_path, vector_store_path
+    from okf_loremaster.run import TRANSCRIPT_FILENAME
 
     corpus = okf_bundle_path(directory)
     store = vector_store_path(corpus)
@@ -85,6 +86,12 @@ def _report_outputs(directory: Path) -> None:
         mark = "[green]+[/green]" if path.exists() else "[dim]-[/dim]"
         console.print(f"  {mark} {label}/{'' if path.exists() else '  [dim]not kept[/dim]'}")
     console.print(f"[dim]move it with[/dim]  [cyan]cp -r {directory} <somewhere>[/cyan]")
+    # Only `--tui` writes one: the plain renderer's output is already in the scrollback,
+    # where it can be selected. A full-screen app's is not, and it is gone the moment the
+    # alternate screen closes.
+    transcript = directory / TRANSCRIPT_FILENAME
+    if transcript.exists():
+        console.print(f"[dim]the run log, to paste[/dim]  [cyan]cat {transcript}[/cyan]")
 
 
 def _version_callback(value: bool) -> None:

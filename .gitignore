@@ -1,5 +1,9 @@
+# Secrets. `.env.local` and `.env.production` matched neither of the first two
+# patterns — `.env` is exact and `*.env` needs something before the dot — so the third
+# is the one that closes it. The exception has to come last to survive them all.
 .env
 *.env
+.env.*
 !.env.example
 
 __pycache__/
@@ -37,6 +41,13 @@ bundles/
 # operator-specific, and none of it describes the package.
 .claude/
 
+# A virtualenv inside the repo is against policy — the conda env is kept outside so it
+# does not bloat cloud sync — but a stray one committed is thousands of files, so it is
+# ignored rather than trusted not to appear.
+.venv/
+venv/
+
 .DS_Store
 .vscode/
 .idea/
+.ipynb_checkpoints/

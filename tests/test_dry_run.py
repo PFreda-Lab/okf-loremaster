@@ -32,6 +32,7 @@ from okf_loremaster.schemas import Charter, Topic
 from okf_loremaster.ui.pauses import TOP_TITLES, ConsolePause
 
 from fake_ncbi import TOPICS, FakeNCBI, all_pmids
+from graph_runs import full_run
 
 PROMPT = "identify predictors of a measured outcome after a procedure in adults"
 
@@ -390,6 +391,41 @@ async def test_the_pauses_are_not_asked_on_a_dry_run(
 ) -> None:
     run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for())
     assert run.output.count("continuing without asking") == 2  # charter, then retrieve
+
+
+# --- a search that finds nothing --------------------------------------------
+
+
+async def test_a_run_that_retrieves_no_papers_fails_instead_of_emitting_a_bundle(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every node after search is a well-behaved no-op on an empty list, so a run that
+    found nothing used to reach the end and print `complete ... bundle valid` over eight
+    empty topics. That is the blank-paper defect again one level up: the tool reporting
+    success for work it did not do.
+
+    It happened for real. Query planning failed, the deterministic fallback anchored on
+    a four-word `population` as an exact phrase, PubMed matched it zero times, and all
+    nine queries came back empty.
+    """
+    with pytest.raises(RuntimeError, match="no papers retrieved"):
+        await full_run(settings_factory, tmp_path, monkeypatch, finds_nothing=True)
+
+
+async def test_a_dry_run_that_finds_nothing_is_still_a_finished_dry_run(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dry run exists to report what the queries would retrieve, and "nothing" is a
+    finding it is supposed to be able to deliver rather than crash on."""
+    run = await dry_run(
+        settings_factory,
+        tmp_path,
+        monkeypatch,
+        charter=charter_for(),
+        fake=FakeNCBI(finds_nothing=True),
+    )
+
+    assert "0" in run.output
 
 
 # --- --vocab ----------------------------------------------------------------

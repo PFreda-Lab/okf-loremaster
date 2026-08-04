@@ -33,8 +33,10 @@ from okf_loremaster.schemas import Charter, ExecutedQuery, PlannedQuery, QueryPl
 
 __all__ = [
     "ALL_FIELDS",
+    "MAX_ANCHOR_PHRASE_WORDS",
     "MAX_GAP_TERMS",
     "MAX_PHRASE_WORDS",
+    "anchor",
     "deterministic_plan",
     "executed",
     "gap_plan",
@@ -52,6 +54,12 @@ ALL_FIELDS = "[All Fields]"
 # A phrase search on a long string finds nothing: PubMed matches it verbatim. Four words
 # is about where a concept ends and a sentence begins.
 MAX_PHRASE_WORDS = 4
+
+# Content words, past which an anchor stops being searched as an exact phrase. Lower
+# than `MAX_PHRASE_WORDS` on purpose: an anchor is ANDed into *every* query in a plan,
+# so it is the one clause whose over-precision costs the whole run rather than one
+# query. See `anchor` for what a four-word anchor cost.
+MAX_ANCHOR_PHRASE_WORDS = 3
 
 # Concepts ORed into one gap query. Past this the clause matches on the weakest term in
 # it, and a topic gets refilled with whatever that term happened to catch.
@@ -108,6 +116,40 @@ def tiab(text: str) -> str:
     built to capture. MeSH enters later, as a ranking signal.
     """
     return f"{phrase(text)}[tiab]"
+
+
+def anchor(text: str) -> str:
+    """One of the charter's anchor concepts, as a clause that can actually match.
+
+    `population` and `outcome` are written to be read by a person — a clause of four
+    or five words naming who was studied — and an exact-phrase search for a description
+    matches nothing, because no abstract prints the description. Measured against
+    PubMed on 2026-08-04, one charter's four-word population:
+
+        as an exact phrase                        0 hits
+        as its words, ANDed                   1,881 hits
+
+    Zero, and this clause is ANDed into every query the fallback plan builds, so all
+    nine of them returned nothing, the run retrieved no papers at all, and it still
+    emitted a bundle and called it valid. The measurement is in `Build_Progress.md`
+    with the terms spelled out; naming them here would put one project's subject in
+    the source of a tool meant for any of them.
+
+    A short anchor stays an exact phrase, which is what makes it precise. A long one
+    keeps every word the charter chose and stops insisting they be adjacent.
+    """
+    words = list(
+        dict.fromkeys(
+            word.lower()
+            for word in _WORD.findall(text)
+            if word.lower() not in _STOPWORDS and len(word) > 2
+        )
+    )
+    if not words:
+        return ""
+    if len(words) <= MAX_ANCHOR_PHRASE_WORDS:
+        return tiab(text)
+    return "(" + " AND ".join(f"{word}[tiab]" for word in words) + ")"
 
 
 def or_group(terms: list[str]) -> str:
@@ -171,7 +213,7 @@ def deterministic_plan(charter: Charter, *, max_queries: int = 12) -> QueryPlan:
     if not anchors:
         anchors = keyphrases(charter.task or charter.prompt)[:2]
 
-    base = " AND ".join(tiab(a) for a in anchors)
+    base = " AND ".join(clause for clause in (anchor(a) for a in anchors) if clause)
     queries: list[PlannedQuery] = []
 
     if base:

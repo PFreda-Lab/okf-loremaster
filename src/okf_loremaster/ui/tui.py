@@ -22,11 +22,13 @@ the run id it was writing under is the one `--resume` wants. The id is taken off
 from __future__ import annotations
 
 import asyncio
+import io
 from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from rich.console import RenderableType
+from rich.console import Console, RenderableType
 from rich.table import Table
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -50,7 +52,7 @@ from okf_loremaster.events import (
 from okf_loremaster.graph.build import NODES
 from okf_loremaster.llm.router import format_cost
 from okf_loremaster.review import Signoff
-from okf_loremaster.run import RunInterrupted, RunOptions, build_run
+from okf_loremaster.run import TRANSCRIPT_FILENAME, RunInterrupted, RunOptions, build_run
 from okf_loremaster.schemas import Charter, ConceptRecord, VerificationSummary
 from okf_loremaster.ui.pauses import PauseDecision, charter_view, retrieve_view
 from okf_loremaster.ui.review import signoff_caption, signoff_view
@@ -227,7 +229,15 @@ class LoremasterApp(App[None]):
     #dialog-keys { height: auto; text-align: center; }
     """
 
-    BINDINGS: ClassVar[list[BindingType]] = [Binding("q", "stop", "quit")]
+    # Selection is not added here, it is *advertised* here. Textual has selected text on
+    # drag and copied it on ctrl+c / cmd+c since 7.0, but it binds that with `show=False`,
+    # so a full-screen app looks like a screenshot of a log rather than a log. The whole
+    # point of the log pane is that a warning can be pasted into a bug report. A second,
+    # visible binding on the same action puts it in the footer where it can be found.
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("q", "stop", "quit"),
+        Binding("c", "screen.copy_text", "copy selection"),
+    ]
 
     def __init__(
         self,
@@ -262,6 +272,7 @@ class LoremasterApp(App[None]):
         self._warnings = 0
         self._errors = 0
         self._progress: tuple[int, int] | None = None
+        self._transcript: list[RenderableType] = []
 
     # --- layout ------------------------------------------------------------
 
@@ -278,6 +289,20 @@ class LoremasterApp(App[None]):
         self.sub_title = self._options.prompt or str(self._options.charter_path or "")
         self._refresh_nodes()
         self._refresh_meter()
+        # Something on screen before the first event. Opening the checkpoint, building
+        # the clients and resolving the models all happen before `RunStarted`, and a
+        # full-screen app that shows an empty log for that whole stretch reads as hung
+        # rather than as starting.
+        self._write(
+            Text.from_markup(
+                "[dim]starting — opening the checkpoint and building the clients[/dim]"
+            )
+        )
+        self._write(
+            Text.from_markup(
+                "[dim]drag to select · c or ctrl+c copies · q stops and checkpoints[/dim]"
+            )
+        )
         # `exit_on_error=False` because a failed run is a result to be reported, not a
         # crash: the exception is stored and re-raised by the caller once the app closes.
         self._worker = self.run_worker(self._drive(), name="build", exit_on_error=False)
@@ -303,6 +328,8 @@ class LoremasterApp(App[None]):
         except Exception as exc:
             self.error = exc
             self._write(Text.from_markup(f"[red]FATAL[/red] {type(exc).__name__}: {exc}"))
+        if self.outcome is not None:
+            self._save_transcript(self.outcome[1])
         self._done = True
         self._refresh_meter()
 
@@ -381,6 +408,11 @@ class LoremasterApp(App[None]):
                 self._progress = None
                 self._status[event.node] = RUNNING
                 self._refresh_nodes()
+                # In the log as well as in the pipeline pane. The pane says which node is
+                # running; the log is what gets read top to bottom afterward, and a node
+                # that only ever appears once it has finished leaves the slow ones — the
+                # charter especially — looking like nothing is happening.
+                self._write(Text.from_markup(f"[dim]->[/dim] {event.node}"))
 
             case NodeFinished():
                 self._progress = None
@@ -401,11 +433,17 @@ class LoremasterApp(App[None]):
                     if event.current is not None and event.total is not None
                     else None
                 )
-                if self._progress is not None:
-                    current, total = self._progress
+                counted = self._progress
+                if counted is not None:
+                    current, total = counted
                     self._detail[event.node] = f"{current}/{total}"
                     self._refresh_nodes()
-                if self._options.verbose:
+                # A progress event with a counter is a tick, and belongs in the pipeline
+                # pane where it overwrites itself. One without a counter is a node saying
+                # what it is about to do — "embedding with <model>", "citation metrics for
+                # 1,310 papers" — which is exactly what someone waiting wants to read, and
+                # there are fewer than ten of them in a whole run.
+                if counted is None or self._options.verbose:
                     self._write(
                         Text.from_markup(f"[dim]   {event.node}: {event.message}[/dim]")
                     )
@@ -444,6 +482,25 @@ class LoremasterApp(App[None]):
 
     def _write(self, line: RenderableType) -> None:
         self.query_one("#log", RichLog).write(line)
+        # Kept as well as shown. Selecting text on screen is one way to get a warning
+        # into a bug report; a file you can `cat` is the way that does not depend on the
+        # terminal honoring a clipboard escape, and it keeps the lines the log pane has
+        # already scrolled past.
+        self._transcript.append(line)
+
+    def _save_transcript(self, directory: Path) -> None:
+        """The log pane, as plain text, beside the bundle it describes.
+
+        No color and no markup: this is written to be pasted somewhere else.
+        """
+        buffer = io.StringIO()
+        Console(file=buffer, width=100, no_color=True, force_terminal=False).print(
+            *self._transcript, sep="\n"
+        )
+        # A run whose output is on disk is not a failure because its transcript could not
+        # be. The lines are still on screen either way.
+        with suppress(OSError):
+            (directory / TRANSCRIPT_FILENAME).write_text(buffer.getvalue(), encoding="utf-8")
 
     def _refresh_nodes(self) -> None:
         table = Table.grid(padding=(0, 1))

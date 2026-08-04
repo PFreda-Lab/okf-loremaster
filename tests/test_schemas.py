@@ -6,6 +6,7 @@ would otherwise get wrong invisibly.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime
 
 import pytest
@@ -695,6 +696,44 @@ def test_a_missing_required_field_raises_with_a_field_level_hint() -> None:
         parse_model('{"include": true}', ScreenVerdict)
     assert "pmid" in caught.value.hint
     assert "JSON" in caught.value.hint
+
+
+def test_an_answer_serialized_into_a_string_is_decoded_rather_than_rejected() -> None:
+    """The forced tool call's other trick: hand back the whole object as *text*, under
+    its own field name. Reproduced twice on the balanced model minutes apart:
+
+        {"queries": "{\\"queries\\": [ ... ]}"}
+
+    It cost a run. Planning failed, the deterministic fallback took over, and the
+    fallback's anchor matched nothing — so nine queries returned zero hits and an empty
+    bundle was emitted and called valid.
+    """
+    from okf_loremaster.schemas.candidates import QueryPlan
+
+    inner = json.dumps({"queries": [{"term": "a[tiab]", "topic": "t", "rationale": "r"}]})
+
+    plan = parse_model(json.dumps({"queries": inner}), QueryPlan)
+
+    assert plan.terms == ("a[tiab]",)
+
+
+def test_a_single_field_handed_back_as_json_text_is_decoded_in_place() -> None:
+    """The partial version of the same fault: the object is fine, one field is text."""
+    from okf_loremaster.schemas.candidates import QueryPlan
+
+    reply = json.dumps(
+        {"queries": json.dumps([{"term": "b[tiab]", "topic": "t", "rationale": "r"}])}
+    )
+
+    assert parse_model(reply, QueryPlan).terms == ("b[tiab]",)
+
+
+def test_a_string_that_is_not_json_is_left_alone_and_still_fails() -> None:
+    """The repair must not turn a genuinely wrong reply into a confident one."""
+    from okf_loremaster.schemas.candidates import QueryPlan
+
+    with pytest.raises(SchemaError, match="queries"):
+        parse_model('{"queries": "I could not build a plan"}', QueryPlan)
 
 
 def test_the_failure_message_names_the_field_and_not_just_a_count() -> None:

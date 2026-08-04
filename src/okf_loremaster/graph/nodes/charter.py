@@ -87,6 +87,11 @@ async def _draft(deps: Deps, prompt: str) -> Charter:
     is wrong in kind rather than in detail, and asking a third time is just spending.
     """
     assert deps.router is not None  # guarded by the caller; a dry run never gets here
+    # Said before the call, not after. This is one reasoning-tier request for a long
+    # reply, so it is the longest stretch of a run in which nothing else happens — and
+    # it is the first, which is when a watcher has the least evidence that anything is
+    # working at all.
+    deps.progress(NODE, f"drafting the charter with {_model(deps)}")
     messages = [
         {"role": "system", "content": CHARTER_SYSTEM},
         {"role": "user", "content": charter_user(prompt)},
@@ -146,8 +151,17 @@ def _apply_overrides(charter: Charter, *, prompt: str, deps: Deps) -> Charter:
 def _generated_by(deps: Deps) -> str:
     if deps.router is None:
         return "okf-loremaster/charter/none"
+    return f"okf-loremaster/charter/{_model(deps)}"
+
+
+def _model(deps: Deps) -> str:
+    """The reasoning model's name, or `unknown` — never an exception.
+
+    Both callers are cosmetic: one labels a progress line, the other stamps provenance.
+    A misconfigured tier is worth failing a run over, but not here and not first; the
+    router raises it with the variable named, which is the error worth seeing.
+    """
     try:
-        model = deps.settings.model_for(Role.REASONING)
+        return str(deps.settings.model_for(Role.REASONING))
     except Exception:
-        model = "unknown"
-    return f"okf-loremaster/charter/{model}"
+        return "unknown"

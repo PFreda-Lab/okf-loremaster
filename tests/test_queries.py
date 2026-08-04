@@ -80,6 +80,45 @@ def test_a_keyphrase_is_capped_so_the_phrase_search_can_match() -> None:
     assert all(len(p.split()) <= queries.MAX_PHRASE_WORDS for p in queries.keyphrases(long_run))
 
 
+def test_a_short_anchor_stays_an_exact_phrase() -> None:
+    """Precision is the whole point of a phrase search, where a phrase is what a paper
+    would actually print."""
+    assert queries.anchor("viral suppression") == '"viral suppression"[tiab]'
+
+
+def test_a_long_anchor_asks_for_the_words_and_not_their_order() -> None:
+    """A charter writes `population` and `outcome` for a person to read, and an exact
+    phrase search for a description matches nothing at all. Measured against PubMed on
+    2026-08-04: the phrase below returned 0 and the ANDed words returned 1,881.
+
+    An anchor is ANDed into every query in a plan, so its over-precision does not cost
+    one query, it costs the run. This one did: nine queries, zero hits, no papers
+    retrieved, and a bundle emitted over eight empty topics that called itself valid.
+    """
+    built = queries.anchor("patients initiating antiretroviral therapy")
+
+    assert built.startswith("(") and " AND " in built
+    assert '"patients initiating antiretroviral therapy"' not in built
+    for word in ("patients", "initiating", "antiretroviral", "therapy"):
+        assert f"{word}[tiab]" in built, "every word the charter chose is still required"
+
+
+def test_an_anchor_of_nothing_but_stopwords_is_empty_rather_than_broken_syntax() -> None:
+    assert queries.anchor("the and of") == ""
+
+
+def test_a_plan_never_anchors_on_a_phrase_that_cannot_match() -> None:
+    """The regression that matters, at the level the run actually failed."""
+    plan = queries.deterministic_plan(
+        charter(population="patients initiating antiretroviral therapy",
+                outcome="viral suppression")
+    )
+
+    assert plan.queries
+    for query in plan.queries:
+        assert '"patients initiating antiretroviral therapy"' not in query.term
+
+
 # --- the deterministic plan -------------------------------------------------
 
 

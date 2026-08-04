@@ -89,6 +89,21 @@ async def search_node(state: RunState, deps: Deps) -> dict[str, Any]:
             + (f", {suspect} suspect" if suspect else "")
         )
 
+    if not candidates and not state.get("dry_run"):
+        # A run that retrieved nothing has nothing to screen, curate, extract or write,
+        # and every one of those nodes is a well-behaved no-op on an empty list — so the
+        # graph used to sail to the end and emit a bundle of eight empty topics that
+        # passed validation and printed `complete ... bundle valid`. An empty answer
+        # presented as a finished one is the same defect as a blank paper presented as a
+        # read one: the tool reporting success for work it did not do. It stops here,
+        # while the cause is still on screen and before the run spends anything more.
+        raise RuntimeError(
+            "no papers retrieved: every query returned zero hits, so there is nothing "
+            "to build a bundle from. The queries as PubMed ran them are in the log "
+            "above — the usual cause is an over-long `population` or `outcome` in the "
+            "charter being searched as an exact phrase"
+        )
+
     return {
         "plan": plan,
         "executed": [*prior_executed, *executed],

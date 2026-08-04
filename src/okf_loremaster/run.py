@@ -56,6 +56,7 @@ if TYPE_CHECKING:  # imported lazily below; litellm and httpx are slow to import
     from okf_loremaster.ui.pauses import Pause
 
 __all__ = [
+    "TRANSCRIPT_FILENAME",
     "PastRun",
     "RunInterrupted",
     "RunOptions",
@@ -69,6 +70,11 @@ __all__ = [
 ]
 
 CHARTER_FILENAME = "charter.yaml"
+
+# The full-screen renderer's log pane, kept as plain text in the run folder. Named here
+# rather than in `ui/tui.py` so the CLI can point at it without importing Textual, which
+# is an optional extra.
+TRANSCRIPT_FILENAME = "run.log"
 
 # How many past runs `okf-loremaster runs` shows. A resumable run is one somebody
 # remembers starting, so a long tail of them is history rather than a work queue.

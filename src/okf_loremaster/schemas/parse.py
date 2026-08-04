@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from typing import Any, TypeVar
 
 from pydantic import ValidationError
@@ -177,10 +178,56 @@ def _field_names(model_cls: type[Model]) -> set[str]:
     return names
 
 
+def _decoded(value: Any) -> Any:
+    """`value` parsed, when it is a string carrying JSON and nothing else."""
+    if not isinstance(value, str) or value.strip()[:1] not in ("[", "{"):
+        return None
+    try:
+        return json.loads(value)
+    except ValueError:
+        return None
+
+
+def _restrung(payload: Any, model_cls: type[Model]) -> Iterator[Any]:
+    """Candidates for a reply whose structure came back as text instead of as JSON.
+
+    The same forced tool call that nests an envelope sometimes serializes the object
+    it was asked for and hands back the *string*. Reproduced on the balanced model
+    2026-08-04, twice minutes apart on the same charter:
+
+        {"queries": "{\\"queries\\": [{\\"topic\\": \\"\\", \\"term\\": \\"...\\"}]}"}
+
+    The whole plan, correct, inside a string, under its own field name. It cost a
+    run: planning failed, the deterministic fallback took over, the fallback's anchor
+    matched nothing, and an empty bundle came out calling itself valid.
+
+    Only reached once honest validation has already failed, so a reply that was right
+    the first time never comes near this.
+    """
+    if not isinstance(payload, dict):
+        return
+    if len(payload) == 1:
+        ((_, only),) = payload.items()
+        inner = _decoded(only)
+        if inner is not None:
+            yield _unwrap(inner, model_cls)
+    swapped = {
+        key: value if (parsed := _decoded(value)) is None else parsed
+        for key, value in payload.items()
+    }
+    if swapped != payload:
+        yield swapped
+
+
 def _validate(payload: Any, model_cls: type[M], text: str) -> M:
     try:
         return model_cls.model_validate(payload)
     except ValidationError as exc:
+        for candidate in _restrung(payload, model_cls):
+            try:
+                return model_cls.model_validate(candidate)
+            except ValidationError:
+                continue
         raise SchemaError(
             f"reply did not match {model_cls.__name__}: "
             f"{exc.error_count()} problem(s) — {_problems(exc)}",

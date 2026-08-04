@@ -209,10 +209,11 @@ async def full_run(
     *,
     scripted: ScriptedLLM | None = None,
     charter: Charter | None = None,
+    finds_nothing: bool = False,
     **overrides: Any,
 ) -> Run:
     model = scripted if scripted is not None else scripted_run()
-    fake = FakeNCBI()
+    fake = FakeNCBI(finds_nothing=finds_nothing)
 
     def router(settings: Any, bus: Any) -> Router:
         return Router(settings, bus, completion_fn=model.completion())
