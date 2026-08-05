@@ -16,7 +16,11 @@ end it asks what you want to keep: the OKF corpus, the vector store, or both.
 
 Under the hood it is an agentic system, and a deliberately small one: **five agents, each with a
 single kind of judgment to make**, wrapped in ordinary code that checks their work and does
-everything that is not a judgment. [The roster is below](#the-roster).
+everything that is not a judgment.
+
+[What you get](#what-you-get) · [How a run works](#how-a-run-works) ·
+[Install](#install) · [Configure](#configure) · [Running it](#running-it) ·
+[Why OKF](#why-open-knowledge-format) · [The downstream contract](#what-downstream-can-rely-on)
 
 ---
 
@@ -97,31 +101,27 @@ Five things about this document carry the design:
 
 **The quote under the table** reproduces the sentence each effect size came from, **exactly as
 published** — the mangled `=< 0.01` included. A tidied quote cannot be checked against the source,
-so it is worse than no quote. A number the source text does not contain is stripped by a
-deterministic pass that downgrades the row's confidence and logs a warning; the run continues.
+so it is worse than no quote. A number the text does not contain is stripped by a deterministic
+pass that lowers the row's confidence and logs a warning; the run continues.
 
-**`# Null or non-significant findings` is never omitted.** A paper reporting none says so. A
-validator inserts the placeholder, so the section cannot go missing by accident — "we looked and
-found nothing" is evidence, and it is the part of the literature nobody else writes down.
+**`# Null or non-significant findings` is never omitted.** A validator inserts the placeholder when
+a paper reports none, so the section cannot go missing by accident. "We looked and found nothing"
+is evidence, and it is the part of the literature nobody else writes down.
 
-**Vocabulary hints pair a concept with its codes.** The variable in the paper's own words, then any
-codes that paper printed for it, in whatever system it used. Most papers name variables and code
-none of them, so a concept on its own is the normal case rather than a gap. Nothing is looked up or
-inferred: every code is searched for in the source text by the same deterministic pass that checks
-the numbers, and one the paper did not print is dropped. The concept stays — the paper did name
-that variable. If the code is not on the page, it is not in the bundle.
+**Vocabulary hints pair a concept with its codes** — the variable in the paper's own words, then
+any codes that paper printed for it, in whatever system it used. Nothing is looked up or inferred:
+a code the paper did not print is dropped and the concept kept, because the paper did name that
+variable. Most papers name variables and code none of them, so a bare concept is the normal case
+rather than a gap.
 
-**`Confidence` and `Strength` are two columns because they are two questions.** Confidence is
-whether we read the row correctly — it is what the numeric check downgrades when a figure is not in
-the source text. Strength is how much weight the study behind it can carry: design, sample size,
-whether the estimate held anything else constant, and how much of the paper we got to read, weighted
-into a score and banded into `strong` / `moderate` / `limited`. A well-read row from a forty-person
-survey is `high` and `limited`, and a reader shown only one of the two columns draws the wrong
-conclusion from either. The score is computed in code from fields the extractor recorded, never
-asked of a model — so it is reproducible, the weights can change without re-reading a paper, and
-what it had nothing to go on is named rather than averaged over. Sample size is scored against the
-scale in the charter, because a few hundred people is a large cohort in one literature and a pilot
-in another.
+**`Confidence` and `Strength` are two questions.** Confidence is whether we read the row correctly,
+and it is what the numeric check downgrades. Strength is how much weight the study behind it can
+carry — design, sample size, whether the estimate held anything else constant, and how much of the
+paper we got to read, banded into `strong` / `moderate` / `limited`. A well-read row from a
+forty-person survey is `high` and `limited`, and either column alone misleads. Strength is computed
+in code from fields the extractor recorded, never asked of a model, so it is reproducible and the
+weights can change without re-reading a paper. Sample size is scored against the charter's scale,
+because a few hundred people is a large cohort in one literature and a pilot in another.
 
 **`text_basis` and `license` are per document.** Most of PubMed is abstract-only under publisher
 copyright and a minority is open access. Recording which is which is what stops a consumer from
@@ -154,67 +154,61 @@ Counted as one: *Short sleep duration* · *short sleep durations*
 ````
 
 **Every line is an address and nothing else.** `paper` and `row` are the document to open and the
-`#` value to find once it is open; the rest of the row is there to help you decide whether to make
-the trip. Nothing appears here that is not already written in a paper's own file — an index you can
-read *instead of* the corpus is one that will be read instead of the corpus, and then the quotes,
-the operationalizations and the licenses stop being opened at all.
+`#` to find once it is open; the rest helps you decide whether to make the trip. Nothing is here
+that is not already in a paper's own file — an index you can read *instead of* the corpus is one
+that will be, and then the quotes, the operationalizations and the licenses stop being opened.
 
 **It is not ranked and it is not scored.** A number combining how good a study is with how often
-something turns up answers neither question, and frequency in a curated corpus is a measurement of
-the curation: diversification and the charter's per-topic floors decide how many times a predictor
-can appear long before the literature gets a say. So the order is how many papers you would have to
-open, and the counts are navigational.
+something turns up answers neither question, and frequency in a curated corpus measures the
+curation: diversification and the charter's per-topic floors decide how often a predictor can appear
+long before the literature gets a say. So the order is how many papers you would have to open.
 
-**A predictor is grouped with its outcome, and the merging is timid.** One paper reporting one
-exposure against six outcomes in six directions is six coherent findings; collapsed onto the
-exposure it reads as a paper arguing with itself. `⚠ contested` means papers disagree about the sign
-of *one* relationship — a null beside an effect is not that. Two spellings become one entry only on
-an exact normalized match, or on a qualifier that narrows a phrase without flipping it — so
-`short sleep duration` and `long sleep duration` stay two entries rather than becoming one U-shaped
-contradiction. Every merge prints the forms it absorbed, so you can disagree with it.
+**A predictor is grouped with its outcome, and the merging is timid.** One exposure against six
+outcomes in six directions is six coherent findings; collapsed onto the exposure it reads as a paper
+arguing with itself. `⚠ contested` means papers disagree about the sign of *one* relationship — a
+null beside an effect is not that. Two spellings merge only on an exact normalized match, or on a
+qualifier that narrows a phrase without flipping it, so `short sleep duration` and `long sleep
+duration` stay two entries rather than one U-shaped contradiction. Every merge prints the forms it
+absorbed, so you can disagree with it.
 
 ### Where the corpus came from
 
 A curated set of papers is an argument about the literature, and an argument whose search you cannot
-inspect is one you have to take on trust. `search.md` is written so you do not have to. Every query
-appears with what it was reaching for, the term exactly as it was sent, PubMed's own expansion of
-it, and what came back:
+inspect is one you have to take on trust. `search.md` is written so you do not have to — every query
+with what it was reaching for, the term exactly as sent, what PubMed made of it, and what came back:
 
 ````markdown
-### 2. Anesthesia Technique and Intraoperative Management
+### 5. Anesthetic Technique and Intraoperative Physiology
 
 **Why** — Intraoperative anesthetic depth as a modifiable exposure.
 
 **Sent**
 
 ```text
-("depth of anesthesia"[tiab] AND "postoperative delirium"[tiab]) AND eng[la] AND 2015:3000[dp]
+("depth of anesthesia"[tiab] AND "postoperative delirium"[tiab]) AND eng[la]
 ```
 
-**PubMed ran**
-
-```text
-"depth of anesthesia"[Title/Abstract] AND "postoperative delirium"[Title/Abstract]
-AND (english[Filter]) AND 2015:3000[Date - Publication]
-```
+**PubMed ran** — the same term, with each field tag written out in full. Nothing was
+substituted, expanded or reinterpreted.
 
 **Result** — 438 papers matched. The first 200 were retrieved (the cap is 200); the other 238
 were never seen by this run.
 ````
 
-**The expansion is there because PubMed will not tell you when a query is wrong.** A field tag it
-does not recognize is not rejected — `x[nosuchfield]` is quietly rewritten to `"x"[All Fields]`,
-matches far more papers than intended, and comes back with an empty error list. The only evidence
-is `query_translation`, so it is recorded for every query rather than for the odd-looking ones, and
-a query whose expansion looks nothing like its term is marked **suspect** on the page.
+**PubMed will not tell you when a query is wrong.** A field tag it does not recognize is not
+rejected — `x[nosuchfield]` is quietly rewritten to `"x"[All Fields]`, matches far more papers than
+intended, and comes back with an empty error list. So every expansion is checked. When it only
+writes out tags the term already carried, you get the one-line note above. When PubMed reached for
+a field or a MeSH heading the term never asked for, the expansion is printed in full and the query
+is marked **suspect** — the case the check exists for, and the only one worth the space.
 
 **It also says what will not reproduce.** Retrieval is capped per query and ordered by PubMed's
 relevance ranking, which is recomputed as the index grows — so a query that matched more than the
 cap can return a different slice months later, while one that came back whole is exact. `search.md`
-counts both kinds and says which is which, because a methods section that implies more repeatability
-than it has is worse than one that admits the limit.
+counts both kinds, because a methods section that implies more repeatability than it has is worse
+than one that admits the limit.
 
-`log.md` still carries the same queries in two lines each, alongside the funnel, the cost and the
+`log.md` carries the same queries in two lines each, alongside the funnel, the cost and the
 warnings. That file is for finding out what a run did; this one is for running the search again.
 
 ---
@@ -227,64 +221,51 @@ The stages are nodes of a [LangGraph](https://langchain-ai.github.io/langgraph/)
 the state is checkpointed to SQLite as each one finishes. That is what makes a stopped run
 resumable rather than merely restartable, and it is why `--resume` needs nothing but a run id.
 
-### The roster
+### The five agents, and what they run on
 
-Five agents. Each has its own prompt, its own output schema, and its own model tier, and each is
-asked for exactly one kind of judgment. Nothing else in a run calls a model at all.
+Each has its own prompt, its own output schema, and one kind of judgment to make. Nothing else in a
+run calls a model.
 
-| Agent | Node | Tier | Calls | The judgment it is asked for |
+| Agent | Node | Calls | Tier | The judgment it is asked for |
 |---|---|---|---|---|
-| **Charter Writer** | `charter` | REASONING | 1 | the population, the outcome, the inclusion rules, and the topics the corpus will be filed under |
-| **Query Planner** | `search` | BALANCED | 1 per round | which concepts to search for, and how to combine them |
-| **Screener** | `screen` | FAST | 1 per pooled paper | keep or drop this abstract, and which topic it belongs to |
-| **Curator** | `curate` | BALANCED | 1 per topic | which of the kept papers a topic should hold, and what it is still missing |
-| **Reader** | `extract` | BALANCED | 1 per kept paper | what this paper reports — predictor rows, null findings, vocabulary hints |
+| **Charter Writer** | `charter` | 1 | REASONING | the population, the outcome, the inclusion rules, and the topics the corpus will be filed under |
+| **Query Planner** | `search` | 1 per round | BALANCED | which concepts to search for and how to combine them — code appends the language and date filters afterward, so every query carries identical ones |
+| **Screener** | `screen` | 1 per pooled paper | FAST | keep or drop this abstract, and which topic it belongs to |
+| **Curator** | `curate` | 1 per topic | BALANCED | which of the kept papers a topic should hold, and what it is still missing |
+| **Reader** | `extract` | 1 per kept paper | BALANCED | what this paper reports — predictor rows, null findings, vocabulary hints |
 
-**The Charter Writer** goes first and matters most. Everything downstream is scoped by what it
-decides, and no later check catches a wrong population or a badly drawn set of topics. It never
-paraphrases your question back at you: a charter records what was asked for, and a paraphrase of a
-request is not the request.
+The tiers are named for the job, not for a vendor. You bind each to whatever model you like; nothing
+in the code names a provider.
 
-**The Query Planner** proposes concepts and boolean structure and stops there — the language and
-date filters are added afterward by code, so every query in a plan carries identical ones. It is
-called again, for one topic at a time, when the Curator reports a gap.
+| Tier | Set in `.env` | What it wants | Examples |
+|---|---|---|---|
+| **FAST** | `OKF_LOREMASTER_MODEL_FAST` | the cheapest model that can follow a rubric | Claude Haiku, GPT Luna |
+| **BALANCED** | `OKF_LOREMASTER_MODEL_BALANCED` | a middle model — what keeps an extraction honest is code, not model size | Claude Sonnet, GPT Terra |
+| **REASONING** | `OKF_LOREMASTER_MODEL_REASONING` | the most capable you have; it is one call per run | Claude Opus, GPT Sol |
 
-**The Screener** is the highest-volume agent by a wide margin and has the narrowest job. One paper
-per call, never a batch: forty abstracts in one call is cheaper per token, but it returns forty
-verdicts whose alignment to the input is the model's to get right, and one dropped row shifts every
-later verdict onto the wrong paper — silently, in the one stage nothing downstream can
-sanity-check. A wrong call here is recoverable, because the Curator sees the whole kept set after.
+The examples name families rather than versions, which turn over quickly. `.env.example` carries
+exact ids to start from.
 
-**The Curator** is the only point in a run where a topic is seen whole, which is what makes "these
-four papers report the same result from the same cohort" noticeable at all. It judges; then
-`curation.enforce_bounds` applies the ceiling, the floor and the global target. Splitting it that
-way is what makes topic sizes reproducible across runs even though the judgment behind them is not.
+**The Charter Writer matters most.** Everything downstream is scoped by what it decides, and no
+later check catches a wrong population or a badly drawn set of topics.
 
-**The Reader** makes one call per kept paper — two hundred against every other agent's handful — so
-whatever it is bound to sets the price of a run. What keeps it honest is not its tier but the code
-that runs after it: every number is looked for in the text it actually read, every quote is sliced
-out of that text, and anything not found is removed and the row's confidence lowered. That check
-does not improve on a more expensive model, because a number the paper does not contain fails it
-either way.
+**The Screener never batches.** Forty abstracts in one call is cheaper per token, but one dropped
+row shifts every later verdict onto the wrong paper — silently, in the one stage nothing downstream
+can sanity-check.
 
-**Everything else is ordinary code and behaves the same way every time**: deduplication, ranking,
-MMR diversification, license logic, the numeric re-check, `predictors.md`, file writing, validation,
-embedding and indexing. There is no agent that supervises the others, and no agent decides when a
-run ends — the graph does.
+**The Curator is the only point where a topic is seen whole**, which is what makes "these four
+papers report the same result from the same cohort" noticeable at all. It judges; code then applies
+the ceiling, the floor and the global target, which is what makes topic sizes reproducible even
+though the judgment behind them is not.
 
-### Binding the tiers
+**The Reader sets the price of a run** — one call per kept paper against every other agent's
+handful. What keeps it honest is not its tier but the code after it: every number is looked for in
+the text it actually read, every quote sliced out of that text, anything not found removed and the
+row's confidence lowered. A more expensive model does not pass that check any better.
 
-The three tiers are named for the job, not for a vendor: you bind each to whatever model you like in
-`.env`, and nothing in the code names a provider. The examples below name families rather than
-versions, which turn over quickly; `.env.example` carries a set of exact ids to start from.
-
-- **FAST** — the Screener, and nothing else. It wants the cheapest model that can follow a rubric.
-  Examples: Claude Haiku, GPT Luna.
-- **BALANCED** — the Query Planner, the Curator and the Reader. The middle tier rather than the top
-  one because what keeps an extraction honest is code, not model size. Examples: Claude Sonnet,
-  GPT Terra.
-- **REASONING** — the Charter Writer, once. A single call, which makes the most capable model you
-  have also the cheapest place to spend. Examples: Claude Opus, GPT Sol.
+**Everything else is ordinary code**: deduplication, ranking, MMR diversification, license logic,
+the numeric re-check, `predictors.md`, file writing, validation, embedding and indexing. No agent
+supervises another, and no agent decides when a run ends — the graph does.
 
 ### The graph
 
@@ -389,8 +370,8 @@ The install is editable and records this directory's absolute path. **If the fol
 okf-loremaster init          # writes .env from the template, then checks the environment
 ```
 
-Set an API key and a model for each of the three tiers (`OKF_LOREMASTER_MODEL_FAST`, `_BALANCED`,
-`_REASONING`). Two more are worth setting:
+Set an API key, and a model for each of the three tiers — see
+[the table above](#the-five-agents-and-what-they-run-on). Two more are worth setting:
 
 - `OKF_LOREMASTER_NCBI_API_KEY` — free from NCBI, raises the shared rate limit from 3/s to 10/s.
 - `HF_HOME` — a shared Hugging Face cache so the embedding model downloads once. **Keep it out of
@@ -454,21 +435,17 @@ a new one. The question comes off the charter too, so there is nothing to retype
 okf-loremaster build --charter bundles/first-attempt/charter.yaml -o second-attempt --tui
 ```
 
-Three things it is for. **Editing.** Stopping at the charter pause tells you to go and edit
-`charter.yaml`; this is how you feed the edited file back. **Comparing.** A charter is drafted by a
-model, so the same question asked twice gives two different runs — pinning the charter is the only
-way to change one thing and see what it did. **Saving.** A charter you are happy with is worth
-keeping; it is short, readable YAML, and it is the whole scope of a run in one file.
-
-Not combinable with `--resume`, which replays the charter its run was built with.
+It is for **editing** (the charter pause tells you to go edit the file; this is how you feed it
+back), for **comparing** (a model drafts the charter, so the same question asked twice gives two
+different runs — pinning it is the only way to change one thing and see what that did), and for
+**saving** a scope you liked, as short readable YAML. Not combinable with `--resume`, which replays
+its own run's charter.
 
 ### Stopping and resuming
 
 A run can be stopped at any point — Ctrl-C, a closed laptop, a declined pause — and picked back up
-later. Nothing is lost and nothing already paid for is bought twice.
-
-**Finding the run.** You need its id, which is the timestamp-shaped string like
-`20260804-111902-b537`. You do not have to have written it down:
+later. Nothing is lost and nothing already paid for is bought twice. You need the run's id, and you
+do not have to have written it down:
 
 ```bash
 okf-loremaster runs
@@ -483,30 +460,26 @@ run id                started       reached      question
 resume with  okf-loremaster build --resume 20260804-111902-b537  (the question is read back from the run)
 ```
 
-`reached` is the last stage that finished. `-n` shows more than the default ten.
-
-**Picking it back up.** The id is all you need — the question is read back out of the run, not
-retyped:
+`reached` is the last stage that finished; `-n` shows more than the default ten. The id is all you
+need to continue — the question is read back out of the run:
 
 ```bash
 okf-loremaster build --resume 20260804-111902-b537
 ```
 
-Every flag you gave the first time still applies where it still can, so pass `-o` again if you
-passed it before. A run resumes into the same output folder either way.
+Every flag you gave the first time still applies where it can, so pass `-o` again if you passed it
+before. A run resumes into the same output folder either way.
 
-**What it costs.** Stages that finished are not re-run at all — a run stopped after screening
-resumes at curation, and pays nothing for the search or the screening. Reading the papers is
-finer-grained than that: each paper is recorded as it comes back, so a run interrupted halfway
-through the reading resumes having kept every paper it already read. It reports what it skipped:
-`142 of 187 paper(s) were already read, and cost nothing`.
+**What it costs.** Finished stages are not re-run — a run stopped after screening resumes at
+curation and pays nothing for the search or the screening. Reading is finer-grained still: each
+paper is recorded as it comes back, so an interrupted run keeps every paper it already read, and
+says what it skipped (`142 of 187 paper(s) were already read, and cost nothing`). That same record
+makes rerunning cheap — ask the same question of the same papers in a brand new run and the reading
+is free. Change the question, or retrieve a longer full text, and they are read again: it is the
+request that is remembered, not the PMID.
 
-The same record is what makes rerunning cheap. Ask the same question of the same papers in a brand
-new run and the reading is free; change the question, or retrieve a longer full text, and those
-papers are read again, because it is the request that is remembered rather than the PMID.
-
-Runs are kept in a local cache directory — `okf-loremaster init` prints where. It holds run state,
-not bundles: deleting it loses the ability to resume, and nothing else.
+Runs live in a local cache directory — `okf-loremaster init` prints where. It holds run state, not
+bundles: deleting it loses the ability to resume, and nothing else.
 
 ---
 
@@ -519,39 +492,33 @@ keys that answer where a document came from (`sources`), what produced it (`gene
 stood behind it (`verified`). That is close to the whole of it. We target v0.2.
 
 **Why a format at all.** What comes out of a run is read by an LLM agent, and agents read markdown
-natively — no client library, no schema server, no version to negotiate. `cp -r` moves a bundle,
-`ls` and `cat` are a sufficient tool set, and the coupling to whatever consumes it is files on disk
-in both directions. A database would answer queries faster and be worse at everything else this
-corpus exists for, starting with a person being able to open one file and check it. Choosing a
-published convention over one of our own is what lets a consumer that has never heard of this
+natively — no client library, no schema server, no version to negotiate. `cp -r` moves a bundle and
+`ls` plus `cat` are a sufficient tool set. A database would answer queries faster and be worse at
+everything else this corpus exists for, starting with a person opening one file to check it. And a
+published convention, rather than one of our own, lets a consumer that has never heard of this
 project still walk the folder correctly.
 
-**Why this one.** Its three reserved keys happen to be the three questions a corpus of
-machine-extracted findings has to answer before it is worth anything. A model wrote every document
-here, so `generated` names the model and the node that called it. Every claim in it is somebody
-else's, so `sources` carries the PMID and the PubMed URL. And nobody has necessarily checked it, so
-`verified` is written only when a human signs off — OKF derives a document's trust tier from that
-key specifically, which makes *unverified* the default we get for free rather than a disclaimer we
-have to remember to write.
+**Why this one.** Its three reserved keys are the three questions a corpus of machine-extracted
+findings has to answer. A model wrote every document, so `generated` names the model and the node
+that called it. Every claim is somebody else's, so `sources` carries the PMID and the PubMed URL.
+Nobody has necessarily checked it, so `verified` is written only when a human signs off — OKF
+derives a document's trust tier from that key, which makes *unverified* a default we get for free
+rather than a disclaimer we have to remember.
 
-**How we use it.** As specified, plus flat keys of our own the spec does not define — `strength`,
-`strength_score`, `text_basis` — which a conforming reader ignores and one that knows them gets for
-free. The spec is permissive about that, and the section below is the contract we hold ourselves to
-on top of it.
+**How we use it.** As specified, plus flat keys of our own — `strength`, `strength_score`,
+`text_basis` — which a conforming reader ignores and one that knows them gets for free.
 
-**Nothing in a bundle asks to be believed on its own authority.** The same rule holds at two levels.
-`predictors.md` points into the corpus: every line is a filename and a row number, and nothing is on
-it that is not in a paper's own document, so an index that could be read *instead of* the papers
-never quietly becomes the papers. Each document then points one level further out — `sources` at the
-PubMed record, the quote under each table at the sentence the number came from, `text_basis` at how
-much of the paper was actually read. The external structure a bundle points into is PubMed itself;
-what we add is the summarization and the structure, never a replacement for the source. Every
-statement in the corpus has an address, and you can go to it.
+**Nothing in a bundle asks to be believed on its own authority.** `predictors.md` points into the
+corpus and holds nothing that is not in a paper's own document, so an index that could be read
+*instead of* the papers never quietly becomes the papers. Each document then points one level
+further out — `sources` at the PubMed record, the quote under each table at the sentence a number
+came from, `text_basis` at how much of the paper was read. What we add is summarization and
+structure, never a replacement for the source. Every statement has an address, and you can go to it.
 
-The one thing we do not do is reproduce the article. `license` records what the source reported,
-verbatim and never inferred, and `export_safe` says whether the document may leave. From a paper
-under publisher copyright, what crosses into the bundle is the quoted spans an extracted number came
-from, and nothing else.
+What we do not do is reproduce the article. `license` records what the source reported, verbatim and
+never inferred, and `export_safe` says whether the document may leave. From a paper under publisher
+copyright, what crosses into the bundle is the quoted spans an extracted number came from, and
+nothing else.
 
 ---
 
@@ -585,12 +552,10 @@ The word for a folder is **topic** in conversation and `domain` in frontmatter. 
 sits outside a `*.md` walk by design and carries one row per document.
 
 **`predictors.md` and `search.md` are things to look for, never things to expect.** A consumer that
-has never heard of either walks straight past: rule 2 keeps them out of every topic folder, rule 4
-keeps them out of search, and rule 8 means the `predictors:` and `search:` keys in the descriptor
-cost nothing to a reader that does not know them. One that does gets the corpus's cross-topic entry
-point and its provenance for free. They are the two files in the bundle with no `domain`, and
-neither can have one — they cut across every topic and sit in none of them, which the validator
-enforces rather than assumes.
+has never heard of either walks straight past, and one that knows them gets the corpus's cross-topic
+entry point and its provenance for free. They are the two files with no `domain`, and neither can
+have one — they cut across every topic and sit in none, which the validator enforces rather than
+assumes.
 
 `tests/test_afce_contract.py` re-implements a consumer from these rules — its own line parser, its
 own resolver, its own matching — and checks a finished bundle against it, rather than reading the
@@ -611,19 +576,15 @@ through **one shared limiter** because the limit is per IP across all of them, a
 PubMed or PMC web pages**. Set `OKF_LOREMASTER_NCBI_EMAIL` so NCBI can reach you, as their access
 policy asks.
 
-Each document records the license its source reported, verbatim and never inferred. Most PubMed
-records are abstracts under publisher copyright and are not redistributable — the normal case, not
-a failure.
-
 Every bundle carries a `stale_after` date, the digest of the charter it came from, the models that
-wrote it, and, with `--review`, who signed it off. OKF v0.2 derives its trust tier from `verified`
-specifically, so an unsigned bundle is *unverified* rather than merely unannotated.
+wrote it, and, with `--review`, who signed it off. Most PubMed records are abstracts under publisher
+copyright and are not redistributable — the normal case, not a failure.
 
 ---
 
 ## Status
 
-Runs end to end and writes a validated bundle. 1,579 tests, none of which touch the network.
+Runs end to end and writes a validated bundle. 1,581 tests, none of which touch the network.
 
 ```bash
 conda run -n okf-loremaster pytest

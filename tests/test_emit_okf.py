@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 import yaml
 
-from okf_loremaster.emitters.okf import search_markdown
+from okf_loremaster.emitters.okf import _expansion_is_mechanical, search_markdown
 from okf_loremaster.okf.frontmatter import load, parse, split
 from okf_loremaster.okf.layout import (
     BODY_SECTIONS,
@@ -447,21 +447,34 @@ async def test_the_search_strategy_is_a_root_file_and_not_a_document(
 async def test_every_query_reaches_the_search_strategy_with_what_pubmed_made_of_it(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The property the file exists for. A term is reproducible only alongside its
-    translation: PubMed rewrites a field tag it does not know instead of rejecting it,
+    """The property the file exists for. A term is reproducible only alongside what
+    PubMed made of it: a field tag it does not know is rewritten rather than rejected,
     so a term printed on its own cannot be told apart from one that quietly asked
-    something far broader."""
+    something far broader. Every expansion is *checked*; only the ones that changed the
+    question are printed."""
     run, bundle = await golden(settings_factory, tmp_path, monkeypatch)
 
     text = (bundle / SEARCH_FILENAME).read_text(encoding="utf-8")
     executed = run.state["executed"]
     assert executed, "the golden run has to have searched for this to mean anything"
 
+    mechanical = 0
     for query in executed:
         assert query.term in text, query.term
-        assert query.translation in text, query.translation
+        if _expansion_is_mechanical(query):
+            mechanical += 1
+        else:
+            assert query.translation in text, query.translation
         if query.rationale:
             assert query.rationale in text, query.rationale
+
+    if mechanical:
+        assert "with each field tag written out in full" in text
+    # Every query accounts for its expansion one way or the other. Collapsing a block is
+    # allowed to shorten the answer, never to leave the question unanswered. Counted below
+    # the queries heading, since the key above it names the same field.
+    queries_section = text.split("## The queries", 1)[1]
+    assert queries_section.count("**PubMed ran**") == sum(1 for q in executed if q.translation)
 
 
 async def test_the_search_strategy_names_the_two_things_that_decide_a_replay(
@@ -534,6 +547,38 @@ def test_a_suspect_query_carries_its_verdict_and_pubmeds_own_report() -> None:
     )
     assert "**Suspect.** PubMed rewrote the field tag" in text
     assert "`nosuchfield` as a field it does not have" in text
+
+
+def test_an_expansion_that_only_spells_out_its_own_tags_is_not_printed_twice() -> None:
+    """A term written in explicit field tags comes back as itself with `[tiab]` written
+    `[Title/Abstract]`. Printing both doubles the file for no information, and a page of
+    near-duplicate blocks is one a reader stops checking."""
+    text = _rendered(
+        ExecutedQuery(
+            term='("a"[tiab] OR "b"[tiab]) AND eng[la]',
+            translation='"a"[Title/Abstract] OR "b"[Title/Abstract] AND "english"[Language]',
+            count=5,
+            retrieved=5,
+        )
+    )
+    assert "with each field tag written out in full" in text
+    assert "[Title/Abstract]" not in text
+
+
+def test_an_expansion_that_reached_for_a_field_the_term_never_asked_for_is_printed() -> None:
+    """The case the block exists for, and the one the collapse must not swallow. An
+    untagged word picks up `[MeSH Terms]` and an unknown tag becomes `[All Fields]`;
+    either means PubMed answered a broader question than the one that was asked."""
+    text = _rendered(
+        ExecutedQuery(
+            term="delirium AND eng[la]",
+            translation='("delirium"[MeSH Terms] OR "delirium"[All Fields]) AND (english[Filter])',
+            count=90_000,
+            retrieved=200,
+        )
+    )
+    assert '("delirium"[MeSH Terms] OR "delirium"[All Fields])' in text
+    assert "with each field tag written out in full" not in text
 
 
 def test_the_round_is_named_only_when_there_was_more_than_one() -> None:

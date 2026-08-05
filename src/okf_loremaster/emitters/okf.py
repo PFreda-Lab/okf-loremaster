@@ -31,6 +31,7 @@ unreadable in a terminal.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -961,13 +962,13 @@ def _search_how_to_read(manifest: RunManifest) -> list[str]:
         "- **Why** — what the query was reaching for. Written by the model that planned "
         "it, before it knew what it would find.",
         "- **Sent** — the term exactly as it left this tool. Copy it whole.",
-        "- **PubMed ran** — PubMed's own expansion of that term, MeSH headings "
-        "substituted and every field tag resolved. It is recorded for every query, not "
-        "only odd-looking ones, because PubMed does not reject a field tag it does not "
-        "recognize: it silently rewrites `x[nosuchfield]` into `\"x\"[All Fields]`, "
-        "returns far more papers than intended, and reports no error at all. When a "
-        "term and its expansion look nothing alike, this is the only place that shows, "
-        "and the query is marked **suspect**.",
+        "- **PubMed ran** — what PubMed made of that term. It is checked for every "
+        "query, because PubMed does not reject a field tag it does not recognize: it "
+        "silently rewrites `x[nosuchfield]` into `\"x\"[All Fields]`, returns far more "
+        "papers than intended, and reports no error at all. When the expansion only "
+        "writes out tags the term already carried, this line says so in one sentence. "
+        "When PubMed reached for a field or a MeSH heading the term did not ask for, "
+        "the expansion is printed in full and the query is marked **suspect**.",
         "- **Result** — how many papers matched, and how many of them were actually "
         f"taken. Retrieval was capped at {manifest.retmax or 'no'} per query, ordered by "
         f"{ordering}, so a query that matched more than the cap contributed only the "
@@ -1035,11 +1036,61 @@ def _search_queries(charter: Charter, manifest: RunManifest) -> list[str]:
         if query.rationale:
             lines += [f"**Why** — {inline(query.rationale)}", ""]
         lines += ["**Sent**", "", "```text", query.term, "```", ""]
-        if query.translation:
+        if _expansion_is_mechanical(query):
+            lines += [
+                "**PubMed ran** — the same term, with each field tag written out in full. "
+                "Nothing was substituted, expanded or reinterpreted.",
+                "",
+            ]
+        elif query.translation:
             lines += ["**PubMed ran**", "", "```text", query.translation, "```", ""]
         lines += [f"**Result** — {_search_result(query, manifest.retmax)}", ""]
         lines += _search_flags(query)
     return lines
+
+
+_TAG = re.compile(r"\[([^\[\]]+)\]")
+
+# PubMed's short field tags and the long names its expansion prints them as. Comparing the
+# two forms is the only way to tell "the same query, spelled out" from "a different query".
+_TAG_ALIASES = {
+    "ab": "abstract",
+    "au": "author",
+    "dp": "date - publication",
+    "la": "language",
+    "mh": "mesh terms",
+    "pt": "publication type",
+    "sb": "filter",
+    "ta": "journal",
+    "ti": "title",
+    "tiab": "title/abstract",
+}
+
+# The filters this tool appends after the planner writes a term. PubMed renders them
+# inconsistently — `[Language]` in one response, `[Filter]` in the next — so they say
+# nothing about whether the query itself was read as written.
+_APPENDED_TAGS = frozenset({"date - publication", "filter", "language"})
+
+
+def _tags(query_text: str) -> set[str]:
+    """The field tags a query names, in PubMed's long form and without our own filters."""
+    found = (raw.strip().lower() for raw in _TAG.findall(query_text))
+    return {_TAG_ALIASES.get(tag, tag) for tag in found} - _APPENDED_TAGS
+
+
+def _expansion_is_mechanical(query: ExecutedQuery) -> bool:
+    """True when PubMed only spelled out tags the term already carried.
+
+    A term written entirely in explicit field tags comes back as itself with `[tiab]`
+    written `[Title/Abstract]`, and printing both is a few hundred characters of noise per
+    query. What earns the space is the opposite case: an unrecognized tag becomes
+    `[All Fields]` and an untagged word picks up `[MeSH Terms]`, neither of which the term
+    asked for. So the test is whether PubMed introduced a tag, not whether the two strings
+    differ — they always differ.
+    """
+    if not query.translation or query.suspect:
+        return False
+    return _tags(query.translation) <= _tags(query.term)
 
 
 def _query_heading(charter: Charter, query: ExecutedQuery) -> str:
