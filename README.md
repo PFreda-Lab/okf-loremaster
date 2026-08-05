@@ -97,45 +97,42 @@ Quoted from the paper, by row:
 Pooled across trials with heterogeneous protocols and durations.
 ````
 
-Five things about this document carry the design:
+Five things in this document carry the design:
 
-**The quote under the table** reproduces the sentence each effect size came from, **exactly as
-published** — the mangled `=< 0.01` included. A tidied quote cannot be checked against the source,
-so it is worse than no quote. A number the text does not contain is stripped by a deterministic
-pass that lowers the row's confidence and logs a warning; the run continues.
+**The quote under the table** is the sentence the number came from, copied exactly as published —
+mangled `=< 0.01` included, because a tidied quote can't be checked against the paper. If a number
+isn't in the text, a deterministic pass removes it, lowers the row's confidence and logs a warning.
 
-**`# Null or non-significant findings` is never omitted.** A validator inserts the placeholder when
-a paper reports none, so the section cannot go missing by accident. "We looked and found nothing"
-is evidence, and it is the part of the literature nobody else writes down.
+**`# Null or non-significant findings` is always there.** If a paper reports none, a validator
+writes in the placeholder, so the section can't go missing by accident. "We looked and found
+nothing" is evidence, and almost nobody else records it.
 
-**Vocabulary hints pair a concept with its codes** — the variable in the paper's own words, then
-any codes that paper printed for it, in whatever system it used. Nothing is looked up or inferred:
-a code the paper did not print is dropped and the concept kept, because the paper did name that
-variable. Most papers name variables and code none of them, so a bare concept is the normal case
-rather than a gap.
+**Vocabulary hints pair a variable with its codes** — the variable in the paper's own words, then
+whatever codes that paper printed for it. Nothing is looked up or guessed: a code the paper didn't
+print is dropped and the variable kept. Most papers print no codes at all, so a bare variable is
+normal rather than a gap.
 
-**`Confidence` and `Strength` are two questions.** Confidence is whether we read the row correctly,
-and it is what the numeric check downgrades. Strength is how much weight the study behind it can
-carry — design, sample size, whether the estimate held anything else constant, and how much of the
-paper we got to read, banded into `strong` / `moderate` / `limited`. A well-read row from a
-forty-person survey is `high` and `limited`, and either column alone misleads. Strength is computed
-in code from fields the extractor recorded, never asked of a model, so it is reproducible and the
-weights can change without re-reading a paper. Sample size is scored against the charter's scale,
-because a few hundred people is a large cohort in one literature and a pilot in another.
+**`Confidence` and `Strength` answer different questions.** Confidence is whether we read the row
+correctly, and it's what the numeric check lowers. Strength is how much weight the study can carry
+— design, sample size, whether the estimate adjusted for anything, and how much of the paper we
+read — banded into `strong` / `moderate` / `limited`. A well-read row from a forty-person survey is
+`high` and `limited`, so either column on its own misleads. Strength is calculated in code from what
+the extractor recorded, never asked of a model. Sample size is judged against a scale in the
+charter, since a few hundred people is a big cohort in one field and a pilot in another.
 
 **`text_basis` and `license` are per document.** Most of PubMed is abstract-only under publisher
-copyright and a minority is open access. Recording which is which is what stops a consumer from
-weighing an abstract-derived claim like a full-text one.
+copyright; a minority is open access. Recording which is which stops a reader from treating a claim
+pulled from an abstract like one pulled from full text.
 
 *(Example content from [PubMed](https://pubmed.ncbi.nlm.nih.gov/33745404/),
 [DOI 10.1080/09540121.2021.1902932](https://doi.org/10.1080/09540121.2021.1902932).)*
 
 ### What recurs across the papers
 
-A corpus of documents answers "what does this paper say" well and "which papers say the same thing"
-not at all — that answer is spread across two hundred files, and nobody opens two hundred files to
-find it. So one more file is written at the root. `predictors.md` holds an entry for every predictor
-two or more papers reported — one entry below, with one of its three rows shown:
+A folder of documents answers "what does this paper say" well, and "which papers say the same thing"
+not at all — that answer is spread across two hundred files. So one more file is written at the
+root. `predictors.md` holds an entry for every predictor two or more papers reported — one entry
+below, with one of its three rows shown:
 
 ````markdown
 ## Short sleep duration
@@ -153,29 +150,26 @@ Counted as one: *Short sleep duration* · *short sleep durations*
 | [26567190_Dashti](diet-and-nutrition/26567190_Dashti.md) | 3 | diet-and-nutrition | Short sleep duration — <6 h/night, self-report | increases | 1.42 (95% CI 1.10-1.83) | strong 0.81 |
 ````
 
-**Every line is an address and nothing else.** `paper` and `row` are the document to open and the
-`#` to find once it is open; the rest helps you decide whether to make the trip. Nothing is here
-that is not already in a paper's own file — an index you can read *instead of* the corpus is one
-that will be, and then the quotes, the operationalizations and the licenses stop being opened.
+**Every line is an address.** `paper` and `row` are the file to open and the `#` to find inside it;
+the rest helps you decide whether it's worth opening. Nothing is here that isn't already in a
+paper's own file, so this index can't quietly become a substitute for the corpus.
 
-**It is not ranked and it is not scored.** A number combining how good a study is with how often
-something turns up answers neither question, and frequency in a curated corpus measures the
-curation: diversification and the charter's per-topic floors decide how often a predictor can appear
-long before the literature gets a say. So the order is how many papers you would have to open.
+**It isn't ranked or scored.** Frequency in a curated corpus measures the curation, not the
+literature — diversification and the charter's per-topic floors decide how often a predictor can
+appear. So entries are ordered by how many papers you'd have to open.
 
-**A predictor is grouped with its outcome, and the merging is timid.** One exposure against six
-outcomes in six directions is six coherent findings; collapsed onto the exposure it reads as a paper
-arguing with itself. `⚠ contested` means papers disagree about the sign of *one* relationship — a
-null beside an effect is not that. Two spellings merge only on an exact normalized match, or on a
-qualifier that narrows a phrase without flipping it, so `short sleep duration` and `long sleep
-duration` stay two entries rather than one U-shaped contradiction. Every merge prints the forms it
-absorbed, so you can disagree with it.
+**Predictors are grouped with their outcome, and merging is deliberately timid.** One exposure
+against six outcomes is six separate findings; collapsed onto the exposure it reads as a paper
+arguing with itself. `⚠ contested` means papers disagree about the direction of *one* relationship
+— a null beside an effect is not that. Two spellings merge only on an exact normalized match, or on
+a qualifier that narrows a phrase without flipping it, so `short sleep duration` and `long sleep
+duration` stay separate. Every merge prints what it absorbed, so you can disagree with it.
 
 ### Where the corpus came from
 
-A curated set of papers is an argument about the literature, and an argument whose search you cannot
-inspect is one you have to take on trust. `search.md` is written so you do not have to — every query
-with what it was reaching for, the term exactly as sent, what PubMed made of it, and what came back:
+A curated set of papers is a claim about the literature, and you can't check that claim without
+seeing the search. `search.md` shows it — every query, what it was reaching for, the term exactly as
+sent, what PubMed made of it, and what came back:
 
 ````markdown
 ### 5. Anesthetic Technique and Intraoperative Physiology
@@ -195,18 +189,17 @@ substituted, expanded or reinterpreted.
 were never seen by this run.
 ````
 
-**PubMed will not tell you when a query is wrong.** A field tag it does not recognize is not
-rejected — `x[nosuchfield]` is quietly rewritten to `"x"[All Fields]`, matches far more papers than
-intended, and comes back with an empty error list. So every expansion is checked. When it only
-writes out tags the term already carried, you get the one-line note above. When PubMed reached for
-a field or a MeSH heading the term never asked for, the expansion is printed in full and the query
-is marked **suspect** — the case the check exists for, and the only one worth the space.
+**PubMed won't tell you when a query is wrong.** A field tag it doesn't recognize isn't rejected —
+`x[nosuchfield]` is quietly rewritten to `"x"[All Fields]`, matches far more papers than intended,
+and comes back with an empty error list. So every expansion is checked. If PubMed only wrote out
+tags the term already carried, you get the one-line note above. If it reached for a field or a MeSH
+heading the term never asked for, the expansion is printed in full and the query is marked
+**suspect**.
 
-**It also says what will not reproduce.** Retrieval is capped per query and ordered by PubMed's
+**It also says what won't reproduce.** Retrieval is capped per query and ordered by PubMed's
 relevance ranking, which is recomputed as the index grows — so a query that matched more than the
 cap can return a different slice months later, while one that came back whole is exact. `search.md`
-counts both kinds, because a methods section that implies more repeatability than it has is worse
-than one that admits the limit.
+counts both kinds.
 
 `log.md` carries the same queries in two lines each, alongside the funnel, the cost and the
 warnings. That file is for finding out what a run did; this one is for running the search again.
@@ -435,11 +428,10 @@ a new one. The question comes off the charter too, so there is nothing to retype
 okf-loremaster build --charter bundles/first-attempt/charter.yaml -o second-attempt --tui
 ```
 
-It is for **editing** (the charter pause tells you to go edit the file; this is how you feed it
-back), for **comparing** (a model drafts the charter, so the same question asked twice gives two
-different runs — pinning it is the only way to change one thing and see what that did), and for
-**saving** a scope you liked, as short readable YAML. Not combinable with `--resume`, which replays
-its own run's charter.
+Use it to **edit** a charter and feed it back, to **compare** runs (a model drafts the charter, so
+the same question asked twice gives two different runs — pinning it is the only way to change one
+thing and see what that did), or to **save** a scope you liked as short readable YAML. Not
+combinable with `--resume`, which replays its own run's charter.
 
 ### Stopping and resuming
 
@@ -486,39 +478,35 @@ bundles: deleting it loses the ability to resume, and nothing else.
 ## Why Open Knowledge Format
 
 [OKF](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
-is a small open convention for making a folder of markdown self-describing: YAML frontmatter on
+is a small open convention that makes a folder of markdown self-describing: YAML frontmatter on
 every document, an `index.md` per folder, an optional `resource_descriptor.yaml`, and three reserved
 keys that answer where a document came from (`sources`), what produced it (`generated`), and who
-stood behind it (`verified`). That is close to the whole of it. We target v0.2.
+stood behind it (`verified`). That's most of it. We target v0.2.
 
 **Why a format at all.** What comes out of a run is read by an LLM agent, and agents read markdown
-natively — no client library, no schema server, no version to negotiate. `cp -r` moves a bundle and
-`ls` plus `cat` are a sufficient tool set. A database would answer queries faster and be worse at
-everything else this corpus exists for, starting with a person opening one file to check it. And a
-published convention, rather than one of our own, lets a consumer that has never heard of this
-project still walk the folder correctly.
+natively — no client library, no schema server, no version to negotiate. `cp -r` moves a bundle;
+`ls` and `cat` are enough to explore one. A database would answer queries faster and be worse at
+everything else this corpus is for, starting with a person opening one file to check it. And using a
+published convention rather than our own means a consumer that has never heard of this project can
+still walk the folder correctly.
 
 **Why this one.** Its three reserved keys are the three questions a corpus of machine-extracted
 findings has to answer. A model wrote every document, so `generated` names the model and the node
 that called it. Every claim is somebody else's, so `sources` carries the PMID and the PubMed URL.
 Nobody has necessarily checked it, so `verified` is written only when a human signs off — OKF
-derives a document's trust tier from that key, which makes *unverified* a default we get for free
-rather than a disclaimer we have to remember.
+derives a document's trust tier from that key, which makes *unverified* the default.
 
 **How we use it.** As specified, plus flat keys of our own — `strength`, `strength_score`,
-`text_basis` — which a conforming reader ignores and one that knows them gets for free.
+`text_basis` — which a conforming reader ignores.
 
-**Nothing in a bundle asks to be believed on its own authority.** `predictors.md` points into the
-corpus and holds nothing that is not in a paper's own document, so an index that could be read
-*instead of* the papers never quietly becomes the papers. Each document then points one level
-further out — `sources` at the PubMed record, the quote under each table at the sentence a number
-came from, `text_basis` at how much of the paper was read. What we add is summarization and
-structure, never a replacement for the source. Every statement has an address, and you can go to it.
+**Nothing in a bundle asks to be believed on its own authority.** Every document points one level
+further out: `sources` at the PubMed record, the quote under each table at the sentence a number came
+from, `text_basis` at how much of the paper was read. What we add is summary and structure, never a
+replacement for the source. Every statement has an address you can go to.
 
-What we do not do is reproduce the article. `license` records what the source reported, verbatim and
+What we don't do is reproduce the article. `license` records what the source reported, verbatim and
 never inferred, and `export_safe` says whether the document may leave. From a paper under publisher
-copyright, what crosses into the bundle is the quoted spans an extracted number came from, and
-nothing else.
+copyright, only the quoted spans an extracted number came from cross into the bundle.
 
 ---
 
@@ -552,10 +540,8 @@ The word for a folder is **topic** in conversation and `domain` in frontmatter. 
 sits outside a `*.md` walk by design and carries one row per document.
 
 **`predictors.md` and `search.md` are things to look for, never things to expect.** A consumer that
-has never heard of either walks straight past, and one that knows them gets the corpus's cross-topic
-entry point and its provenance for free. They are the two files with no `domain`, and neither can
-have one — they cut across every topic and sit in none, which the validator enforces rather than
-assumes.
+has never heard of either walks straight past. Neither carries a `domain` — they cut across every
+topic and sit in none — and the validator errors if one appears.
 
 `tests/test_afce_contract.py` re-implements a consumer from these rules — its own line parser, its
 own resolver, its own matching — and checks a finished bundle against it, rather than reading the
