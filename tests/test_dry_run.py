@@ -452,7 +452,7 @@ def _projection(settings_factory: Any, *, target: int, topics: int = 8, floor: i
     from okf_loremaster.llm.estimate import project_spend
 
     charter = charter_for(tuple(f"topic-{i}" for i in range(topics))).model_copy(
-        update={"target_papers": target, "topic_min": floor}
+        update={"target_papers": target, "topic_paper_min": floor}
     )
     return project_spend(
         charter,
@@ -468,7 +468,7 @@ def test_the_projection_prices_the_papers_curation_will_keep_not_the_target(
 ) -> None:
     """Measured against a real run, and this is the whole gap.
 
-    `--target-papers 10` over 8 topics with `topic_min 8` kept 62 papers and extracted
+    `--target-papers 10` over 8 topics with `topic_paper_min 8` kept 62 papers and extracted
     61, because trimming stops once no topic is above its floor. The projection priced
     extraction — the dearest node per call — at 10, and came in at $1.01 against $5.04
     actually spent. An estimate a human is shown just before deciding whether to pay it
@@ -477,7 +477,7 @@ def test_the_projection_prices_the_papers_curation_will_keep_not_the_target(
     estimate = _projection(settings_factory, target=10)
     extract = next(node for node in estimate.nodes if node.node == "extract")
 
-    assert extract.calls == 64, "8 topics x topic_min 8 is the floor a target cannot undercut"
+    assert extract.calls == 64, "8 topics x topic_paper_min 8 is the floor a target cannot undercut"
     assert any("floor of 64" in note for note in estimate.notes), (
         "the table shows a number above the requested target, so it has to say why"
     )

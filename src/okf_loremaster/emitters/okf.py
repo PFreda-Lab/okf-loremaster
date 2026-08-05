@@ -622,8 +622,8 @@ def root_index(
             ("Population", charter.population),
             ("Outcome", charter.outcome),
             ("Languages", ", ".join(charter.languages) or "any"),
-            ("Target", f"{charter.target_papers} papers, {charter.topic_min}"
-                       f"-{charter.topic_max} per topic"),
+            ("Target", f"{charter.target_papers} papers, {charter.topic_paper_min}"
+                       f"-{charter.topic_paper_max} per topic"),
             ("From", str(charter.min_year) if charter.min_year else ""),
             ("Full charter", f"[{CHARTER_FILENAME}]({CHARTER_FILENAME})"),
         ]

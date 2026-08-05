@@ -30,16 +30,24 @@ everything that is not a judgment.
 ```
 bundles/hf-readmission/
 ├── charter.yaml          # what the run decided to look for — edit and rerun from this
+├── run.log               # the full-screen interface's log pane, as plain text
 ├── okf/                  # the corpus: markdown, one file per paper
 │   ├── index.md
 │   ├── predictors.md     # what recurs across the topics, and where to read it
 │   ├── search.md         # every query, why it was asked, and what PubMed made of it
 │   ├── log.md            # what ran, what it found, what it cost
+│   ├── charter.yaml      # a copy, so okf/ still says what it was built for on its own
 │   ├── _catalog.jsonl
 │   ├── resource_descriptor.yaml
 │   └── <topic>/          # one folder per topic, each with its own index.md
 └── vectors/              # Chroma store, built by walking okf/
 ```
+
+A **topic** is a sub-domain of the one subject the whole bundle is about. Ask for predictors of
+heart-failure readmission and the topics are the separate kinds of explanation a reader would go
+looking for — what the patient arrived with, how they were treated, what happened after discharge —
+not chapters of a report. The charter picks them before anything is searched, and every stage after
+that files papers under them.
 
 Move it with `cp -r`. Nothing records an absolute path, and `okf/` and `vectors/` can each be
 attached downstream on their own.
@@ -363,16 +371,20 @@ one project's corpus, which is exactly what would stop it generalizing.
 same neutral citation score, and a constant added to every score changes no ordering — so the
 signal drops out instead of quietly becoming a second recency term.
 
-Two passes then run on top of that ordering.
+Ranking by itself would just hand the screener the top `--pool-size` papers by score. Two more
+passes run inside `rank` before that happens, and what comes out of them is the pool.
 
 **Maximal marginal relevance (MMR)** — take the best paper that isn't already covered by what you've
-already taken — trades a little relevance for coverage. MMR's dial is lambda (λ), set to 0.7 here on
-a scale where 1.0 would mean pure relevance and no coverage at all. The effect is that a cluster of
-near-identical reviews contributes its best member rather than its first six.
+already taken — trades a little relevance for coverage. It compares each candidate against the ones
+already picked on their titles, MeSH terms and keywords, so a cluster of near-identical reviews
+contributes its best member rather than its first six. MMR's dial is lambda (λ): at 1.0 it is pure
+relevance and does nothing, at 0.0 it is pure coverage and ignores the score. It is fixed at 0.7 in
+the code, like the weights above and for the same reason.
 
 **A per-topic quota** reserves capacity for each topic before the pool fills, so a topic whose
 queries match ten thousand papers can't crowd out one that matches two hundred. Unused quota is
-released back rather than held empty. `--dry-run` prints what both passes changed.
+released back rather than held empty. Both passes run for every build; `--dry-run` prints what each
+of them changed without spending anything.
 
 ---
 
@@ -434,12 +446,17 @@ okf-loremaster build "<your question>" -o my-corpus  # do it
 | `--review` | off | sign the bundle off by hand before it is written |
 | `--tui` | off | full-screen interface |
 | `--target-papers` | 200 | 120–250 is a browsability ceiling, not a recall target |
-| `--topic-min` / `--topic-max` | 8 / 40 | papers per topic |
+| `--topic-paper-min` / `--topic-paper-max` | 8 / 40 | papers inside one topic folder |
+| `--max-topics` | 8 | how many topic folders the review is divided into |
 | `--pool-size` | 800 | candidates considered before screening |
 | `--screen-budget` | 400 | abstracts sent to the screener |
 | `--max-rounds` | 2 | search rounds; `1` disables the re-query of thin topics |
 | `--resume <id>` | — | pick a run back up; see [Stopping and resuming](#stopping-and-resuming) |
 | `--json`, `-v` | — | machine-readable events, verbosity |
+
+The three topic flags multiply. `--max-topics` × `--topic-paper-min` is the smallest corpus the
+taxonomy can hold and `--max-topics` × `--topic-paper-max` the largest, so `--target-papers` outside
+that range is a request nothing can satisfy — the charter pause says so before anything is spent.
 
 `--finalize` is asked at the end rather than up front so you can see what was built before
 deciding. One caveat: the embedding pass runs during the build, so answering "OKF only" at the

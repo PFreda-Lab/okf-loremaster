@@ -159,9 +159,10 @@ def test_cli_defaults_match_the_constants(command: str) -> None:
     quietly stop being the default of anything.
     """
     from okf_loremaster.schemas.charter import (
+        DEFAULT_MAX_TOPICS,
         DEFAULT_TARGET_PAPERS,
-        DEFAULT_TOPIC_MAX,
-        DEFAULT_TOPIC_MIN,
+        DEFAULT_TOPIC_PAPER_MAX,
+        DEFAULT_TOPIC_PAPER_MIN,
     )
 
     group = typer.main.get_command(app)
@@ -170,5 +171,6 @@ def test_cli_defaults_match_the_constants(command: str) -> None:
         for param in group.commands[command].params  # type: ignore[attr-defined]
     }
     assert params["target_papers"] == DEFAULT_TARGET_PAPERS
-    assert params["topic_min"] == DEFAULT_TOPIC_MIN
-    assert params["topic_max"] == DEFAULT_TOPIC_MAX
+    assert params["topic_paper_min"] == DEFAULT_TOPIC_PAPER_MIN
+    assert params["topic_paper_max"] == DEFAULT_TOPIC_PAPER_MAX
+    assert params["max_topics"] == DEFAULT_MAX_TOPICS

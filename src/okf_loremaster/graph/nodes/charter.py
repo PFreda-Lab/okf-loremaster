@@ -20,7 +20,7 @@ from typing import Any
 
 from okf_loremaster.config import Role
 from okf_loremaster.graph.state import Deps, RunState, span
-from okf_loremaster.prompts import CHARTER_SYSTEM, charter_user
+from okf_loremaster.prompts import charter_system, charter_user
 from okf_loremaster.schemas import Charter
 from okf_loremaster.schemas.parse import (
     SchemaError,
@@ -93,7 +93,7 @@ async def _draft(deps: Deps, prompt: str) -> Charter:
     # working at all.
     deps.progress(NODE, f"drafting the charter with {_model(deps)}")
     messages = [
-        {"role": "system", "content": CHARTER_SYSTEM},
+        {"role": "system", "content": charter_system(deps.max_topics)},
         {"role": "user", "content": charter_user(prompt)},
     ]
     result = await deps.router.complete(
@@ -138,8 +138,9 @@ def _apply_overrides(charter: Charter, *, prompt: str, deps: Deps) -> Charter:
     updated = charter.model_copy(deep=True)
     updated.prompt = prompt or updated.prompt
     updated.target_papers = deps.target_papers
-    updated.topic_min = deps.topic_min
-    updated.topic_max = deps.topic_max
+    updated.topic_paper_min = deps.topic_paper_min
+    updated.topic_paper_max = deps.topic_paper_max
+    updated.max_topics = deps.max_topics
     if not updated.generated_by:
         updated.generated_by = _generated_by(deps)
     if updated.generated_at is None:

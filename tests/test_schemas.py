@@ -477,8 +477,8 @@ def test_duplicate_topic_slugs_are_rejected() -> None:
 
 
 def test_an_inverted_topic_range_is_rejected() -> None:
-    with pytest.raises(ValidationError, match="topic_min"):
-        a_charter(topic_min=20, topic_max=10)
+    with pytest.raises(ValidationError, match="topic_paper_min"):
+        a_charter(topic_paper_min=20, topic_paper_max=10)
 
 
 def test_a_charter_round_trips_through_yaml() -> None:
@@ -494,7 +494,7 @@ def test_charter_yaml_keeps_declaration_order() -> None:
     lines = a_charter().to_yaml().splitlines()
     keys = [line.split(":")[0] for line in lines if line and not line.startswith((" ", "-"))]
     assert keys.index("prompt") < keys.index("topic_taxonomy") < keys.index("languages")
-    assert keys.index("topic_min") < keys.index("topic_max")
+    assert keys.index("topic_paper_min") < keys.index("topic_paper_max")
 
 
 def test_the_charter_digest_ignores_when_it_was_generated() -> None:
@@ -507,17 +507,57 @@ def test_the_charter_digest_ignores_when_it_was_generated() -> None:
 
 
 def test_a_target_the_taxonomy_cannot_hold_is_reported() -> None:
-    problems = a_charter(target_papers=500, topic_max=10).problems()
+    problems = a_charter(target_papers=500, topic_paper_max=10).problems()
     assert any("exceeds what the taxonomy can hold" in p for p in problems)
 
 
 def test_a_workable_charter_has_no_problems() -> None:
-    assert a_charter(target_papers=40, topic_min=8, topic_max=40).problems() == []
+    assert a_charter(target_papers=40, topic_paper_min=8, topic_paper_max=40).problems() == []
 
 
 def test_capacity_reflects_the_taxonomy_size() -> None:
-    charter = a_charter(topic_min=5, topic_max=25)
+    charter = a_charter(topic_paper_min=5, topic_paper_max=25)
     assert charter.capacity() == (10, 50)
+
+
+def test_too_many_topics_is_reported_against_the_charters_own_ceiling() -> None:
+    """`max_topics` is per charter, so the complaint cannot read a module constant."""
+    taxonomy = [a_topic(slug=f"topic-{n}") for n in range(4)]
+    fits = a_charter(topic_taxonomy=taxonomy, max_topics=4, target_papers=100)
+    assert fits.problems() == []
+
+    problems = fits.model_copy(update={"max_topics": 3}).problems()
+    assert any("exceeds the browsable maximum of 3" in p for p in problems)
+
+
+def test_the_charter_prompt_carries_the_topic_ceiling() -> None:
+    """A ceiling the model never sees is not a setting.
+
+    `problems` would otherwise complain about a taxonomy the prompt itself asked for.
+    The floor follows `max_topics` down and never up, so a deliberately small run does
+    not get a prompt asking for a range it cannot satisfy.
+    """
+    from okf_loremaster.prompts import charter_system
+
+    assert "between 4 and 8 topics" in charter_system(8)
+    assert "between 4 and 20 topics" in charter_system(20)
+    assert "exactly 2 topics" in charter_system(2)
+    assert "exactly 1 topics" not in charter_system(1)
+    assert "exactly 1 topic" in charter_system(1)
+
+
+def test_a_charter_saved_before_the_rename_still_loads() -> None:
+    """`--charter` points at a file an earlier run wrote; the old key names must work.
+
+    Only on the way in. What is written back out is always the current name, so a
+    round trip through `--charter` quietly migrates the file.
+    """
+    text = a_charter().to_yaml().replace("topic_paper_min:", "topic_min:")
+    text = text.replace("topic_paper_max:", "topic_max:")
+    restored = Charter.from_yaml(text)
+
+    assert (restored.topic_paper_min, restored.topic_paper_max) == (8, 40)
+    assert "topic_min:" not in restored.to_yaml()
 
 
 # --- screening and curation -------------------------------------------------

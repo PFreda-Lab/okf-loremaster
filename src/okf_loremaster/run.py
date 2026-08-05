@@ -37,9 +37,10 @@ from okf_loremaster.extraction_cache import ExtractionCache
 from okf_loremaster.finalize import Finalize
 from okf_loremaster.okf.layout import okf_bundle_path
 from okf_loremaster.schemas import (
+    DEFAULT_MAX_TOPICS,
     DEFAULT_TARGET_PAPERS,
-    DEFAULT_TOPIC_MAX,
-    DEFAULT_TOPIC_MIN,
+    DEFAULT_TOPIC_PAPER_MAX,
+    DEFAULT_TOPIC_PAPER_MIN,
     Charter,
 )
 
@@ -236,8 +237,9 @@ class RunOptions:
     pool_size: int = 800
     screen_budget: int = 400
     target_papers: int = DEFAULT_TARGET_PAPERS
-    topic_min: int = DEFAULT_TOPIC_MIN
-    topic_max: int = DEFAULT_TOPIC_MAX
+    topic_paper_min: int = DEFAULT_TOPIC_PAPER_MIN
+    topic_paper_max: int = DEFAULT_TOPIC_PAPER_MAX
+    max_topics: int = DEFAULT_MAX_TOPICS
     max_queries: int = 12
     max_rounds: int = MAX_ROUNDS
     # Stop at the charter and the retrieved pool and ask. Off by default: a run is
@@ -377,8 +379,9 @@ async def build_run(
         max_queries=options.max_queries,
         max_rounds=options.max_rounds,
         target_papers=options.target_papers,
-        topic_min=options.topic_min,
-        topic_max=options.topic_max,
+        topic_paper_min=options.topic_paper_min,
+        topic_paper_max=options.topic_paper_max,
+        max_topics=options.max_topics,
     )
 
     try:

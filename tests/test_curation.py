@@ -33,14 +33,14 @@ SEEDS = range(120)
 
 
 def charter_with(
-    slugs: list[str], *, topic_min: int = 2, topic_max: int = 5, target: int = 100
+    slugs: list[str], *, topic_paper_min: int = 2, topic_paper_max: int = 5, target: int = 100
 ) -> Charter:
     return Charter(
         prompt="a request",
         topic_taxonomy=[Topic(slug=slug, title=slug.title()) for slug in slugs],
         target_papers=target,
-        topic_min=topic_min,
-        topic_max=topic_max,
+        topic_paper_min=topic_paper_min,
+        topic_paper_max=topic_paper_max,
     )
 
 
@@ -53,23 +53,23 @@ class Case:
 
     def __init__(self, rng: random.Random) -> None:
         count = rng.randint(1, 6)
-        topic_min = rng.randint(1, 6)
-        topic_max = topic_min + rng.randint(0, 8)
+        topic_paper_min = rng.randint(1, 6)
+        topic_paper_max = topic_paper_min + rng.randint(0, 8)
         self.slugs = [f"topic-{index}" for index in range(count)]
         self.charter = charter_with(
             self.slugs,
-            topic_min=topic_min,
-            topic_max=topic_max,
+            topic_paper_min=topic_paper_min,
+            topic_paper_max=topic_paper_max,
             # Spans every relationship the three bounds can have: under the taxonomy's
             # floor, inside its range, and past what it could hold.
-            target=rng.randint(1, count * topic_max + 4),
+            target=rng.randint(1, count * topic_paper_max + 4),
         )
 
         universe = [str(11000 + n) for n in range(60)]
         # Topics sample independently, so the same paper landing on two of them is
         # ordinary rather than a special case somebody has to remember to generate.
         self.kept = {
-            slug: rng.sample(universe, rng.randint(0, min(len(universe), topic_max + 4)))
+            slug: rng.sample(universe, rng.randint(0, min(len(universe), topic_paper_max + 4)))
             for slug in self.slugs
         }
         self.reserve = {slug: rng.sample(universe, rng.randint(0, 10)) for slug in self.slugs}
@@ -103,7 +103,7 @@ def test_p1_no_topic_exceeds_its_ceiling(seed: int) -> None:
     case = Case(random.Random(seed))
     placement = case.run()
     for slug, pmids in placement.topics.items():
-        assert len(pmids) <= case.charter.topic_max, slug
+        assert len(pmids) <= case.charter.topic_paper_max, slug
 
 
 @pytest.mark.parametrize("seed", SEEDS)
@@ -114,10 +114,10 @@ def test_p2_a_topic_under_its_floor_is_reported_as_a_gap(seed: int) -> None:
     gapped = {gap.topic for gap in placement.gaps}
 
     for slug, pmids in placement.topics.items():
-        assert (len(pmids) >= case.charter.topic_min) is (slug not in gapped), slug
+        assert (len(pmids) >= case.charter.topic_paper_min) is (slug not in gapped), slug
 
     for gap in placement.gaps:
-        assert gap.floor == case.charter.topic_min
+        assert gap.floor == case.charter.topic_paper_min
         assert gap.kept == len(placement.topics[gap.topic])
         assert gap.shortfall > 0
         # The curator's own words survive to the re-query round, which is the only
@@ -134,7 +134,7 @@ def test_p3_the_target_is_met_or_the_floors_are_the_reason(seed: int) -> None:
 
     # Over target is only allowed when every topic is already at or under its floor —
     # there is nothing left to trim that would not break a floor.
-    assert all(len(pmids) <= case.charter.topic_min for pmids in placement.topics.values())
+    assert all(len(pmids) <= case.charter.topic_paper_min for pmids in placement.topics.values())
     assert any("not worth having" in warning for warning in placement.warnings)
 
 
@@ -193,7 +193,7 @@ def test_p8_every_topic_is_listed_and_every_topic_is_ordered(seed: int) -> None:
 
 
 def test_the_ceiling_trims_the_worst_ranked_first() -> None:
-    charter = charter_with(["aa"], topic_min=1, topic_max=2)
+    charter = charter_with(["aa"], topic_paper_min=1, topic_paper_max=2)
     placement = enforce_bounds(
         charter, kept={"aa": ["3", "1", "2"]}, rank=ranked(["1", "2", "3"])
     )
@@ -205,7 +205,7 @@ def test_the_floor_backfills_in_the_order_the_reserve_was_given() -> None:
     """Not in rank order. The caller decided what "nearest miss" means, and it knows
     things the rank does not — whether the screener included it, whether the curator
     turned it down."""
-    charter = charter_with(["aa"], topic_min=2, topic_max=8)
+    charter = charter_with(["aa"], topic_paper_min=2, topic_paper_max=8)
     placement = enforce_bounds(
         charter,
         kept={"aa": ["1"]},
@@ -218,7 +218,7 @@ def test_the_floor_backfills_in_the_order_the_reserve_was_given() -> None:
 
 
 def test_a_backfill_never_takes_a_paper_another_topic_already_holds() -> None:
-    charter = charter_with(["aa", "bb"], topic_min=2, topic_max=8)
+    charter = charter_with(["aa", "bb"], topic_paper_min=2, topic_paper_max=8)
     placement = enforce_bounds(
         charter,
         kept={"aa": ["1", "2"], "bb": ["3"]},
@@ -229,7 +229,7 @@ def test_a_backfill_never_takes_a_paper_another_topic_already_holds() -> None:
 
 
 def test_a_paper_two_topics_wanted_stays_on_the_first_in_the_charters_order() -> None:
-    charter = charter_with(["aa", "bb"], topic_min=1, topic_max=8)
+    charter = charter_with(["aa", "bb"], topic_paper_min=1, topic_paper_max=8)
     placement = enforce_bounds(
         charter,
         # bb asks first in the mapping's order, and the charter's order wins anyway.
@@ -242,7 +242,7 @@ def test_a_paper_two_topics_wanted_stays_on_the_first_in_the_charters_order() ->
 
 
 def test_papers_kept_on_a_topic_the_charter_does_not_have_are_dropped_and_named() -> None:
-    charter = charter_with(["aa"], topic_min=1, topic_max=8)
+    charter = charter_with(["aa"], topic_paper_min=1, topic_paper_max=8)
     placement = enforce_bounds(
         charter, kept={"aa": ["1"], "invented": ["2"]}, rank=ranked(["1", "2"])
     )
@@ -251,7 +251,7 @@ def test_papers_kept_on_a_topic_the_charter_does_not_have_are_dropped_and_named(
 
 
 def test_every_charter_topic_appears_even_when_nothing_was_kept() -> None:
-    charter = charter_with(["aa", "bb"], topic_min=1, topic_max=8)
+    charter = charter_with(["aa", "bb"], topic_paper_min=1, topic_paper_max=8)
     placement = enforce_bounds(charter, kept={}, rank={})
     assert placement.topics == {"aa": [], "bb": []}
     assert [gap.topic for gap in placement.gaps] == ["aa", "bb"]
@@ -260,7 +260,7 @@ def test_every_charter_topic_appears_even_when_nothing_was_kept() -> None:
 
 def test_the_target_trims_the_widest_topic_and_breaks_ties_the_same_way_every_run() -> None:
     """Three equal topics, two papers over target. Which two go is not arbitrary."""
-    charter = charter_with(["aa", "bb", "cc"], topic_min=1, topic_max=10, target=10)
+    charter = charter_with(["aa", "bb", "cc"], topic_paper_min=1, topic_paper_max=10, target=10)
     placement = enforce_bounds(
         charter,
         kept={
@@ -283,7 +283,7 @@ def test_the_target_trims_the_widest_topic_and_breaks_ties_the_same_way_every_ru
 
 def test_the_target_gives_way_to_the_floors_and_says_it_did() -> None:
     """The one bound allowed to fail, failing out loud."""
-    charter = charter_with(["aa", "bb"], topic_min=4, topic_max=8, target=5)
+    charter = charter_with(["aa", "bb"], topic_paper_min=4, topic_paper_max=8, target=5)
     placement = enforce_bounds(
         charter,
         kept={"aa": ["1", "2", "3", "4"], "bb": ["5", "6", "7", "8"]},
@@ -298,7 +298,7 @@ def test_the_target_gives_way_to_the_floors_and_says_it_did() -> None:
 def test_the_target_trim_cannot_create_a_gap() -> None:
     """Gaps are computed before the trim, which is only honest because the trim stops at
     the floor. If it did not, a topic could end up short with no gap reported for it."""
-    charter = charter_with(["aa", "bb"], topic_min=3, topic_max=8, target=6)
+    charter = charter_with(["aa", "bb"], topic_paper_min=3, topic_paper_max=8, target=6)
     placement = enforce_bounds(
         charter,
         kept={"aa": [str(n) for n in range(1, 8)], "bb": ["8", "9", "10"]},
@@ -309,13 +309,13 @@ def test_the_target_trim_cannot_create_a_gap() -> None:
 
 
 def test_a_paper_missing_from_the_ranking_sorts_last_rather_than_raising() -> None:
-    charter = charter_with(["aa"], topic_min=1, topic_max=8)
+    charter = charter_with(["aa"], topic_paper_min=1, topic_paper_max=8)
     placement = enforce_bounds(charter, kept={"aa": ["9", "1"]}, rank=ranked(["1"]))
     assert placement.topics == {"aa": ["1", "9"]}
 
 
 def test_the_summary_reads_as_a_sentence() -> None:
-    charter = charter_with(["aa", "bb"], topic_min=2, topic_max=8)
+    charter = charter_with(["aa", "bb"], topic_paper_min=2, topic_paper_max=8)
     placement = enforce_bounds(
         charter,
         kept={"aa": ["1", "2"]},

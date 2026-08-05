@@ -21,15 +21,15 @@ from datetime import datetime
 from typing import Any, Self
 
 import yaml
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 
 from okf_loremaster.schemas.common import Model, Slug
 
 __all__ = [
+    "DEFAULT_MAX_TOPICS",
     "DEFAULT_TARGET_PAPERS",
-    "DEFAULT_TOPIC_MAX",
-    "DEFAULT_TOPIC_MIN",
-    "MAX_TOPICS",
+    "DEFAULT_TOPIC_PAPER_MAX",
+    "DEFAULT_TOPIC_PAPER_MIN",
     "Charter",
     "Topic",
 ]
@@ -39,9 +39,18 @@ __all__ = [
 # possible. The per-topic floor matters just as much — a topic of three papers is a
 # heading pretending to be a topic.
 DEFAULT_TARGET_PAPERS = 200
-DEFAULT_TOPIC_MIN = 8
-DEFAULT_TOPIC_MAX = 40
-MAX_TOPICS = 12
+
+# Papers *inside* one topic folder, not the number of topics. The two multiply into the
+# taxonomy's floor and ceiling — see `capacity` — which is why they were renamed away
+# from `topic_min`/`topic_max`: those read as bounds on the topic count.
+DEFAULT_TOPIC_PAPER_MIN = 8
+DEFAULT_TOPIC_PAPER_MAX = 40
+
+# How many topic folders a bundle may have — the number the charter prompt asks for and
+# the number `problems` complains above, which were two different numbers until they
+# were merged here. A browsability limit like the others: a reader holding thirty
+# headings in mind is reading an ontology rather than a corpus.
+DEFAULT_MAX_TOPICS = 8
 
 
 class Topic(Model):
@@ -81,8 +90,19 @@ class Charter(Model):
     min_year: int | None = None
 
     target_papers: int = Field(default=DEFAULT_TARGET_PAPERS, ge=1)
-    topic_min: int = Field(default=DEFAULT_TOPIC_MIN, ge=1)
-    topic_max: int = Field(default=DEFAULT_TOPIC_MAX, ge=1)
+    # `topic_min`/`topic_max` are the names these carried before they were disambiguated;
+    # accepted so a charter.yaml written by an older run still loads through --charter.
+    topic_paper_min: int = Field(
+        default=DEFAULT_TOPIC_PAPER_MIN,
+        ge=1,
+        validation_alias=AliasChoices("topic_paper_min", "topic_min"),
+    )
+    topic_paper_max: int = Field(
+        default=DEFAULT_TOPIC_PAPER_MAX,
+        ge=1,
+        validation_alias=AliasChoices("topic_paper_max", "topic_max"),
+    )
+    max_topics: int = Field(default=DEFAULT_MAX_TOPICS, ge=1)
 
     # What counts as a small and a large study *in this literature*. Evidence strength
     # scores sample size against these, and they are here rather than in `src/` because
@@ -114,9 +134,10 @@ class Charter(Model):
                 "topic slugs must be unique — they are directory names: "
                 + ", ".join(sorted(duplicates))
             )
-        if self.topic_min > self.topic_max:
+        if self.topic_paper_min > self.topic_paper_max:
             raise ValueError(
-                f"topic_min ({self.topic_min}) exceeds topic_max ({self.topic_max})"
+                f"topic_paper_min ({self.topic_paper_min}) exceeds "
+                f"topic_paper_max ({self.topic_paper_max})"
             )
         return self
 
@@ -153,7 +174,7 @@ class Charter(Model):
     def capacity(self) -> tuple[int, int]:
         """(floor, ceiling) papers implied by the taxonomy and the per-topic bounds."""
         count = len(self.topic_taxonomy)
-        return count * self.topic_min, count * self.topic_max
+        return count * self.topic_paper_min, count * self.topic_paper_max
 
     def problems(self) -> list[str]:
         """Advisory complaints, for the confirmation pause.
@@ -165,20 +186,23 @@ class Charter(Model):
         issues: list[str] = []
         if not self.topic_taxonomy:
             issues.append("no topics — every paper would land in one undifferentiated pile")
-        if len(self.topic_taxonomy) > MAX_TOPICS:
+        if len(self.topic_taxonomy) > self.max_topics:
             issues.append(
-                f"{len(self.topic_taxonomy)} topics exceeds the browsable maximum of {MAX_TOPICS}"
+                f"{len(self.topic_taxonomy)} topics exceeds the browsable "
+                f"maximum of {self.max_topics}"
             )
         floor, ceiling = self.capacity()
         if self.topic_taxonomy and self.target_papers > ceiling:
             issues.append(
                 f"target_papers ({self.target_papers}) exceeds what the taxonomy can hold "
-                f"({ceiling} = {len(self.topic_taxonomy)} topics x topic_max {self.topic_max})"
+                f"({ceiling} = {len(self.topic_taxonomy)} topics "
+                f"x topic_paper_max {self.topic_paper_max})"
             )
         if self.topic_taxonomy and self.target_papers < floor:
             issues.append(
                 f"target_papers ({self.target_papers}) is below the taxonomy's floor "
-                f"({floor} = {len(self.topic_taxonomy)} topics x topic_min {self.topic_min})"
+                f"({floor} = {len(self.topic_taxonomy)} topics "
+                f"x topic_paper_min {self.topic_paper_min})"
             )
         return issues
 
@@ -189,7 +213,7 @@ class Charter(Model):
 
         `sort_keys=False` on purpose: the file is meant to be edited by hand between
         the charter pause and the build, and alphabetical order would separate
-        `topic_min` from `topic_max` and bury `prompt` in the middle.
+        `topic_paper_min` from `topic_paper_max` and bury `prompt` in the middle.
         """
         payload = self.model_dump(mode="json", exclude_none=True)
         return str(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, width=100))

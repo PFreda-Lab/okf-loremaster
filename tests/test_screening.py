@@ -61,8 +61,8 @@ def two_topics() -> Charter:
         prompt=PROMPT,
         task=PROMPT,
         topic_taxonomy=[Topic(slug="aa", title="Aa"), Topic(slug="bb", title="Bb")],
-        topic_min=1,
-        topic_max=8,
+        topic_paper_min=1,
+        topic_paper_max=8,
         target_papers=50,
     )
 
@@ -247,7 +247,7 @@ async def test_but_a_topic_under_its_floor_can_still_reach_an_unanswered_paper(
         return curation({offered[0]: True})
 
     scripted = ScriptedLLM(screen=screening(include=True, relevance=3), curate=curate)
-    charter = two_topics().model_copy(update={"topic_min": 3})
+    charter = two_topics().model_copy(update={"topic_paper_min": 3})
 
     async with node_deps(settings_factory, tmp_path, scripted=scripted) as deps:
         update = await curate_node(curate_state(3, charter), deps)

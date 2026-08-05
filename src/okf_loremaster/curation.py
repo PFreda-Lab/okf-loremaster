@@ -14,9 +14,9 @@ pool.
 The three bounds conflict, and the order they are applied in is what decides which one
 yields:
 
-1. `topic_max` is a hard trim. A topic past its ceiling stops being browsable, which is
+1. `topic_paper_max` is a hard trim. A topic past its ceiling stops being browsable, which is
    the failure this whole package exists to avoid.
-2. `topic_min` is a backfill from the reserve — papers the screener saw and the curator
+2. `topic_paper_min` is a backfill from the reserve — papers the screener saw and the curator
    did not keep. Cheaper and better informed than another search round, and it is tried
    first for exactly that reason.
 3. `target_papers` is a trim of the largest topics, and the only bound allowed to fail.
@@ -130,11 +130,11 @@ def enforce_bounds(
         TopicGap(
             topic=slug,
             kept=len(placed[slug]),
-            floor=charter.topic_min,
+            floor=charter.topic_paper_min,
             missing=missing_map.get(slug, ""),
         )
         for slug in slugs
-        if len(placed[slug]) < charter.topic_min
+        if len(placed[slug]) < charter.topic_paper_min
     )
 
     trimmed += _apply_target(charter, slugs, placed, taken, warnings)
@@ -183,16 +183,16 @@ def _apply_ceiling(
     taken: dict[str, str],
     order: Callable[[str], tuple[int, str]],
 ) -> int:
-    """Trim every topic to `topic_max`, worst-ranked first."""
+    """Trim every topic to `topic_paper_max`, worst-ranked first."""
     trimmed = 0
     for pmids in placed.values():
         pmids.sort(key=order)
-        if len(pmids) <= charter.topic_max:
+        if len(pmids) <= charter.topic_paper_max:
             continue
-        for pmid in pmids[charter.topic_max :]:
+        for pmid in pmids[charter.topic_paper_max :]:
             del taken[pmid]
-        trimmed += len(pmids) - charter.topic_max
-        del pmids[charter.topic_max :]
+        trimmed += len(pmids) - charter.topic_paper_max
+        del pmids[charter.topic_paper_max :]
     return trimmed
 
 
@@ -203,12 +203,12 @@ def _apply_floor(
     taken: dict[str, str],
     reserve: Mapping[str, Sequence[str]],
 ) -> int:
-    """Fill topics under `topic_min` from their reserve, in the order given."""
+    """Fill topics under `topic_paper_min` from their reserve, in the order given."""
     backfilled = 0
     for slug in slugs:
         pmids = placed[slug]
         for pmid in reserve.get(slug, ()):
-            if len(pmids) >= charter.topic_min:
+            if len(pmids) >= charter.topic_paper_min:
                 break
             if pmid in taken:
                 continue
@@ -228,7 +228,7 @@ def _apply_target(
     """Trim the largest topics down to `target_papers`, never below a floor.
 
     The bound that yields. `target_papers` is a browsability ceiling for the bundle as a
-    whole; `topic_min` is a judgment about whether a topic earns a heading. When they
+    whole; `topic_paper_min` is a judgment about whether a topic earns a heading. When they
     disagree the topics win, because a bundle slightly over its target still reads,
     while one with a two-paper topic in it reads as broken.
     """
@@ -236,7 +236,7 @@ def _apply_target(
     total = sum(len(pmids) for pmids in placed.values())
     while total > charter.target_papers:
         widest = max(
-            (slug for slug in slugs if len(placed[slug]) > charter.topic_min),
+            (slug for slug in slugs if len(placed[slug]) > charter.topic_paper_min),
             key=lambda slug: (len(placed[slug]), slug),
             default="",
         )
@@ -249,7 +249,7 @@ def _apply_target(
     if total > charter.target_papers:
         warnings.append(
             f"kept {total} papers against a target of {charter.target_papers}: trimming "
-            f"further would put a topic below its floor of {charter.topic_min}, and a "
+            f"further would put a topic below its floor of {charter.topic_paper_min}, and a "
             "topic below its floor is not worth having"
         )
     return trimmed

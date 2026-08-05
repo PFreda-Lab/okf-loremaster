@@ -34,9 +34,10 @@ from okf_loremaster.extraction_cache import ExtractionCache
 from okf_loremaster.llm.router import Router
 from okf_loremaster.ranking import DEFAULT_LAMBDA, SelectionComparison
 from okf_loremaster.schemas import (
+    DEFAULT_MAX_TOPICS,
     DEFAULT_TARGET_PAPERS,
-    DEFAULT_TOPIC_MAX,
-    DEFAULT_TOPIC_MIN,
+    DEFAULT_TOPIC_PAPER_MAX,
+    DEFAULT_TOPIC_PAPER_MIN,
     Candidate,
     Charter,
     ConceptRecord,
@@ -175,8 +176,9 @@ class Deps:
     # Charter fields the user has the last word on, applied by the charter node
     # whether the charter was drafted or supplied.
     target_papers: int = DEFAULT_TARGET_PAPERS
-    topic_min: int = DEFAULT_TOPIC_MIN
-    topic_max: int = DEFAULT_TOPIC_MAX
+    topic_paper_min: int = DEFAULT_TOPIC_PAPER_MIN
+    topic_paper_max: int = DEFAULT_TOPIC_PAPER_MAX
+    max_topics: int = DEFAULT_MAX_TOPICS
     # PubMed ids pulled per query. 200 is enough for a query worth planning and small
     # enough that a badly broadened one cannot flood the pool on its own.
     per_query_retmax: int = 200

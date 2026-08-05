@@ -16,10 +16,10 @@ from okf_loremaster.schemas.candidates import (
     ScoredCandidate,
 )
 from okf_loremaster.schemas.charter import (
+    DEFAULT_MAX_TOPICS,
     DEFAULT_TARGET_PAPERS,
-    DEFAULT_TOPIC_MAX,
-    DEFAULT_TOPIC_MIN,
-    MAX_TOPICS,
+    DEFAULT_TOPIC_PAPER_MAX,
+    DEFAULT_TOPIC_PAPER_MIN,
     Charter,
     Topic,
 )
@@ -96,9 +96,10 @@ from okf_loremaster.schemas.strength import (
 
 __all__ = [
     "DEFAULT_FRESHNESS_DAYS",
+    "DEFAULT_MAX_TOPICS",
     "DEFAULT_TARGET_PAPERS",
-    "DEFAULT_TOPIC_MAX",
-    "DEFAULT_TOPIC_MIN",
+    "DEFAULT_TOPIC_PAPER_MAX",
+    "DEFAULT_TOPIC_PAPER_MIN",
     "MAX_BODY_WORDS",
     "MAX_BOTTOM_LINE_SENTENCES",
     "MAX_CAVEAT_SENTENCES",
@@ -108,7 +109,6 @@ __all__ = [
     "MAX_QUOTE_WORDS",
     "MAX_SOURCE_CHARS",
     "MAX_TAGS",
-    "MAX_TOPICS",
     "MAX_VOCABULARY_HINTS",
     "NONE_REPORTED",
     "BundleCounts",

@@ -21,11 +21,11 @@ from dataclasses import dataclass
 from okf_loremaster.config import ConfigError, Role, Settings
 from okf_loremaster.llm.router import format_cost
 from okf_loremaster.prompts import (
-    CHARTER_SYSTEM,
     CURATE_SYSTEM,
     EXTRACT_SYSTEM,
     QUERY_PLAN_SYSTEM,
     SCREEN_SYSTEM,
+    charter_system,
     extract_context,
     screen_context,
 )
@@ -231,7 +231,10 @@ def project_spend(
             "charter",
             Role.REASONING,
             calls=1,
-            prompt_tokens=estimate_tokens(CHARTER_SYSTEM) + estimate_tokens(charter.prompt),
+            prompt_tokens=(
+                estimate_tokens(charter_system(charter.max_topics))
+                + estimate_tokens(charter.prompt)
+            ),
             completion_tokens=900,
             basis="one call; the prompt is measured, the reply allowed 900 tokens",
         )
@@ -283,18 +286,18 @@ def project_spend(
 
     topics = max(1, len(charter.topic_taxonomy))
     # `target_papers` is not the number of papers a run keeps. Trimming stops once no
-    # topic is above `topic_min` (`curation.py::_apply_target`), so the taxonomy sets a
+    # topic is above `topic_paper_min` (`curation.py::_apply_target`), so the taxonomy sets a
     # floor the target cannot pull a bundle under — and the floor is what priced a real
     # run. `--target-papers 10` against 8 topics of 8 kept 62 papers and extracted 61,
     # while this projected 10. Extraction is the dearest node per call, so being six
     # times short there put the whole estimate five times under what the run spent:
     # $1.01 projected, $5.04 paid.
-    floor = topics * charter.topic_min
+    floor = topics * charter.topic_paper_min
     kept = max(target_papers, floor)
     if floor > target_papers:
         notes.append(
             f"priced on the taxonomy's floor of {kept} papers ({topics} topics x "
-            f"topic_min {charter.topic_min}), not on target_papers ({target_papers}) — "
+            f"topic_paper_min {charter.topic_paper_min}), not on target_papers ({target_papers}) — "
             "when the two disagree the topics win and the bundle comes in over target"
         )
     included = min(screened, kept * 2)

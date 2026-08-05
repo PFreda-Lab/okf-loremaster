@@ -107,7 +107,7 @@ def charter_view(charter: Charter) -> list[RenderableType]:
     if charter.outcome:
         facts.add_row("outcome", charter.outcome)
     facts.add_row("target", f"{charter.target_papers} papers")
-    facts.add_row("per topic", f"{charter.topic_min}-{charter.topic_max}")
+    facts.add_row("per topic", f"{charter.topic_paper_min}-{charter.topic_paper_max}")
     if charter.min_year:
         facts.add_row("from", str(charter.min_year))
     facts.add_row("languages", ", ".join(charter.languages) or "[dim]any[/dim]")

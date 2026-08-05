@@ -23,12 +23,16 @@ from typing import Any
 
 from okf_loremaster.llm.fake import FakeCompletion
 from okf_loremaster.prompts import (
-    CHARTER_SYSTEM,
     CURATE_SYSTEM,
     EXTRACT_SYSTEM,
     QUERY_PLAN_SYSTEM,
     SCREEN_SYSTEM,
+    charter_system,
 )
+
+# The charter prompt varies with `--max-topics`, so it is recognized by its opening
+# line. Sliced from the real thing rather than retyped, so it cannot go stale.
+_CHARTER_MARKER = charter_system(1).split("\n", 1)[0]
 
 # The four shapes this reads back out of a prompt, each written by `prompts.py`.
 _PAPER = re.compile(r"\n\nPaper:\n\n(.*)$", re.DOTALL)
@@ -217,7 +221,10 @@ class ScriptedLLM:
         if system == QUERY_PLAN_SYSTEM:
             self.plans += 1
             return json.dumps({"queries": list(self.plan)})
-        if system == CHARTER_SYSTEM:
+        # Matched on a stable fragment rather than the whole string: the charter prompt
+        # is now assembled per run around `--max-topics`, so no single value of it is
+        # the prompt.
+        if _CHARTER_MARKER in system:
             raise AssertionError(
                 "a charter was drafted; these tests supply one so the taxonomy is fixed"
             )

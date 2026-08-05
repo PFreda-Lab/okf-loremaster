@@ -198,7 +198,7 @@ def _offers(
     order: Mapping[str, int],
 ) -> dict[str, list[str]]:
     """The included papers each topic is asked about, best first and capped."""
-    cap = max(1, charter.topic_max * OFFER_MULTIPLE)
+    cap = max(1, charter.topic_paper_max * OFFER_MULTIPLE)
     offers: dict[str, list[str]] = {slug: [] for slug in charter.slugs}
     for pmid, slug in assigned.items():
         if verdicts[pmid].include and slug in offers:
@@ -327,8 +327,8 @@ async def _curate_one(
                         topic=topic.slug,
                         scope=topic.scope,
                         seed_terms=list(topic.seed_terms),
-                        floor=charter.topic_min,
-                        ceiling=charter.topic_max,
+                        floor=charter.topic_paper_min,
+                        ceiling=charter.topic_paper_max,
                         papers=papers,
                     ),
                 },

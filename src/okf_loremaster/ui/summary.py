@@ -34,8 +34,8 @@ def render_topics(console: Console, state: RunState) -> None:
         return
 
     charter = state.get("charter")
-    floor = charter.topic_min if charter is not None else 0
-    ceiling = charter.topic_max if charter is not None else 0
+    floor = charter.topic_paper_min if charter is not None else 0
+    ceiling = charter.topic_paper_max if charter is not None else 0
     titles = {topic.slug: topic.title for topic in charter.topic_taxonomy} if charter else {}
     curation = state.get("curation")
     gaps = {gap.topic: gap for gap in (curation.gaps if curation is not None else [])}

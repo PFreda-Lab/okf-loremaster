@@ -22,11 +22,11 @@ from okf_loremaster.schemas.limits import (
 )
 
 __all__ = [
-    "CHARTER_SYSTEM",
     "CURATE_SYSTEM",
     "EXTRACT_SYSTEM",
     "QUERY_PLAN_SYSTEM",
     "SCREEN_SYSTEM",
+    "charter_system",
     "charter_user",
     "curate_user",
     "extract_context",
@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 
-CHARTER_SYSTEM = """\
+_CHARTER_SYSTEM = """\
 You are drafting the terms of reference for a literature review that will be read by \
 another agent, not by a person browsing for interest.
 
@@ -58,8 +58,8 @@ restatement of the request matches nothing at all.
 4. `inclusion` / `exclusion` — short criteria a screener can apply to a title and \
 abstract alone. Four or fewer each. Say nothing you would not be able to check from an \
 abstract.
-5. `topic_taxonomy` — between 4 and 8 topics that together cover the request and do \
-not overlap. Each needs:
+5. `topic_taxonomy` — {topics}. Between them they must cover the request without \
+overlapping. Each needs:
    - `slug`: lowercase, hyphenated, 2-64 characters, unique. It becomes a directory \
 name.
    - `title`: how a reader would name the topic.
@@ -97,6 +97,25 @@ topic that would hold half the corpus is two topics.
 
 Do not invent a scope the request did not ask for, and do not narrow one it did.\
 """
+
+# Below this the taxonomy stops dividing the literature and starts enumerating it, so
+# the floor only follows `max_topics` down, never up.
+_CHARTER_TOPIC_FLOOR = 4
+
+
+def charter_system(max_topics: int) -> str:
+    """The charter prompt, with the taxonomy's size set by `--max-topics`.
+
+    A function rather than a constant because a ceiling the model never sees is not a
+    setting: `Charter.problems` would warn about a taxonomy that the prompt had asked
+    for. One number, said once, in the only place that can act on it.
+    """
+    floor = min(_CHARTER_TOPIC_FLOOR, max_topics)
+    if floor < max_topics:
+        topics = f"between {floor} and {max_topics} topics"
+    else:
+        topics = "exactly 1 topic" if max_topics == 1 else f"exactly {max_topics} topics"
+    return _CHARTER_SYSTEM.format(topics=topics)
 
 
 def charter_user(prompt: str) -> str:

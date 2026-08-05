@@ -66,8 +66,8 @@ def charter_for(**overrides: Any) -> Charter:
             for topic in TOPICS
         ],
         target_papers=TARGET,
-        topic_min=TOPIC_MIN,
-        topic_max=TOPIC_MAX,
+        topic_paper_min=TOPIC_MIN,
+        topic_paper_max=TOPIC_MAX,
         # The scale evidence strength measures sample size against. Bracketing
         # `fake_ncbi.sample_size`, which runs a couple of hundred either side of 200, so
         # an end-to-end run produces papers on both sides of the midpoint rather than a
@@ -235,8 +235,8 @@ async def full_run(
         out=tmp_path / "run",
         pool_size=POOL_SIZE,
         target_papers=TARGET,
-        topic_min=TOPIC_MIN,
-        topic_max=TOPIC_MAX,
+        topic_paper_min=TOPIC_MIN,
+        topic_paper_max=TOPIC_MAX,
         **overrides,
     )
     state, _ = await build_run(

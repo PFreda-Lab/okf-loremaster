@@ -238,8 +238,11 @@ def build(
     # Literals rather than the constants they mirror: importing them would pull pydantic
     # into `--help`. `test_cli_defaults` fails if the two ever drift apart.
     target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 200,
-    topic_min: Annotated[int, typer.Option(help="Minimum papers per topic.")] = 8,
-    topic_max: Annotated[int, typer.Option(help="Maximum papers per topic.")] = 40,
+    topic_paper_min: Annotated[int, typer.Option(help="Minimum papers inside one topic.")] = 8,
+    topic_paper_max: Annotated[int, typer.Option(help="Maximum papers inside one topic.")] = 40,
+    max_topics: Annotated[
+        int, typer.Option(help="Topic folders the charter may divide the review into.", min=1)
+    ] = 8,
     max_rounds: Annotated[
         int, typer.Option(help="Search rounds, including the first. 1 disables re-query.", min=1)
     ] = 2,
@@ -346,8 +349,9 @@ def build(
         pool_size=pool_size,
         screen_budget=screen_budget,
         target_papers=target_papers,
-        topic_min=topic_min,
-        topic_max=topic_max,
+        topic_paper_min=topic_paper_min,
+        topic_paper_max=topic_paper_max,
+        max_topics=max_topics,
         max_rounds=max_rounds,
         interactive=interactive,
         review=review,
