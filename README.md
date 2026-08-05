@@ -545,14 +545,14 @@ has a ceiling. `okf-loremaster runs` prints each size against its limit.
 
 | | Holds | Default cap | Also bounded by |
 |---|---|---|---|
-| checkpoints | run state, for `--resume` | `CHECKPOINT_MAX_MB` — 1024 | the newest `CHECKPOINT_KEEP_RUNS` runs, five |
+| checkpoints | run state, for `--resume` | `CHECKPOINT_MAX_MB` — 2048 | the newest `CHECKPOINT_KEEP_RUNS` runs, five |
 | responses | what PubMed and PMC returned | `HTTP_CACHE_MAX_MB` — 1024 | `HTTP_CACHE_TTL_DAYS`, thirty |
 | readings | papers already extracted | `EXTRACTION_CACHE_MAX_MB` — 512 | nothing; a reading does not go stale |
 
 Every name takes the `OKF_LOREMASTER_` prefix, and `0` turns any one of them off. Each is applied
-when a build starts, so the true peak is the sum plus the run being written — a cap here is a
-promise about what you come back to, not a limit that can never be crossed. Within a cap the oldest
-entries go first.
+at both ends of a build — on the way in and again on the way out — so between builds the three
+stores sit under their caps rather than at their caps plus the last run. Only a run in flight is
+over, and nothing is reclaimed unless you build. Within a cap the oldest entries go first.
 
 Checkpoints are the expensive part: a build writes 100 to 350 MB of them, because the whole run
 state is saved once per node and by the later ones that state holds abstracts, full texts and

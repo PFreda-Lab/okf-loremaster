@@ -160,15 +160,16 @@ class Settings(BaseSettings):
     checkpoint_keep_runs: int = 5
 
     # Ceilings on the three things that accumulate, in MB, so that none of them can grow
-    # without limit however long the tool is used. Each is applied when a build starts,
-    # so the honest bound is the sum of these plus the run being written — see
-    # `okf_loremaster.retention`. 0 turns one off.
+    # without limit however long the tool is used. Applied at both ends of a build, so
+    # between builds each store is under its ceiling and only a run in flight is over —
+    # see `okf_loremaster.retention`. 0 turns one off.
     #
-    # Checkpoints are scratch and usually bounded by the count above long before this
-    # matters; the ceiling is what catches an unusually large run. The other two are not
-    # scratch — they are what makes a rerun cheap, and the extraction cache is what makes
-    # it free — so they are set where an ordinary year of use will not reach them.
-    checkpoint_max_mb: int = 1024
+    # Checkpoints are scratch, and the count above is meant to be what binds: five runs
+    # measure around 900 MB, so a ceiling of 1024 would quietly cut how many are
+    # resumable rather than catching an outlier. This is set clear of that. The other two
+    # are not scratch — they are what makes a rerun cheap, and the extraction cache is
+    # what makes it free — so they sit where ordinary use will not reach them.
+    checkpoint_max_mb: int = 2048
     http_cache_max_mb: int = 1024
     extraction_cache_max_mb: int = 512
 

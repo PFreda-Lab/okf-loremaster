@@ -361,6 +361,30 @@ async def test_the_newest_run_survives_the_ceiling(
     assert kept == ["20260801-120000-aaaa"]
 
 
+async def test_a_finished_build_leaves_the_store_at_its_ceiling(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retention ran only on the way in, so a store rested at its ceiling *plus* the run
+    just written — until somebody built again, and if they never did, forever. A cap you
+    are over for the whole time you are not using the tool is not much of a cap.
+
+    Run ids are pinned because they are the sort key: two builds inside the same second
+    would be ordered by the random suffix, and this asserts which one survived.
+    """
+    ids = iter(["20260101-000001-aaaa", "20260101-000002-bbbb"])
+    monkeypatch.setattr("okf_loremaster.run.new_run_id", lambda: next(ids))
+    settings = run_settings(settings_factory, tmp_path).model_copy(
+        update={"checkpoint_keep_runs": 1}
+    )
+
+    await full_run(settings_factory, tmp_path, monkeypatch, settings=settings)
+    await full_run(settings_factory, tmp_path, monkeypatch, settings=settings)
+
+    kept, kept_writes = await threads(settings)
+    assert kept == ["20260101-000002-bbbb"], "the first run outlived the build that replaced it"
+    assert kept_writes == kept
+
+
 async def test_a_finished_run_whose_folder_was_deleted_is_dropped(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

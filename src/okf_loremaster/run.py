@@ -448,12 +448,19 @@ def run_directory(
 
 
 async def _reclaim(settings: Settings, clients: Clients, extractions: ExtractionCache) -> None:
-    """Put every store back under its ceiling before the run adds to it.
+    """Put every store back under its ceiling. Called at both ends of a build.
 
     All three of them, in one place, because "how much disk does this tool use" is one
     question and answering it from three scattered call sites is how one of them ends up
     without a limit. Which is what happened: the checkpoints got a bound first and the
     other two kept growing.
+
+    Both ends, because on the way in alone a ceiling only describes the moment a build
+    starts. The run then writes on top of it and nothing looks again, so the store rests
+    at its ceiling plus the run just written — until the next build, and if there is
+    never a next build, forever. A cap you are over for the whole time you are not using
+    the tool is not much of a cap. Running again on the way out costs one pass over
+    already-pruned stores and makes the resting state the number that was configured.
 
     Here rather than in a node, and silent. It is not part of the pipeline, it produces
     nothing the bundle records, and a line about disk in front of every run is noise —
@@ -606,6 +613,14 @@ async def build_run(
 
     if state.get("bundle") and not options.dry_run:
         _settle_finalize(options.finalize, corpus, console=console)
+
+    # Again on the way out, so the stores rest at their ceilings rather than at their
+    # ceilings plus this run. After `_settle_finalize`, because that is what decides
+    # whether the folder this run recorded still exists. Same exemption as on the way in
+    # and for the same reason: a resumed thread is not the newest, and the count rule
+    # would drop the run that was just picked up the moment a newer one exists.
+    if options.resume is None:
+        await _reclaim(resolved, clients, extractions)
     return state, directory
 
 

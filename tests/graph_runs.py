@@ -216,6 +216,7 @@ async def full_run(
     scripted: ScriptedLLM | None = None,
     charter: Charter | None = None,
     finds_nothing: bool = False,
+    settings: Any = None,
     **overrides: Any,
 ) -> Run:
     model = scripted if scripted is not None else scripted_run()
@@ -242,7 +243,7 @@ async def full_run(
     state, _ = await build_run(
         options,
         console=Console(file=io.StringIO(), width=160, no_color=True),
-        settings=run_settings(settings_factory, tmp_path),
+        settings=settings if settings is not None else run_settings(settings_factory, tmp_path),
         transport=fake.transport(),
     )
     return Run(state, model, fake)

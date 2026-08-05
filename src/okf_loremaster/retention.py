@@ -7,10 +7,11 @@ and the extraction cache is what makes it *free*, since extract is the only node
 per paper. So the checkpoint store is trimmed hard and the other two only at a ceiling they
 are not expected to reach.
 
-Every budget here is applied when a build starts, not while it runs. A build writes on top
-of whatever survived, so the true peak is a budget plus one run, and a cap of a gigabyte is
-a promise about what you come back to rather than a limit that can never be crossed. Saying
-otherwise would be a number that quietly does not hold.
+Every budget here is applied at both ends of a build, not while it runs. On the way in so a
+build starts from a store that fits, and again on the way out so it does not leave one that
+does not — a store trimmed only on entry rests at its ceiling *plus* the run just written,
+and if nobody builds again it rests there forever. What is still true is that a run in
+flight can exceed a cap, and that nothing at all is reclaimed unless a build happens.
 
 Byte budgets are on content, and files are deleted oldest first. Age is the only ranking
 available that is not a guess: what a cache holds is answers, and an answer nobody has
