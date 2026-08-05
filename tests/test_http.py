@@ -233,7 +233,7 @@ async def test_a_certificate_failure_is_not_retried_and_names_the_cause(
     Found on a corporate network that TLS-intercepts one NIH host and not another: the
     run reported `ConnectError` three times, backed off between them, and concluded the
     service was unavailable. The service was fine. Both halves of that are fixed here —
-    one attempt, and a message that points at the proxy rather than at NIH.
+    one attempt, and a message that says trust failed rather than that NIH is down.
     """
     calls = {"n": 0}
 
@@ -249,6 +249,36 @@ async def test_a_certificate_failure_is_not_retried_and_names_the_cause(
         await client.get_text(URL, cacheable=False)
     assert calls["n"] == 1, "a retry cannot make a certificate trusted"
     assert client.stats.retries == 0
+
+
+async def test_a_certificate_failure_quotes_openssl_rather_than_guessing_the_cause(
+    tmp_path: Path,
+) -> None:
+    """Two causes look identical from here, and the message used to assert one of them.
+
+    It said the failure was "almost always a proxy on your own network" and pointed at
+    `OKF_LOREMASTER_CA_BUNDLE`. It cannot know that: `self-signed certificate` is what a
+    corporate root looks like and equally what a service answering on a misconfigured
+    host looks like, and one NIH host fails exactly that way while the others in the same
+    run succeed. A reader followed the message and went looking for a CA file that could
+    not have helped.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("certificate verify failed") from (
+            ssl.SSLCertVerificationError("self-signed certificate")
+        )
+
+    client = _client(handler, tmp_path)
+    with pytest.raises(HttpError) as excinfo:
+        await client.get_text(URL, cacheable=False)
+
+    message = str(excinfo.value)
+    assert "self-signed certificate" in message, "OpenSSL's own words reach the reader"
+    assert "OKF_LOREMASTER_CA_BUNDLE" in message, "still named, for the case where it is the fix"
+    # Both causes, and the one thing that separates them: whether the run's other hosts
+    # failed too. Asserting either one is what this test exists to prevent.
+    assert "other hosts" in message and "this host failed alone" in message
 
 
 async def test_an_ordinary_connect_error_is_still_retried(tmp_path: Path) -> None:

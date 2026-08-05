@@ -274,8 +274,11 @@ class HttpClient:
             try:
                 response = await client.get(url, params=dict(params or {}))
             except (httpx.TimeoutException, httpx.TransportError) as exc:
-                if _is_certificate_failure(exc):
-                    raise HttpError(f"{_redact(url)}: {_CERTIFICATE_ADVICE}") from exc
+                trust_failure = _certificate_failure(exc)
+                if trust_failure is not None:
+                    raise HttpError(
+                        f"{_redact(url)}: {_certificate_advice(trust_failure)}"
+                    ) from exc
                 if attempt == attempts:
                     raise HttpError(f"{_redact(url)}: {type(exc).__name__}") from exc
                 reason = type(exc).__name__
@@ -311,23 +314,45 @@ class HttpClient:
         raise AssertionError("unreachable")
 
 
-_CERTIFICATE_ADVICE = (
-    "TLS certificate verification failed. This is almost always a proxy on your own "
-    "network terminating TLS and presenting its own certificate, not the service being "
-    "down. Point OKF_LOREMASTER_CA_BUNDLE at your organization's CA file."
-)
+def _certificate_advice(exc: ssl.SSLError) -> str:
+    """What a TLS trust failure means, without asserting which cause it had.
+
+    This message used to say the failure was "almost always a proxy on your own network"
+    and to point at `OKF_LOREMASTER_CA_BUNDLE`. It cannot know that. `icite.od.nih.gov`
+    fails here with OpenSSL reporting `self-signed certificate`, which is what a proxy's
+    own root looks like *and* what a service answering on a misconfigured host looks
+    like. The two are indistinguishable from inside one request, and asserting the first
+    sent a reader off to obtain a corporate CA file that could not have helped.
+
+    So the reason is quoted rather than interpreted, and the discriminator named instead:
+    whether the other hosts in this run also failed. They share a network and they do not
+    share an operator, so one host failing alone is that host's certificate and all of
+    them failing together is the network's. A reader has that in front of them already —
+    the rest of the warnings — which is why this does not go looking for it.
+    """
+    reason = str(getattr(exc, "verify_message", "") or exc).strip() or "no reason given"
+    return (
+        f"TLS certificate verification failed: {reason}. Retrying cannot help — a "
+        "certificate does not become trusted between attempts. If the run's other hosts "
+        "failed the same way, a proxy on your own network is terminating TLS: point "
+        "OKF_LOREMASTER_CA_BUNDLE at your organization's CA file. If this host failed "
+        "alone, the certificate is the service's own and nothing here configures it away."
+    )
 
 
-def _is_certificate_failure(exc: BaseException) -> bool:
-    """Whether a transport error is really a TLS trust failure.
+def _certificate_failure(exc: BaseException) -> ssl.SSLError | None:
+    """The TLS trust failure under a transport error, or None if it is something else.
+
+    The error itself rather than a boolean, because the advice quotes OpenSSL's reason
+    and only this object carries it.
 
     Worth telling apart from every other `ConnectError` for two reasons, both learned
     from a run that reported `ConnectError from icite.od.nih.gov` three times and then
     ranked without citation metrics. Retrying is pointless — a certificate does not
     become trusted between attempts — so this raises on the first one instead of
-    sleeping through a backoff schedule that cannot help. And the generic message sends
-    a reader to the service's status page when the service is fine and the interception
-    is local, which is the more expensive half of the mistake.
+    sleeping through a backoff schedule that cannot help. And `ConnectError` on its own
+    reads as "the service is down", which sends a reader to a status page that will say
+    everything is fine; what actually failed is trust, and only this branch can say so.
 
     Read off the `__cause__` chain rather than the exception type: httpx reports this as
     a plain `ConnectError`, and only the `ssl.SSLError` underneath it says what happened.
@@ -337,9 +362,9 @@ def _is_certificate_failure(exc: BaseException) -> bool:
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         if isinstance(current, ssl.SSLError):
-            return True
+            return current
         current = current.__cause__ or current.__context__
-    return False
+    return None
 
 
 def _backoff(attempt: int) -> float:
