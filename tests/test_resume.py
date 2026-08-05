@@ -15,6 +15,7 @@ written per paper, so a run interrupted *inside* that node keeps what it already
 from __future__ import annotations
 
 import io
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,7 @@ from okf_loremaster.run import (
     started_at,
 )
 
-from graph_runs import PROMPT, full_run, run_settings
+from graph_runs import PROMPT, charter_for, full_run, run_settings
 
 
 async def resume(settings_factory: Any, tmp_path: Path, run_id: str, **overrides: Any) -> Any:
@@ -200,12 +201,16 @@ async def test_a_second_run_of_the_same_question_re_reads_no_papers(
 # --- what the store keeps -----------------------------------------------------
 
 
-async def seed_runs(settings: Any, *run_ids: str) -> None:
+async def seed_runs(settings: Any, *run_ids: str, size: int = 0) -> None:
     """Put threads in the store without paying for runs to make them.
 
     Retention is SQL over two tables, and what it has to get right is which thread_ids
     it picks — not anything about what a checkpoint contains. Three real runs to prove
     that would be minutes of test time to assert on an `ORDER BY`.
+
+    `size` pads the checkpoint blob, for the rule that is about bytes rather than count.
+    A real run is 100 to 350 MB and the ceiling has to be tested against something; these
+    are the same arithmetic three orders of magnitude down.
     """
     from okf_loremaster.graph.build import checkpointer
 
@@ -215,7 +220,7 @@ async def seed_runs(settings: Any, *run_ids: str) -> None:
             await saver.conn.execute(
                 "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, "
                 "type, checkpoint, metadata) VALUES (?, '', 'c1', 'x', ?, ?)",
-                (run_id, b"{}", b"{}"),
+                (run_id, b"{}" + b" " * size, b"{}"),
             )
             await saver.conn.execute(
                 "INSERT INTO writes (thread_id, checkpoint_ns, checkpoint_id, task_id, "
@@ -323,6 +328,89 @@ async def test_a_resumed_run_prunes_nothing(
 
     kept, _ = await threads(settings)
     assert "20200101-120000-aaaa" in kept, "the resume pruned on its way in"
+
+
+async def test_the_store_has_a_ceiling_in_bytes_as_well_as_in_runs(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """The count is the rule that normally binds; this is what catches runs several
+    times the usual size, so that the ceiling is a number of megabytes rather than a
+    number of runs times a guess about how big one is."""
+    settings = run_settings(settings_factory, tmp_path)
+    ids = [f"2026080{day}-120000-aaaa" for day in range(1, 6)]
+    await seed_runs(settings, *ids, size=10_000)
+
+    result = await prune_checkpoints(settings, keep=0, max_bytes=25_000)
+
+    assert result.runs == 3
+    kept, kept_writes = await threads(settings)
+    assert kept == ids[-1:-3:-1], "dropped by size, newest kept"
+    assert kept_writes == kept
+
+
+async def test_the_newest_run_survives_the_ceiling(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """A ceiling that deletes the run somebody is about to resume has stopped being a
+    ceiling and become a bug. One run over budget is over budget."""
+    settings = run_settings(settings_factory, tmp_path)
+    await seed_runs(settings, "20260801-120000-aaaa", size=10_000)
+
+    assert (await prune_checkpoints(settings, keep=0, max_bytes=100)).runs == 0
+    kept, _ = await threads(settings)
+    assert kept == ["20260801-120000-aaaa"]
+
+
+async def test_a_finished_run_whose_folder_was_deleted_is_dropped(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one honest link between a bundle and what it cost. A run records where it
+    wrote and whether it validated, so a finished run whose folder has been deleted is
+    hundreds of megabytes of checkpoints for output that no longer exists — and nothing
+    will resume it, because there is nothing left to resume to."""
+    settings = run_settings(settings_factory, tmp_path)
+    run = await full_run(settings_factory, tmp_path, monkeypatch)
+    assert (await prune_checkpoints(settings, keep=0)).runs == 0, "its folder is right there"
+
+    shutil.rmtree(tmp_path / "run")
+
+    assert (await prune_checkpoints(settings, keep=0)).runs == 1
+    assert await find_run(settings, run.state["run_id"]) is None
+
+
+async def test_an_unfinished_run_is_not_judged_by_a_folder_it_may_never_have_written(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run stopped at the charter may never have created a folder at all, and stopped
+    runs are the entire set `--resume` exists for. Judging them the same way would delete
+    every one of them."""
+    from okf_loremaster.ui.pauses import PauseDecision
+
+    from fake_ncbi import FakeNCBI
+
+    class StopsAtCharter:
+        async def charter(self, charter: Any) -> PauseDecision:
+            return PauseDecision(proceed=False, reason="not this taxonomy")
+
+        async def retrieve(self, state: Any, *, estimate: Any) -> PauseDecision:
+            return PauseDecision(proceed=True)
+
+    given = tmp_path / "given.yaml"
+    given.write_text(charter_for().to_yaml(), encoding="utf-8")
+    settings = run_settings(settings_factory, tmp_path)
+    state, directory = await build_run(
+        RunOptions(prompt=PROMPT, charter_path=given, out=tmp_path / "stopped"),
+        console=Console(file=io.StringIO(), width=160, no_color=True),
+        settings=settings,
+        transport=FakeNCBI().transport(),
+        pause=StopsAtCharter(),
+    )
+    assert not state.get("validated")
+    shutil.rmtree(directory)
+
+    assert (await prune_checkpoints(settings, keep=0)).runs == 0
+    found = await find_run(settings, state["run_id"])
+    assert found is not None and found.finished is False
 
 
 # --- what survives being written down and read back ---------------------------

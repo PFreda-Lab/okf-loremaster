@@ -393,12 +393,20 @@ def runs(
     from rich.table import Table
 
     from okf_loremaster.config import load_settings
+    from okf_loremaster.retention import (
+        MB,
+        directory_bytes,
+        extraction_cache_path,
+        http_cache_path,
+    )
     from okf_loremaster.run import list_runs, store_size
 
     with _reported():
         settings = load_settings()
         past = asyncio.run(list_runs(settings, limit=limit))
         held = store_size(settings)
+        http = directory_bytes(http_cache_path(settings))
+        read = directory_bytes(extraction_cache_path(settings))
 
     if not past:
         console.print(
@@ -434,16 +442,24 @@ def runs(
             f"  [dim](the question is read back from the run)[/dim]"
         )
 
-    # What the store costs, next to what bounds it. A run's checkpoints are hundreds of
-    # megabytes and nothing outside this command ever mentions them, so without a number
-    # here the only way to find out is to go looking in the cache directory.
+    # What the caches cost, next to what bounds each of them. Nothing else in the tool
+    # ever mentions this, so without it the only way to find out where the disk went is
+    # to go looking in the cache directory — which is how it reached three gigabytes
+    # before anyone noticed. Each line is a measurement and its ceiling, so a store
+    # sitting at its limit is visible rather than inferred.
     keep = settings.checkpoint_keep_runs
-    console.print(
-        f"\n[dim]checkpoints:[/dim] {held / 1_048_576:,.0f} MB [dim]in "
-        f"{settings.cache_dir}, keeping the newest "
-        + (f"{keep} run(s)" if keep > 0 else "— retention off")
-        + "[/dim]"
-    )
+    kept = f"newest {keep}" if keep > 0 else "all"
+    console.print(f"\n[dim]caches in[/dim] {settings.cache_dir}")
+    for label, size, cap, note in (
+        ("checkpoints", held, settings.checkpoint_max_mb, f"{kept} runs"),
+        ("responses", http, settings.http_cache_max_mb, f"{settings.http_cache_ttl_days}d"),
+        ("readings", read, settings.extraction_cache_max_mb, "no expiry"),
+    ):
+        ceiling = f"{cap:,} MB" if cap > 0 else "uncapped"
+        console.print(
+            f"  [dim]{label:<12}[/dim] {size / MB:>7,.0f} MB "
+            f"[dim]of {ceiling}, {note}[/dim]"
+        )
 
 if __name__ == "__main__":
     app()

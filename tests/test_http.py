@@ -189,6 +189,26 @@ def test_a_cache_with_no_ttl_sweeps_nothing(tmp_path: Path) -> None:
     assert list(tmp_path.rglob("*.json"))
 
 
+def test_a_budget_bounds_a_cache_the_ttl_cannot(tmp_path: Path) -> None:
+    """A TTL is not a ceiling. Every entry here is a day old against a month-long
+    lifetime, so the sweep has nothing to expire — and enough traffic inside one lifetime
+    is still unbounded growth. The two answer different questions: the TTL is about an
+    answer being stale, the budget is about disk."""
+    cache = DiskCache(tmp_path, ttl_days=30)
+    for index in range(4):
+        key = DiskCache.key("GET", URL, {"term": f"t{index}"})
+        cache.put(key, status=200, text="x" * 500, content_type="")
+        # Aged by hand: four files written in a loop share an mtime on a filesystem with
+        # one-second granularity, and "oldest first" would then pass on any order at all.
+        expire(tmp_path / key[:2] / f"{key}.json", index + 1)
+
+    assert cache.sweep() == (0, 0), "nothing is past a 30-day TTL yet"
+    files, freed = cache.sweep(max_bytes=1200)
+    assert files == 2 and freed > 0
+    assert cache.get(DiskCache.key("GET", URL, {"term": "t0"})) is not None, "newest first"
+    assert cache.get(DiskCache.key("GET", URL, {"term": "t3"})) is None, "oldest went"
+
+
 def test_a_disabled_cache_never_answers(tmp_path: Path) -> None:
     cache = DiskCache(tmp_path, ttl_days=30, enabled=False)
     key = DiskCache.key("GET", URL, {"term": "x"})

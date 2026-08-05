@@ -41,6 +41,7 @@ from okf_loremaster.clients.pubtator import (
 )
 from okf_loremaster.config import ConfigError, Settings
 from okf_loremaster.events import EventBus
+from okf_loremaster.retention import http_cache_path
 
 __all__ = [
     "AnnotatedDocument",
@@ -123,7 +124,7 @@ def build_clients(
         )
 
     cache = DiskCache(
-        settings.cache_dir / "http",
+        http_cache_path(settings),
         ttl_days=settings.http_cache_ttl_days,
         enabled=settings.http_cache_enabled,
     )

@@ -159,6 +159,19 @@ class Settings(BaseSettings):
     # the store holds this many plus the one being written. Set to 0 to keep everything.
     checkpoint_keep_runs: int = 5
 
+    # Ceilings on the three things that accumulate, in MB, so that none of them can grow
+    # without limit however long the tool is used. Each is applied when a build starts,
+    # so the honest bound is the sum of these plus the run being written — see
+    # `okf_loremaster.retention`. 0 turns one off.
+    #
+    # Checkpoints are scratch and usually bounded by the count above long before this
+    # matters; the ceiling is what catches an unusually large run. The other two are not
+    # scratch — they are what makes a rerun cheap, and the extraction cache is what makes
+    # it free — so they are set where an ordinary year of use will not reach them.
+    checkpoint_max_mb: int = 1024
+    http_cache_max_mb: int = 1024
+    extraction_cache_max_mb: int = 512
+
     # --- Accessors ---------------------------------------------------------
 
     def model_for(self, role: Role) -> str:

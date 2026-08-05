@@ -25,6 +25,7 @@ from urllib.parse import urlencode
 import httpx
 
 from okf_loremaster.events import EventBus, WarningEvent
+from okf_loremaster.retention import trim_to_budget
 
 # NCBI publishes 3 requests/second without an API key and 10 with one. We run under
 # both ceilings on purpose: the limit is enforced per IP, and a shared institutional
@@ -197,14 +198,18 @@ class DiskCache:
             # A cache that cannot be written is a slow run, not a failed one.
             return
 
-    def sweep(self) -> tuple[int, int]:
-        """Delete entries past the TTL. Returns how many files and how many bytes.
+    def sweep(self, *, max_bytes: int = 0) -> tuple[int, int]:
+        """Delete entries past the TTL, then whatever still does not fit `max_bytes`.
 
         The TTL expired reads and nothing ever expired the files. An entry past it is
         ignored on lookup and then stays on disk indefinitely, because the only thing
         that overwrites one is the same URL being requested again — so a directory that
         looks like a month of cache is really every response this tool has ever seen.
         This is what makes the configured lifetime mean what it says.
+
+        The TTL alone is not a ceiling, though: enough traffic inside one lifetime is
+        still unbounded. `max_bytes` is the ceiling, and the two answer different
+        questions — the TTL is about an answer being stale, the budget is about disk.
 
         Judged by modification time rather than by the `stored_at` inside each entry, so
         a sweep is one stat per file instead of a parse. They agree: an entry is written
@@ -213,22 +218,26 @@ class DiskCache:
         Best effort throughout, on the same grounds as `put` — a cache that cannot be
         tidied is disk, not a failed run.
         """
-        if not self._enabled or self._ttl <= 0:
+        if not self._enabled:
             return (0, 0)
-        cutoff = time.time() - self._ttl
+
         files = 0
         freed = 0
-        for path in self._root.glob("*/*.json"):
-            try:
-                stat = path.stat()
-                if stat.st_mtime > cutoff:
+        if self._ttl > 0:
+            cutoff = time.time() - self._ttl
+            for path in self._root.glob("*/*.json"):
+                try:
+                    stat = path.stat()
+                    if stat.st_mtime > cutoff:
+                        continue
+                    path.unlink()
+                except OSError:
                     continue
-                path.unlink()
-            except OSError:
-                continue
-            files += 1
-            freed += stat.st_size
-        return (files, freed)
+                files += 1
+                freed += stat.st_size
+
+        trimmed, reclaimed = trim_to_budget(self._root, max_bytes=max_bytes)
+        return (files + trimmed, freed + reclaimed)
 
 
 @dataclass

@@ -36,6 +36,7 @@ from okf_loremaster.curation import MAX_ROUNDS
 from okf_loremaster.extraction_cache import ExtractionCache
 from okf_loremaster.finalize import Finalize
 from okf_loremaster.okf.layout import okf_bundle_path
+from okf_loremaster.retention import extraction_cache_path
 from okf_loremaster.schemas import (
     DEFAULT_MAX_TOPICS,
     DEFAULT_TARGET_PAPERS,
@@ -197,8 +198,8 @@ class Pruned:
     reclaimed: int
 
 
-async def prune_checkpoints(settings: Settings, *, keep: int) -> Pruned:
-    """Drop all but the newest `keep` runs from the checkpoint store.
+async def prune_checkpoints(settings: Settings, *, keep: int, max_bytes: int = 0) -> Pruned:
+    """Drop runs from the checkpoint store: too old, too big, or output already deleted.
 
     Checkpoints are the only thing this tool writes that grows without bound. A build
     costs 100 to 350 MB of them, because LangGraph serializes the entire state at every one
@@ -207,29 +208,59 @@ async def prune_checkpoints(settings: Settings, *, keep: int) -> Pruned:
     is the output, and a checkpoint exists only so `--resume` can pick a stopped run back
     up. Once a run has finished, or once nobody is going to resume it, it is scratch.
 
-    Retention is by count and not by age, because what makes a checkpoint worth keeping
-    is being recent *relative to the others* — someone resuming picks from the last few
-    runs, not from the last few days, and a fortnight away from the tool should not mean
-    coming back to an empty store.
+    Three rules, and a run goes if any of them says so:
+
+    **Count.** All but the newest `keep`. By count and not by age, because what makes a
+    checkpoint worth keeping is being recent *relative to the others* — someone resuming
+    picks from the last few runs, not from the last few days, and a fortnight away from
+    the tool should not mean coming back to an empty store. `keep=0` turns it off.
+
+    **Size.** Whatever does not fit in `max_bytes`, newest first. The count is the rule
+    that normally binds; this is what catches a run several times the usual size, so that
+    the ceiling is a number of megabytes rather than a number of runs times a guess. The
+    newest run always survives it — a ceiling that deletes the run somebody is about to
+    resume has stopped being a ceiling and become a bug. `max_bytes=0` turns it off.
+
+    **Orphans.** A run that finished and whose output folder is no longer on disk. That
+    is the one honest link between a bundle and what it cost: the run recorded where it
+    wrote and whether it validated, so if the folder has been deleted these are
+    checkpoints for output that does not exist, and there is nothing left to resume to.
+    Only ever *finished* runs — an unfinished one may not have written a folder at all,
+    and judging those the same way would delete every stopped run there is, which is the
+    entire set worth keeping.
 
     Deletes whole runs only. Within a run the older checkpoints look like dead weight too,
     since resuming reads the newest one, but LangGraph records each one's parent and this
     is not the place to bet on which of those links it walks. A thread is present or it is
     not.
-
-    `keep=0` keeps everything, which is the way to turn this off.
     """
-    if keep <= 0:
-        return Pruned(runs=0, reclaimed=0)
-
     before = store_size(settings)
     async with _store(settings) as saver:
-        cursor = await saver.conn.execute(
-            "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id DESC "
-            "LIMIT -1 OFFSET ?",
-            (keep,),
-        )
-        stale = [str(row[0]) for row in await cursor.fetchall()]
+        sizes = await _thread_bytes(saver)
+        # The ids begin with a sortable timestamp, so a lexical sort is recency order.
+        ordered = sorted(sizes, reverse=True)
+        if not ordered:
+            return Pruned(runs=0, reclaimed=0)
+
+        stale: list[str] = []
+        if keep > 0:
+            stale.extend(ordered[keep:])
+            ordered = ordered[:keep]
+
+        if max_bytes > 0:
+            held = 0
+            for index, thread_id in enumerate(ordered):
+                held += sizes[thread_id]
+                # `index > 0` is the newest run's exemption, not an off-by-one.
+                if index > 0 and held > max_bytes:
+                    stale.extend(ordered[index:])
+                    ordered = ordered[:index]
+                    break
+
+        for thread_id in ordered:
+            if await _output_is_gone(saver, thread_id):
+                stale.append(thread_id)
+
         if not stale:
             return Pruned(runs=0, reclaimed=0)
 
@@ -255,6 +286,47 @@ async def prune_checkpoints(settings: Settings, *, keep: int) -> Pruned:
             await saver.conn.commit()
 
     return Pruned(runs=len(stale), reclaimed=max(0, before - store_size(settings)))
+
+
+async def _thread_bytes(saver: Any) -> dict[str, int]:
+    """What each run is holding in the store, by thread id.
+
+    Measured on the blobs rather than on the file, because the file is a single number
+    for all of them and the question here is which run to drop. SQLite's own page
+    overhead and its freelist are left out, so this reads somewhat under the file size —
+    on purpose, since attributing them would make a budget shift with how long it has
+    been since the last vacuum rather than with what is stored.
+    """
+    totals: dict[str, int] = {}
+    for query in (
+        "SELECT thread_id, SUM(LENGTH(checkpoint) + LENGTH(COALESCE(metadata, ''))) "
+        "FROM checkpoints GROUP BY thread_id",
+        "SELECT thread_id, SUM(LENGTH(COALESCE(value, ''))) FROM writes GROUP BY thread_id",
+    ):
+        cursor = await saver.conn.execute(query)
+        for thread_id, size in await cursor.fetchall():
+            totals[str(thread_id)] = totals.get(str(thread_id), 0) + int(size or 0)
+    return totals
+
+
+async def _output_is_gone(saver: Any, thread_id: str) -> bool:
+    """Whether this run finished and the folder it wrote is no longer there.
+
+    The run folder, not the corpus inside it: `--finalize` legitimately deletes `okf/`
+    or `vectors/` from a run that went perfectly well, so only the whole folder being
+    gone means somebody threw the run away.
+
+    A checkpoint that cannot be read answers no. Unreadable is not evidence of anything,
+    and the cost of guessing wrong here is deleting the one thing that could still be
+    resumed.
+    """
+    try:
+        past = await _read_run(saver, thread_id)
+    except Exception:  # any failure to read it back at all
+        return False
+    if not past.finished or not past.directory:
+        return False
+    return not Path(past.directory).is_dir()
 
 
 @asynccontextmanager
@@ -375,20 +447,32 @@ def run_directory(
     return settings.output_dir / run_id
 
 
-async def _reclaim(settings: Settings, clients: Clients) -> None:
-    """Bound what a run leaves behind: old checkpoints, and cache entries past the TTL.
+async def _reclaim(settings: Settings, clients: Clients, extractions: ExtractionCache) -> None:
+    """Put every store back under its ceiling before the run adds to it.
+
+    All three of them, in one place, because "how much disk does this tool use" is one
+    question and answering it from three scattered call sites is how one of them ends up
+    without a limit. Which is what happened: the checkpoints got a bound first and the
+    other two kept growing.
 
     Here rather than in a node, and silent. It is not part of the pipeline, it produces
     nothing the bundle records, and a line about disk in front of every run is noise —
-    `okf-loremaster runs` reports what the store is holding, which is where somebody
+    `okf-loremaster runs` reports what the stores are holding, which is where somebody
     wondering about it would look.
 
     Never fails a run. Deleting scratch is the least important thing happening, and a
     locked database or a read-only cache directory is not a reason to refuse to build.
     """
+    from okf_loremaster.retention import MB
+
     try:
-        await prune_checkpoints(settings, keep=settings.checkpoint_keep_runs)
-        clients.cache.sweep()
+        await prune_checkpoints(
+            settings,
+            keep=settings.checkpoint_keep_runs,
+            max_bytes=settings.checkpoint_max_mb * MB,
+        )
+        clients.cache.sweep(max_bytes=settings.http_cache_max_mb * MB)
+        extractions.sweep(max_bytes=settings.extraction_cache_max_mb * MB)
     except Exception:  # housekeeping, so on any failure at all
         return
 
@@ -465,11 +549,13 @@ async def build_run(
     task = attach(bus) if attach is not None else _start_renderer(bus, options, console)
 
     clients = build_clients(resolved, bus=bus, transport=transport)
+    # Built here rather than inline below so that reclaiming and reading share one path.
+    extractions = ExtractionCache(extraction_cache_path(resolved))
     # Before the graph starts, and never on a resume — retention keeps the newest runs
     # and a resumed one is by definition not the newest, so pruning here could delete
     # the very thread about to be replayed.
     if options.resume is None:
-        await _reclaim(resolved, clients)
+        await _reclaim(resolved, clients, extractions)
     router = None if options.dry_run else _router(resolved, bus)
     deps = Deps(
         settings=resolved,
@@ -483,9 +569,7 @@ async def build_run(
         # across runs rather than kept under the run directory: the same paper read for
         # the same question is the same reading, and scoping it per run would mean a
         # rerun after a crash starts from nothing.
-        extraction_cache=None if options.dry_run else ExtractionCache(
-            resolved.cache_dir / "extractions"
-        ),
+        extraction_cache=None if options.dry_run else extractions,
         pool_size=options.pool_size,
         screen_budget=options.screen_budget,
         max_queries=options.max_queries,

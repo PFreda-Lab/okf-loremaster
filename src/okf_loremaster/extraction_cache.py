@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from okf_loremaster.retention import trim_to_budget
 from okf_loremaster.schemas import Extraction
 
 __all__ = ["ExtractionCache", "fingerprint"]
@@ -84,6 +85,21 @@ class ExtractionCache:
             temporary.replace(path)
         except OSError:
             return
+
+    def sweep(self, *, max_bytes: int = 0) -> tuple[int, int]:
+        """Delete the oldest readings until the cache fits `max_bytes`. Files, bytes.
+
+        No TTL here, unlike the HTTP cache, because an entry does not go stale: the key
+        is the request, so a reading is either still the answer to a question somebody is
+        asking or it is unreachable already. What accumulates is the unreachable half —
+        every prompt revision, every full text that got longer, left behind under a
+        fingerprint nothing will ever ask for again. A budget is the only thing that
+        clears those, since they are indistinguishable from live entries by content.
+
+        Which makes deleting by age exactly right here: the entries nobody can reach are
+        the old ones, and a live entry that goes with them costs one paper re-read.
+        """
+        return trim_to_budget(self.root, max_bytes=max_bytes)
 
     def _path(self, pmid: str, key: str) -> Path:
         # Fanned out one level, because a flat directory of a hundred thousand files is
