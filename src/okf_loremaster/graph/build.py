@@ -62,6 +62,7 @@ from okf_loremaster.schemas import (
     BundleCounts,
     Candidate,
     Charter,
+    CodedAs,
     ConceptRecord,
     Confidence,
     CostSummary,
@@ -72,20 +73,26 @@ from okf_loremaster.schemas import (
     ExecutedQuery,
     Extraction,
     NullFinding,
+    PaperStrength,
     PaperText,
     PlannedQuery,
     PredictorRow,
     QueryPlan,
+    RowStrength,
     RunManifest,
     ScoredCandidate,
     ScreenVerdict,
     SourceRef,
+    StrengthGrade,
+    StudyDesign,
     TextBasis,
     Topic,
     TopicGap,
     TopicSummary,
     Verification,
+    VerificationExample,
     VerificationSummary,
+    VocabularyHint,
 )
 from okf_loremaster.ui.pauses import AutoApprove, Pause
 
@@ -144,10 +151,17 @@ class BoundNode(Protocol):
 # string and pydantic revalidates it on the way back into the model. The data survives —
 # but every resume logs a page of `Blocked deserialization` at the user, and the day one
 # of these stops being a `StrEnum` the silent fallback becomes silent data loss.
+#
+# Alphabetical, because the way this list fails is somebody scanning it, not finding what
+# they were about to add, and being right. `test_resume.py` walks `RunState` and pins it:
+# seven types had gone missing before that test existed, which is what a list maintained
+# by hand does. A type reachable from state belongs here whether or not it is nested
+# inside one that is already listed — msgpack tags each model with its own type.
 CHECKPOINTED_TYPES = (
     BundleCounts,
     Candidate,
     Charter,
+    CodedAs,
     ConceptRecord,
     Confidence,
     CostSummary,
@@ -158,21 +172,27 @@ CHECKPOINTED_TYPES = (
     ExecutedQuery,
     Extraction,
     NullFinding,
+    PaperStrength,
     PaperText,
     PlannedQuery,
     PredictorRow,
     QueryPlan,
+    RowStrength,
     RunManifest,
     ScoredCandidate,
     ScreenVerdict,
     SelectionComparison,
+    SourceRef,
+    StrengthGrade,
+    StudyDesign,
+    TextBasis,
     Topic,
     TopicGap,
     TopicSummary,
-    SourceRef,
-    TextBasis,
     Verification,
+    VerificationExample,
     VerificationSummary,
+    VocabularyHint,
 )
 
 

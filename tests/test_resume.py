@@ -323,3 +323,76 @@ async def test_a_resumed_run_prunes_nothing(
 
     kept, _ = await threads(settings)
     assert "20200101-120000-aaaa" in kept, "the resume pruned on its way in"
+
+
+# --- what survives being written down and read back ---------------------------
+
+
+def reachable_from_state() -> set[type]:
+    """Every schema a checkpoint can contain, walked from `RunState` rather than listed.
+
+    Nesting is not shelter: msgpack tags each model with its own type, so a model only
+    ever reached through one that is already allowlisted still needs to be there itself.
+    That is how five of the seven missing ones hid.
+    """
+    import inspect
+    import typing
+    from enum import Enum
+
+    from pydantic import BaseModel
+
+    from okf_loremaster.graph.state import RunState
+
+    seen: set[Any] = set()
+    found: set[type] = set()
+
+    def walk(annotation: Any) -> None:
+        if annotation in seen:
+            return
+        seen.add(annotation)
+        for arg in typing.get_args(annotation):
+            walk(arg)
+        if not inspect.isclass(annotation):
+            return
+        if not annotation.__module__.startswith("okf_loremaster"):
+            return
+        if issubclass(annotation, BaseModel | Enum):
+            found.add(annotation)
+        if issubclass(annotation, BaseModel):
+            for field in annotation.model_fields.values():
+                walk(field.annotation)
+
+    for annotation in typing.get_type_hints(RunState).values():
+        walk(annotation)
+    return found
+
+
+def test_every_type_that_can_travel_in_state_is_allowlisted() -> None:
+    """The serializer allowlist is written by hand and had drifted seven types behind.
+
+    Two of them showed up as `Blocked deserialization` the moment a real checkpoint was
+    read back; the other five had not been reached yet and would have surfaced on some
+    later resume instead. LangGraph's msgpack path warns today and has announced it will
+    refuse, so a gap here is a resume that stops working at a date nobody chose.
+    """
+    from okf_loremaster.graph.build import CHECKPOINTED_TYPES
+
+    missing = reachable_from_state() - set(CHECKPOINTED_TYPES)
+
+    assert not missing, (
+        "reachable from RunState but not in CHECKPOINTED_TYPES: "
+        + ", ".join(sorted(t.__name__ for t in missing))
+    )
+
+
+def test_the_allowlist_names_nothing_that_cannot_travel() -> None:
+    """The other direction, and the reason the list stays scannable: a name that state
+    can no longer reach is one more line to read past when checking whether the thing
+    you are adding is already there."""
+    from okf_loremaster.graph.build import CHECKPOINTED_TYPES
+
+    stale = set(CHECKPOINTED_TYPES) - reachable_from_state()
+
+    assert not stale, "in CHECKPOINTED_TYPES but unreachable from RunState: " + ", ".join(
+        sorted(t.__name__ for t in stale)
+    )
