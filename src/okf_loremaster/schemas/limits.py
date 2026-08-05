@@ -23,6 +23,7 @@ __all__ = [
     "MAX_BOTTOM_LINE_SENTENCES",
     "MAX_CAVEAT_SENTENCES",
     "MAX_DESCRIPTION_CHARS",
+    "MAX_LOCATED_QUOTE_WORDS",
     "MAX_NULL_FINDINGS",
     "MAX_PREDICTOR_ROWS",
     "MAX_QUOTE_WORDS",
@@ -61,6 +62,19 @@ MAX_VOCABULARY_HINTS = 8
 # catches a plausible one; a located quote is sliced out of the source, so it is verbatim
 # by construction.
 MAX_QUOTE_WORDS = 10
+
+# How much of what a locator finds may be stored. Anything longer is not a sentence: a
+# full text is prose, headings and *tables*, and BioC delivers a table as one unbroken
+# line with no terminator anywhere in it — so the sentence splitter returns the whole
+# table as one "sentence" and a locator landing inside it carries the table into the
+# bundle, once per row that quoted it. A smoke run produced a 10,281-word document that
+# was the same 1,166-word table eight times.
+#
+# Not a style rule. `verification.Source.scope` checks a row's numbers against its quote,
+# so a quote holding an entire table holds every number in the table and the check stops
+# discriminating. Measured over 1,358 stored quotes in two finished bundles: median 32
+# words, p75 47. Above 80 they are almost all flattened tables.
+MAX_LOCATED_QUOTE_WORDS = 80
 
 # --- the body guideline, which is derived rather than chosen ------------------
 #

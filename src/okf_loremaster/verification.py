@@ -54,7 +54,7 @@ from okf_loremaster.schemas import (
     PredictorRow,
     VocabularyHint,
 )
-from okf_loremaster.schemas.limits import sentences
+from okf_loremaster.schemas.limits import MAX_LOCATED_QUOTE_WORDS, sentences
 
 __all__ = [
     "ExtractionCheck",
@@ -227,13 +227,16 @@ class Source:
         Empty on a miss rather than a guess. The caller keeps whatever the model wrote
         and the ordinary quote check judges it, so a locator that finds nothing degrades
         to exactly the behavior that existed before locators did.
+
+        Capped at `MAX_LOCATED_QUOTE_WORDS`, because what a locator lands in is not
+        always a sentence — see `_windowed`.
         """
         needle = normalize(locator)
         if not needle:
             return ""
         for original, folded in self._sentences:
             if needle in folded:
-                return original
+                return _windowed(original, needle)
         return ""
 
     def holds_quote(self, quote: str) -> bool:
@@ -369,6 +372,49 @@ def verify_extraction(extraction: Extraction, source_text: str) -> ExtractionChe
         codes_dropped=len(codes_missing),
         codes_missing=codes_missing,
     )
+
+
+def _windowed(sentence: str, needle: str) -> str:
+    """`sentence`, or the `MAX_LOCATED_QUOTE_WORDS` words that open at `needle`.
+
+    A full text is prose, headings and *tables*, and BioC delivers a table as one
+    unbroken line with no terminator anywhere in it — so `sentences` hands back the whole
+    table as a single "sentence". Uncapped, a locator landing inside one carried the
+    entire table into the bundle for every row that had quoted it: a real run produced a
+    10,281-word document that was the same 1,166-word table eight times over.
+
+    The window opens at the locator rather than centering on it, because a locator is by
+    construction the *opening* words of the finding — the numbers it was written to point
+    at come after it. What is returned is still a contiguous slice of the source, so it
+    is still verbatim, and `holds_quote` still finds it.
+    """
+    words = sentence.split()
+    if len(words) <= MAX_LOCATED_QUOTE_WORDS:
+        return sentence
+    start = _opens_at(words, needle.split())
+    return " ".join(words[start : start + MAX_LOCATED_QUOTE_WORDS])
+
+
+def _opens_at(words: Sequence[str], needle: Sequence[str]) -> int:
+    """Where in `words` the folded `needle` begins, or 0 if it cannot be placed.
+
+    Zero on a miss rather than a guess. `sentence_for` matched the needle as a substring
+    of the folded span, which can land mid-token where this token-wise walk will not; the
+    window then opens at the start of the span, which is the text the caller would have
+    received anyway, only bounded.
+    """
+    tokens: list[str] = []
+    owner: list[int] = []
+    for index, word in enumerate(words):
+        for token in normalize(word).split():
+            tokens.append(token)
+            owner.append(index)
+
+    span = len(needle)
+    for start in range(len(tokens) - span + 1):
+        if tokens[start : start + span] == list(needle):
+            return owner[start]
+    return 0
 
 
 def _expand_quotes(extraction: Extraction, source: Source) -> Extraction:

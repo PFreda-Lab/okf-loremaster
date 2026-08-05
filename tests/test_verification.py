@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from okf_loremaster.schemas import (
+    MAX_LOCATED_QUOTE_WORDS,
     CodedAs,
     Confidence,
     Extraction,
@@ -232,6 +233,56 @@ def test_a_locator_matching_nothing_leaves_the_row_where_it_was() -> None:
 
     assert check.extraction.predictors[0].quote == ""
     assert check.quotes_dropped == 1
+
+
+def test_a_table_is_not_a_sentence_however_the_splitter_reads_it() -> None:
+    """BioC delivers a table as one unbroken line with no terminator in it, so the
+    splitter returns the whole table as one "sentence". Uncapped, a locator landing
+    inside one carried the entire table into the bundle once per row that quoted it —
+    a real run produced a 10,281-word document that was one 1,166-word table, eight
+    times."""
+    table = "Characteristic " + " ".join(f"row {n} value {n}.0" for n in range(200))
+    document = f"Table 2 follows.\n{table}\nThe discussion begins here."
+
+    check = verify_extraction(one_row(quote="row 40 value"), document)
+    quote = check.extraction.predictors[0].quote
+
+    assert len(quote.split()) == MAX_LOCATED_QUOTE_WORDS
+    # Opening at the locator, not at the table's first column: a locator names where the
+    # finding starts, and the numbers it was written to point at come after it.
+    assert quote.startswith("row 40 value 40.0 row 41")
+    # Still a contiguous slice of the source, so still verbatim.
+    assert quote in " ".join(document.split())
+    assert check.quotes_dropped == 0
+
+
+def test_windowing_a_table_keeps_the_row_the_locator_pointed_at_in_scope() -> None:
+    """The window is a narrower numeric scope than the table, not a broken one. The
+    point of expanding at all is that `scope` checks a row's numbers against its quote —
+    and a quote holding a whole table holds every number in it, which is a check that
+    has stopped discriminating."""
+    table = "Characteristic " + " ".join(f"row {n} value {n}.0" for n in range(200))
+
+    near = one_row(effect=40.0, effect_raw="40.0", quote="row 40 value")
+    far = one_row(effect=180.0, effect_raw="180.0", quote="row 40 value")
+
+    assert verify_extraction(near, table).effects_dropped == 0
+    # In the table, and no longer in the quote — which is the whole reason for the cap.
+    assert verify_extraction(far, table).effects_dropped == 1
+
+
+def test_a_long_sentence_that_is_really_a_sentence_is_left_whole() -> None:
+    """The cap is set above what prose reaches — median 32 words across two finished
+    bundles, p75 47 — so it must not start editing papers that were merely wordy."""
+    long_sentence = (
+        "In models adjusted for " + ", ".join(f"covariate {n}" for n in range(20)) + ", "
+        "the association was 1.82 (95% CI 1.21-2.74)."
+    )
+    assert len(long_sentence.split()) < MAX_LOCATED_QUOTE_WORDS
+
+    check = verify_extraction(one_row(quote="In models adjusted"), long_sentence)
+
+    assert check.extraction.predictors[0].quote == long_sentence
 
 
 def test_a_null_finding_locator_expands_too() -> None:
