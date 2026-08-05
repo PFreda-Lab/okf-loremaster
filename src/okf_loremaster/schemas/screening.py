@@ -9,9 +9,11 @@ thin, or empty" — the one place a run can notice it searched badly.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from pydantic import Field
 
-from okf_loremaster.schemas.common import Confidence, Model
+from okf_loremaster.schemas.common import Confidence, Model, prose
 
 __all__ = [
     "CurationDecision",
@@ -38,8 +40,10 @@ class ScreenVerdict(Model):
     # The topic the screener thinks this belongs on. Advisory: curation decides, and
     # the screener has seen the taxonomy but not the topic's other papers.
     topic: str = ""
-    # One clause. Long reasons at FAST volume cost more than they inform.
-    reason: str = Field(default="", max_length=240)
+    # One clause. Long reasons at FAST volume cost more than they inform. Trimmed
+    # rather than rejected: a screening call carries a whole batch, so one verdict
+    # that ran a clause long would fail the parse for every paper beside it.
+    reason: Annotated[str, prose(240)] = ""
     confidence: Confidence = Confidence.MEDIUM
 
     @property
@@ -63,7 +67,7 @@ class CurationDecision(Model):
     # by the model — set on rejections too, because that is what tells the floor
     # backfill which topic a rejected paper is the nearest miss for.
     topic: str = ""
-    rationale: str = Field(default="", max_length=240)
+    rationale: Annotated[str, prose(240)] = ""
 
 
 class TopicCuration(Model):
@@ -78,7 +82,7 @@ class TopicCuration(Model):
     # What the topic still lacks, in the curator's own words. This is the seed for the
     # conditional re-query edge, which is why it is prompted for as search concepts
     # rather than as a complaint.
-    missing: str = Field(default="", max_length=300)
+    missing: Annotated[str, prose(300)] = ""
 
 
 class TopicGap(Model):

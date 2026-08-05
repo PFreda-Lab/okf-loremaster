@@ -20,6 +20,7 @@ from okf_loremaster.schemas.charter import (
     DEFAULT_TARGET_PAPERS,
     DEFAULT_TOPIC_PAPER_MAX,
     DEFAULT_TOPIC_PAPER_MIN,
+    MAX_TOPIC_SCOPE_CHARS,
     Charter,
     Topic,
 )
@@ -111,6 +112,7 @@ __all__ = [
     "MAX_QUOTE_WORDS",
     "MAX_SOURCE_CHARS",
     "MAX_TAGS",
+    "MAX_TOPIC_SCOPE_CHARS",
     "MAX_VOCABULARY_HINTS",
     "NONE_REPORTED",
     "BundleCounts",

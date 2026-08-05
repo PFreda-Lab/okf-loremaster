@@ -12,7 +12,9 @@ import re
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints
+
+from okf_loremaster.schemas.limits import truncate_chars
 
 __all__ = [
     "PERMISSIVE_LICENSES",
@@ -26,6 +28,7 @@ __all__ = [
     "TextBasis",
     "filename_token",
     "is_export_safe",
+    "prose",
     "slugify",
 ]
 
@@ -35,6 +38,29 @@ __all__ = [
 SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 
 Slug = Annotated[str, StringConstraints(pattern=SLUG_PATTERN, min_length=2, max_length=64)]
+
+
+def prose(limit: int) -> AfterValidator:
+    """A model-written prose field, trimmed at `limit` characters rather than rejected.
+
+    Use for any text a model writes that nothing downstream parses — a rationale, a
+    scope line, a screener's note. `max_length` on one of those makes a sentence a few
+    characters too long a `ValidationError`, and a `ValidationError` on a model reply is
+    a **failed node**: the repair round trip re-asks and, unless the prompt states the
+    number, the model writes long again. That killed a live run over a topic scope
+    eleven characters over.
+
+    `limits.py` has said *truncate and warn, never reject* from the beginning, on the
+    reasoning that an over-long reply is a good reply that ran on and re-asking pays for
+    a whole second call to fix a formatting problem. This is that rule, as a type.
+    `truncate_chars` leaves an ellipsis, so a trimmed line says so where a reader sees it.
+
+    A hard cap still belongs on anything read by something other than a person — `Slug`
+    above becomes a directory name and the `domain` key in every file under it, and a
+    truncated one is a broken bundle rather than a shortened sentence.
+    """
+    return AfterValidator(lambda value: truncate_chars(value, limit)[0])
+
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _FILENAME_UNSAFE = re.compile(r"[^A-Za-z0-9]+")

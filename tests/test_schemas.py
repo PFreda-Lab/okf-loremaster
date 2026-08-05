@@ -15,12 +15,14 @@ from pydantic import ValidationError
 from okf_loremaster.clients import Clients
 from okf_loremaster.okf.layout import FULL_TEXT_BASIS
 from okf_loremaster.schemas import (
+    DEFAULT_MAX_TOPICS,
     MAX_BODY_WORDS,
     MAX_BOTTOM_LINE_SENTENCES,
     MAX_DESCRIPTION_CHARS,
     MAX_NULL_FINDINGS,
     MAX_PREDICTOR_ROWS,
     MAX_TAGS,
+    MAX_TOPIC_SCOPE_CHARS,
     MAX_VOCABULARY_HINTS,
     NONE_REPORTED,
     Candidate,
@@ -41,6 +43,7 @@ from okf_loremaster.schemas import (
     SourceRef,
     TextBasis,
     Topic,
+    TopicCuration,
     TopicGap,
     VocabularyHint,
     is_export_safe,
@@ -50,8 +53,8 @@ from okf_loremaster.schemas.limits import sentences, truncate_chars
 from okf_loremaster.schemas.parse import SchemaError, extract_json, parse_model
 
 
-def a_topic(slug: str = "risk-factors") -> Topic:
-    return Topic(slug=slug, title=slug.replace("-", " ").title(), scope="what belongs here")
+def a_topic(slug: str = "risk-factors", scope: str = "what belongs here") -> Topic:
+    return Topic(slug=slug, title=slug.replace("-", " ").title(), scope=scope)
 
 
 def a_charter(**overrides: object) -> Charter:
@@ -274,6 +277,45 @@ def test_a_generous_paper_still_fits_under_every_list_ceiling() -> None:
     assert len(trimmed.null_findings) == MAX_NULL_FINDINGS
     assert len(trimmed.vocabulary_hints) == MAX_VOCABULARY_HINTS
     assert not [w for w in warnings if "dropped" in w]
+
+
+def test_an_over_long_topic_scope_is_trimmed_rather_than_killing_the_run() -> None:
+    """It was `max_length=300`, so eleven characters of extra prose was a fatal run.
+
+    The repair round trip re-asked and the model, still never told the number, wrote
+    long again — a live build died having spent a reasoning-tier call, over a line that
+    nothing downstream parses. Trim and move on, like every other length budget here.
+    """
+    verbose = a_topic(scope="word " * 200)
+
+    assert len(verbose.scope) <= MAX_TOPIC_SCOPE_CHARS
+    assert verbose.scope.endswith("…"), "a trimmed scope says so where a reader sees it"
+    assert a_topic(scope="A short scope.").scope == "A short scope."
+
+
+def test_no_prose_field_a_model_writes_can_fail_a_parse_on_its_length() -> None:
+    """The same defect as the topic scope, in the three places it had not been fixed.
+
+    A screening call carries a whole batch, so one verdict whose reason ran a clause
+    long would have failed the parse for every paper beside it — the cheapest possible
+    field taking out the most expensive possible response. Each of these is read by a
+    person or by nothing at all, so trimming loses a clause and rejecting loses a call.
+    """
+    long = "word " * 400
+
+    assert ScreenVerdict(pmid="1", include=True, reason=long).reason.endswith("…")
+    assert CurationDecision(pmid="1", keep=True, rationale=long).rationale.endswith("…")
+    assert TopicCuration(missing=long).missing.endswith("…")
+    # And an ordinary one is untouched, ellipsis and all.
+    assert ScreenVerdict(pmid="1", include=False, reason="Wrong population.").reason == (
+        "Wrong population."
+    )
+
+
+def test_the_charter_prompt_states_the_scope_budget_it_will_enforce() -> None:
+    from okf_loremaster.prompts import charter_system
+
+    assert str(MAX_TOPIC_SCOPE_CHARS) in charter_system(DEFAULT_MAX_TOPICS)
 
 
 def test_every_budget_the_extractor_can_obey_is_stated_in_its_prompt() -> None:

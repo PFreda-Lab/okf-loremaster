@@ -14,6 +14,7 @@ to prevent.
 
 from __future__ import annotations
 
+from okf_loremaster.schemas.charter import MAX_TOPIC_SCOPE_CHARS
 from okf_loremaster.schemas.limits import (
     MAX_DESCRIPTION_CHARS,
     MAX_NULL_FINDINGS,
@@ -65,7 +66,8 @@ overlapping. Each needs:
    - `slug`: lowercase, hyphenated, 2-64 characters, unique. It becomes a directory \
 name.
    - `title`: how a reader would name the topic.
-   - `scope`: one line saying what belongs here and what does not.
+   - `scope`: one line saying what belongs here and what does not, in at most \
+{scope_chars} characters. Anything past that is cut mid-sentence.
    - `seed_terms`: 3-6 concepts a literature search for this topic would use. Concepts, \
 not query syntax — no field tags, no boolean operators, no quotation marks.
 
@@ -117,7 +119,7 @@ def charter_system(max_topics: int) -> str:
         topics = f"between {floor} and {max_topics} topics"
     else:
         topics = "exactly 1 topic" if max_topics == 1 else f"exactly {max_topics} topics"
-    return _CHARTER_SYSTEM.format(topics=topics)
+    return _CHARTER_SYSTEM.format(topics=topics, scope_chars=MAX_TOPIC_SCOPE_CHARS)
 
 
 def charter_user(prompt: str) -> str:

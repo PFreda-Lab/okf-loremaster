@@ -18,18 +18,19 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from typing import Any, Self
+from typing import Annotated, Any, Self
 
 import yaml
 from pydantic import AliasChoices, Field, field_validator, model_validator
 
-from okf_loremaster.schemas.common import Model, Slug
+from okf_loremaster.schemas.common import Model, Slug, prose
 
 __all__ = [
     "DEFAULT_MAX_TOPICS",
     "DEFAULT_TARGET_PAPERS",
     "DEFAULT_TOPIC_PAPER_MAX",
     "DEFAULT_TOPIC_PAPER_MIN",
+    "MAX_TOPIC_SCOPE_CHARS",
     "Charter",
     "Topic",
 ]
@@ -52,6 +53,10 @@ DEFAULT_TOPIC_PAPER_MAX = 40
 # headings in mind is reading an ontology rather than a corpus.
 DEFAULT_MAX_TOPICS = 8
 
+# One line of prose per topic, shown at the confirmation pause and reused as the topic's
+# `index.md` header. A budget rather than a schema constraint — see `common.prose`.
+MAX_TOPIC_SCOPE_CHARS = 300
+
 
 class Topic(Model):
     """One folder of the bundle.
@@ -65,7 +70,10 @@ class Topic(Model):
     # One line, in the charter's own words, describing what belongs here. Shown at the
     # confirmation pause and reused as the topic's index.md header, so it is written
     # for a reader rather than for a prompt.
-    scope: str = Field(default="", max_length=300)
+    # Trimmed rather than rejected — see `common.prose`. This was `max_length=300`, and
+    # a scope line eleven characters long killed a live run: the repair round trip
+    # re-asked, the model was still never told the number, and it wrote long again.
+    scope: Annotated[str, prose(MAX_TOPIC_SCOPE_CHARS)] = ""
     # Concepts to seed query planning for this topic. Suggestions, not a query.
     seed_terms: list[str] = Field(default_factory=list)
 
