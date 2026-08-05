@@ -50,6 +50,7 @@
     "rapidfuzz",
     "respx",
     "ruff",
+    "spdx",
     "tiab",
     "typer"
   ],

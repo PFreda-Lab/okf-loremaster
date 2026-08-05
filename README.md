@@ -693,6 +693,15 @@ conda run -n okf-loremaster mypy src/
 conda run -n okf-loremaster ruff check src/ tests/
 ```
 
+---
+
 ## License
 
-Not yet chosen. Treat this as unlicensed and internal until one is set.
+[Apache License 2.0](LICENSE). Use it, change it, build something commercial on it. Keep the notice
+and state what you changed, and you get an explicit patent grant along with the copyright one —
+which is the reason for this license rather than MIT.
+
+**It covers this code, not the bundles the code builds.** What a run writes is governed by what it
+read: every document records the `license` its publisher reported, verbatim and never inferred, and
+`export_safe` says whether that document may leave. Most PubMed records are abstracts under
+publisher copyright. A bundle is yours to keep and not necessarily yours to redistribute.

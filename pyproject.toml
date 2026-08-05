@@ -8,6 +8,10 @@ version = "0.1.0.dev0"
 description = "Build a task-scoped biomedical literature knowledge bundle from PubMed/PMC in Open Knowledge Format."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
+# SPDX expression, not a `License ::` classifier: PEP 639 supersedes those, and declaring both is
+# what makes a build back-end complain.
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 keywords = ["pubmed", "pmc", "okf", "open-knowledge-format", "literature", "rag", "biomedical"]
 classifiers = [
     "Development Status :: 3 - Alpha",
