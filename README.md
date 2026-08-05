@@ -346,14 +346,15 @@ signals, summing to 1.0:
 | `position` | 0.30 | the best rank the paper reached in any query, decayed rather than cut off |
 | `agreement` | 0.25 | how many independent queries found it — convergence is evidence |
 | `recency` | 0.15 | publication year, against the charter's floor or 20 years back |
-| `citation` | 0.15 | how much the paper has been read — see below |
+| `citation` | 0.15 | how much the paper has been read — Relative Citation Ratio (RCR), see below |
 | `abstract` | 0.10 | whether there is an abstract to screen at all |
 | `article` | 0.05 | primary research, versus a comment, editorial or erratum |
 
-**The citation signal prefers the Relative Citation Ratio**, which is NIH's iCite service scoring a
-paper against others of the same age in the same field, with 1.0 being the average NIH-funded paper.
-A raw count can't compare a 2019 paper with a 2023 one. Where iCite has no ratio for a paper, the
-raw count is used on a log scale, so the hundredth citation moves the score far less than the first.
+**The citation signal prefers the Relative Citation Ratio (RCR)**, which is NIH's iCite service
+scoring a paper against others of the same age in the same field, with an RCR of 1.0 being the
+average NIH-funded paper. A raw count can't compare a 2019 paper with a 2023 one. Where iCite has no
+RCR for a paper, the raw count is used on a log scale, so the hundredth citation moves the score far
+less than the first.
 
 **The weights are constants, not settings.** A knob per signal invites tuning the ranking against
 one project's corpus, which is exactly what would stop it generalizing.
@@ -605,7 +606,7 @@ runs PubMed:
 | **E-utilities** | Entrez Programming Utilities — NCBI's query and retrieval endpoints, used to run each search and fetch the matching records |
 | **BioC** | full text for the open-access subset of PMC, as structured JSON with the article's license attached |
 | **PubTator** | biomedical concepts (genes, diseases, chemicals) already annotated in a paper's text |
-| **iCite** | citation metrics, including the Relative Citation Ratio described under [ranking](#how-the-pool-is-ranked) |
+| **iCite** | citation metrics, including the Relative Citation Ratio (RCR) described under [ranking](#how-the-pool-is-ranked) |
 
 All four are called at their documented rate limits through **one shared limiter**, because the
 limit is per IP address across all of them, and we **never scrape PubMed or PMC web pages**. Set
