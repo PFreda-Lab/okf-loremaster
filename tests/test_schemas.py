@@ -20,6 +20,7 @@ from okf_loremaster.schemas import (
     MAX_DESCRIPTION_CHARS,
     MAX_NULL_FINDINGS,
     MAX_PREDICTOR_ROWS,
+    MAX_TAGS,
     MAX_VOCABULARY_HINTS,
     NONE_REPORTED,
     Candidate,
@@ -273,6 +274,32 @@ def test_a_generous_paper_still_fits_under_every_list_ceiling() -> None:
     assert len(trimmed.null_findings) == MAX_NULL_FINDINGS
     assert len(trimmed.vocabulary_hints) == MAX_VOCABULARY_HINTS
     assert not [w for w in warnings if "dropped" in w]
+
+
+def test_every_budget_the_extractor_can_obey_is_stated_in_its_prompt() -> None:
+    """A budget the model is never told is one it breaks on every paper.
+
+    `description` said "two lines at most" and was enforced at 200 characters, so all
+    twelve papers of a smoke run came back with a description cut mid-sentence. Truncate
+    and warn is the right behavior for the rare overrun; it is the wrong shape for a
+    number nobody was given.
+    """
+    from okf_loremaster.prompts import EXTRACT_SYSTEM
+
+    # Named per field rather than swept, because three of these budgets are 8 and a
+    # bare `str(n) in prompt` would let two of them go unasked for on the third's back.
+    stated = {
+        line.split("`")[1]: line
+        for line in EXTRACT_SYSTEM.splitlines()
+        if line.lstrip().startswith("- `")
+    }
+    assert str(MAX_DESCRIPTION_CHARS) in stated["description"]
+    assert str(MAX_TAGS) in stated["tags"]
+    # These two are asked for in the prose above their sections rather than on a field
+    # line, so they are checked against the whole prompt.
+    assert f"{MAX_PREDICTOR_ROWS} of them" in EXTRACT_SYSTEM
+    assert f"at most {MAX_NULL_FINDINGS} of them" in EXTRACT_SYSTEM
+    assert f"at most {MAX_VOCABULARY_HINTS} of them" in EXTRACT_SYSTEM
 
 
 def test_the_body_guideline_sits_above_what_every_other_budget_allows() -> None:

@@ -15,9 +15,11 @@ to prevent.
 from __future__ import annotations
 
 from okf_loremaster.schemas.limits import (
+    MAX_DESCRIPTION_CHARS,
     MAX_NULL_FINDINGS,
     MAX_PREDICTOR_ROWS,
     MAX_QUOTE_WORDS,
+    MAX_TAGS,
     MAX_VOCABULARY_HINTS,
 )
 
@@ -326,9 +328,9 @@ Write the JSON compactly: no indentation, no line breaks between fields, no spac
 costs about a fifth of the reply's room and buys nothing.
 
 Fields:
-  - `description`: two lines at most, saying what this paper reports. An agent reads \
-this before deciding whether to open the file, so lead with the finding, not with the \
-topic.
+  - `description`: at most {MAX_DESCRIPTION_CHARS} characters — about two lines — saying \
+what this paper reports. An agent reads this before deciding whether to open the file, \
+so lead with the finding, not with the topic. Anything past that is cut mid-sentence.
   - `bottom_line`: the finding itself, in at most two sentences.
   - `study_design`: as the paper describes it.
   - `design`: the same thing as one of "systematic_review", "randomized_trial", \
@@ -365,7 +367,7 @@ rather than looking a code up or guessing one. Record a code only where the pape
 prints it.
   - `caveats`: at most three sentences on what would make this evidence weaker than it \
 looks.
-  - `tags`: a handful of short topic terms.
+  - `tags`: at most {MAX_TAGS} short topic terms.
 
 Each row in `predictors`:
   - `predictor`: the thing being related to the outcome.
