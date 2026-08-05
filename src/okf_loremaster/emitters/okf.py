@@ -914,8 +914,9 @@ def _search_preamble(charter: Charter, manifest: RunManifest) -> list[str]:
     lines = [
         f"{_count(len(queries), 'query', 'queries')} ran against PubMed through NCBI's "
         f"E-utilities on {when}. Between them they matched "
-        f"{sum(q.count for q in queries):,} papers, retrieved {counts.found:,}, and left "
-        f"{counts.unique:,} distinct ones once duplicates were folded together. "
+        f"{sum(q.count for q in queries):,} papers, retrieved {counts.found:,}, and kept "
+        f"{counts.unique:,} — the rest were the same paper found twice, retracted, or "
+        "carried no abstract to screen. "
         f"Screening, curation and extraction narrowed those to the {counts.emitted:,} "
         "papers in this bundle; that part of the story is in "
         f"[{LOG_FILENAME}]({LOG_FILENAME}).",
