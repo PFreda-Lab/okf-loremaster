@@ -540,20 +540,40 @@ request that is remembered, not the PubMed identifier (PMID).
 Runs live in a local cache directory — `okf-loremaster init` prints where. It holds run state, not
 bundles: deleting it loses the ability to resume, and nothing else.
 
-**What it costs on disk, and what bounds it.** Checkpoints are the expensive part. A build writes
-100 to 350 MB of them, because the whole run state is saved once per node and by the later ones that
-state holds abstracts, full texts and extractions. Left alone that grows without limit — two days of
-ordinary use reached 3 GB here. So each build first drops all but the newest few runs:
-`OKF_LOREMASTER_CHECKPOINT_KEEP_RUNS` sets how many, five by default, and `0` turns it off. By count
-rather than by age, because what makes a checkpoint worth keeping is being recent relative to the
-others — you resume from the last few runs, not the last few days, and a fortnight away from the
-tool should not mean coming back to nothing. Whole runs only: a run is kept or dropped, never
-half-kept. A resumed run prunes nothing, since the run being picked up is by definition not the
-newest. `okf-loremaster runs` prints what the store is holding.
+**What it costs on disk, and what bounds it.** Three things accumulate there, and every one of them
+has a ceiling. `okf-loremaster runs` prints each size against its limit.
 
-The HTTP cache is swept at the same moment, dropping entries past
-`OKF_LOREMASTER_HTTP_CACHE_TTL_DAYS`. It is cheap to keep and expensive to lose — every entry is a
-paper that would otherwise be fetched again — so it is only ever the expired ones that go.
+| | Holds | Default cap | Also bounded by |
+|---|---|---|---|
+| checkpoints | run state, for `--resume` | `CHECKPOINT_MAX_MB` — 1024 | the newest `CHECKPOINT_KEEP_RUNS` runs, five |
+| responses | what PubMed and PMC returned | `HTTP_CACHE_MAX_MB` — 1024 | `HTTP_CACHE_TTL_DAYS`, thirty |
+| readings | papers already extracted | `EXTRACTION_CACHE_MAX_MB` — 512 | nothing; a reading does not go stale |
+
+Every name takes the `OKF_LOREMASTER_` prefix, and `0` turns any one of them off. Each is applied
+when a build starts, so the true peak is the sum plus the run being written — a cap here is a
+promise about what you come back to, not a limit that can never be crossed. Within a cap the oldest
+entries go first.
+
+Checkpoints are the expensive part: a build writes 100 to 350 MB of them, because the whole run
+state is saved once per node and by the later ones that state holds abstracts, full texts and
+extractions. Two days of ordinary use reached 3 GB here before anything dropped them. The count is
+usually what binds, and it is a count rather than an age because what makes a checkpoint worth
+keeping is being recent relative to the others — you resume from the last few runs, not the last few
+days, and a fortnight away from the tool should not mean coming back to nothing. Whole runs only,
+never half-kept. A resumed run prunes nothing, since the run being picked up is by definition not
+the newest, and the newest run is never dropped for being over the size cap either.
+
+**Deleting a bundle folder reclaims its checkpoints.** A run records where it wrote and whether it
+finished, so once a *finished* run's folder is gone, its checkpoints are state for output that no
+longer exists and the next build drops them. Unfinished runs are exempt: one may never have written
+a folder at all, and those are the entire set `--resume` exists for.
+
+The two caches are deliberately *not* tied to a bundle, and this is worth knowing before you go
+looking for the setting. Both are keyed by the request rather than by the run, so the same paper
+fetched or read for two bundles is one entry serving both — which is exactly why rebuilding is fast
+and re-reading is free. Scoping them per bundle would mean either storing everything twice, or
+deleting one bundle and quietly making the next build of another one pay again. So they are capped
+by size and swept by age, and never by which bundle asked first.
 
 None of this touches a bundle. Bundles are the output and are never cleaned up for you.
 
