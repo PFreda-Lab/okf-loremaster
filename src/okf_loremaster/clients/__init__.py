@@ -84,6 +84,9 @@ class Clients:
     icite: ICiteClient
     ncbi_http: HttpClient
     icite_http: HttpClient
+    # Both clients share it, and a run sweeps it. Held here rather than reached for
+    # through one of them, since it belongs to neither.
+    cache: DiskCache
 
     @property
     def stats(self) -> HttpStats:
@@ -154,4 +157,5 @@ def build_clients(
         icite=ICiteClient(icite_http),
         ncbi_http=ncbi_http,
         icite_http=icite_http,
+        cache=cache,
     )

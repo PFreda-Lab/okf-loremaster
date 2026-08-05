@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Protocol
 
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -88,7 +89,14 @@ from okf_loremaster.schemas import (
 )
 from okf_loremaster.ui.pauses import AutoApprove, Pause
 
-__all__ = ["NODES", "PAUSE_AFTER", "build_graph", "checkpointer", "run_build"]
+__all__ = [
+    "NODES",
+    "PAUSE_AFTER",
+    "build_graph",
+    "checkpoint_store_path",
+    "checkpointer",
+    "run_build",
+]
 
 # The nodes after which the graph stops for confirmation. Both are the last cheap
 # moment before an expensive one.
@@ -259,6 +267,15 @@ def _serde() -> JsonPlusSerializer:
     return JsonPlusSerializer(allowed_msgpack_modules=list(CHECKPOINTED_TYPES))
 
 
+def checkpoint_store_path(settings: Settings) -> Path:
+    """Where the checkpoint database lives.
+
+    One definition because three callers need it — the saver, retention, and the run
+    listing that reports its size — and a second literal is one that drifts.
+    """
+    return settings.cache_dir / "checkpoints.sqlite"
+
+
 @asynccontextmanager
 async def checkpointer(settings: Settings) -> AsyncIterator[AsyncSqliteSaver]:
     """A SQLite checkpointer under the cache directory.
@@ -267,7 +284,7 @@ async def checkpointer(settings: Settings) -> AsyncIterator[AsyncSqliteSaver]:
     on every node, and the cache directory is the one place already guaranteed to be
     outside a synced folder.
     """
-    path = settings.cache_dir / "checkpoints.sqlite"
+    path = checkpoint_store_path(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
     async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
         saver.serde = _serde()

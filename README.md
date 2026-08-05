@@ -540,6 +540,23 @@ request that is remembered, not the PubMed identifier (PMID).
 Runs live in a local cache directory — `okf-loremaster init` prints where. It holds run state, not
 bundles: deleting it loses the ability to resume, and nothing else.
 
+**What it costs on disk, and what bounds it.** Checkpoints are the expensive part. A build writes
+100 to 350 MB of them, because the whole run state is saved once per node and by the later ones that
+state holds abstracts, full texts and extractions. Left alone that grows without limit — two days of
+ordinary use reached 3 GB here. So each build first drops all but the newest few runs:
+`OKF_LOREMASTER_CHECKPOINT_KEEP_RUNS` sets how many, five by default, and `0` turns it off. By count
+rather than by age, because what makes a checkpoint worth keeping is being recent relative to the
+others — you resume from the last few runs, not the last few days, and a fortnight away from the
+tool should not mean coming back to nothing. Whole runs only: a run is kept or dropped, never
+half-kept. A resumed run prunes nothing, since the run being picked up is by definition not the
+newest. `okf-loremaster runs` prints what the store is holding.
+
+The HTTP cache is swept at the same moment, dropping entries past
+`OKF_LOREMASTER_HTTP_CACHE_TTL_DAYS`. It is cheap to keep and expensive to lose — every entry is a
+paper that would otherwise be fetched again — so it is only ever the expired ones that go.
+
+None of this touches a bundle. Bundles are the output and are never cleaned up for you.
+
 ---
 
 ## Why Open Knowledge Format

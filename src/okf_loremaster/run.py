@@ -48,6 +48,7 @@ if TYPE_CHECKING:  # imported lazily below; litellm and httpx are slow to import
     import httpx
     from rich.console import Console
 
+    from okf_loremaster.clients import Clients
     from okf_loremaster.config import Settings
     from okf_loremaster.emitters.vectors import Embedder
     from okf_loremaster.events import EventBus
@@ -59,6 +60,7 @@ if TYPE_CHECKING:  # imported lazily below; litellm and httpx are slow to import
 __all__ = [
     "TRANSCRIPT_FILENAME",
     "PastRun",
+    "Pruned",
     "RunInterrupted",
     "RunOptions",
     "build_run",
@@ -66,8 +68,10 @@ __all__ = [
     "find_run",
     "list_runs",
     "new_run_id",
+    "prune_checkpoints",
     "require_textual",
     "run_directory",
+    "store_size",
 ]
 
 CHARTER_FILENAME = "charter.yaml"
@@ -80,6 +84,11 @@ TRANSCRIPT_FILENAME = "run.log"
 # How many past runs `okf-loremaster runs` shows. A resumable run is one somebody
 # remembers starting, so a long tail of them is history rather than a work queue.
 DEFAULT_RUN_LIST = 10
+
+# When a prune rewrites the store to hand disk back, rather than leaving the freed pages
+# for the next run to reuse. A share of the file, not a byte count, so it means the same
+# thing to a store of any size.
+VACUUM_AT_FREE_FRACTION = 0.25
 
 
 class RunInterrupted(Exception):
@@ -166,6 +175,86 @@ async def find_run(settings: Settings, run_id: str) -> PastRun | None:
         if await cursor.fetchone() is None:
             return None
         return await _read_run(saver, run_id)
+
+
+def store_size(settings: Settings) -> int:
+    """Bytes the checkpoint store occupies. 0 before any run has written one."""
+    from okf_loremaster.graph.build import checkpoint_store_path
+
+    try:
+        return checkpoint_store_path(settings).stat().st_size
+    except OSError:
+        return 0
+
+
+@dataclass(frozen=True, slots=True)
+class Pruned:
+    """What one retention pass dropped, for a caller that wants to report it."""
+
+    runs: int
+    # Bytes the file gave back to the filesystem. Zero when the pages were freed for
+    # reuse but the database was not rewritten, which is the usual case.
+    reclaimed: int
+
+
+async def prune_checkpoints(settings: Settings, *, keep: int) -> Pruned:
+    """Drop all but the newest `keep` runs from the checkpoint store.
+
+    Checkpoints are the only thing this tool writes that grows without bound. A build
+    costs 100 to 350 MB of them, because LangGraph serializes the entire state at every one
+    of thirteen nodes and the state by then holds abstracts, full texts and extractions —
+    two days of ordinary use reached 3 GB here. Nothing downstream reads them: the bundle
+    is the output, and a checkpoint exists only so `--resume` can pick a stopped run back
+    up. Once a run has finished, or once nobody is going to resume it, it is scratch.
+
+    Retention is by count and not by age, because what makes a checkpoint worth keeping
+    is being recent *relative to the others* — someone resuming picks from the last few
+    runs, not from the last few days, and a fortnight away from the tool should not mean
+    coming back to an empty store.
+
+    Deletes whole runs only. Within a run the older checkpoints look like dead weight too,
+    since resuming reads the newest one, but LangGraph records each one's parent and this
+    is not the place to bet on which of those links it walks. A thread is present or it is
+    not.
+
+    `keep=0` keeps everything, which is the way to turn this off.
+    """
+    if keep <= 0:
+        return Pruned(runs=0, reclaimed=0)
+
+    before = store_size(settings)
+    async with _store(settings) as saver:
+        cursor = await saver.conn.execute(
+            "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id DESC "
+            "LIMIT -1 OFFSET ?",
+            (keep,),
+        )
+        stale = [str(row[0]) for row in await cursor.fetchall()]
+        if not stale:
+            return Pruned(runs=0, reclaimed=0)
+
+        marks = ",".join("?" * len(stale))
+        for table in ("writes", "checkpoints"):
+            await saver.conn.execute(
+                f"DELETE FROM {table} WHERE thread_id IN ({marks})",
+                stale,
+            )
+        await saver.conn.commit()
+
+        # Deleting rows frees pages for reuse; only a rewrite hands them back to the
+        # filesystem, and rewriting a multi-gigabyte store takes long enough to read as
+        # a hang at the start of a run. Skipped while the free space is small enough
+        # that the next run will simply reuse it, which is what keeps the steady state
+        # cheap: the first prune after a long stretch pays, the rest are instant.
+        cursor = await saver.conn.execute("PRAGMA freelist_count")
+        free = int((await cursor.fetchone())[0])
+        cursor = await saver.conn.execute("PRAGMA page_count")
+        total = int((await cursor.fetchone())[0]) or 1
+        if free / total >= VACUUM_AT_FREE_FRACTION:
+            await saver.conn.execute("VACUUM")
+            await saver.conn.commit()
+
+    return Pruned(runs=len(stale), reclaimed=max(0, before - store_size(settings)))
 
 
 @asynccontextmanager
@@ -286,6 +375,24 @@ def run_directory(
     return settings.output_dir / run_id
 
 
+async def _reclaim(settings: Settings, clients: Clients) -> None:
+    """Bound what a run leaves behind: old checkpoints, and cache entries past the TTL.
+
+    Here rather than in a node, and silent. It is not part of the pipeline, it produces
+    nothing the bundle records, and a line about disk in front of every run is noise —
+    `okf-loremaster runs` reports what the store is holding, which is where somebody
+    wondering about it would look.
+
+    Never fails a run. Deleting scratch is the least important thing happening, and a
+    locked database or a read-only cache directory is not a reason to refuse to build.
+    """
+    try:
+        await prune_checkpoints(settings, keep=settings.checkpoint_keep_runs)
+        clients.cache.sweep()
+    except Exception:  # housekeeping, so on any failure at all
+        return
+
+
 # --- the build command ------------------------------------------------------
 
 
@@ -358,6 +465,11 @@ async def build_run(
     task = attach(bus) if attach is not None else _start_renderer(bus, options, console)
 
     clients = build_clients(resolved, bus=bus, transport=transport)
+    # Before the graph starts, and never on a resume — retention keeps the newest runs
+    # and a resumed one is by definition not the newest, so pruning here could delete
+    # the very thread about to be replayed.
+    if options.resume is None:
+        await _reclaim(resolved, clients)
     router = None if options.dry_run else _router(resolved, bus)
     deps = Deps(
         settings=resolved,

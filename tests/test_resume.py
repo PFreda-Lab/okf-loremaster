@@ -22,7 +22,14 @@ from typing import Any
 import pytest
 from rich.console import Console
 
-from okf_loremaster.run import RunOptions, build_run, find_run, list_runs, started_at
+from okf_loremaster.run import (
+    RunOptions,
+    build_run,
+    find_run,
+    list_runs,
+    prune_checkpoints,
+    started_at,
+)
 
 from graph_runs import PROMPT, full_run, run_settings
 
@@ -188,3 +195,131 @@ async def test_a_second_run_of_the_same_question_re_reads_no_papers(
     assert second.scripted.extracted == [], "the second run paid to read the same papers"
     assert set(second.state["extractions"]) == set(first.state["extractions"])
     assert second.state["run_id"] != first.state["run_id"]
+
+
+# --- what the store keeps -----------------------------------------------------
+
+
+async def seed_runs(settings: Any, *run_ids: str) -> None:
+    """Put threads in the store without paying for runs to make them.
+
+    Retention is SQL over two tables, and what it has to get right is which thread_ids
+    it picks — not anything about what a checkpoint contains. Three real runs to prove
+    that would be minutes of test time to assert on an `ORDER BY`.
+    """
+    from okf_loremaster.graph.build import checkpointer
+
+    async with checkpointer(settings) as saver:
+        await saver.setup()
+        for run_id in run_ids:
+            await saver.conn.execute(
+                "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, "
+                "type, checkpoint, metadata) VALUES (?, '', 'c1', 'x', ?, ?)",
+                (run_id, b"{}", b"{}"),
+            )
+            await saver.conn.execute(
+                "INSERT INTO writes (thread_id, checkpoint_ns, checkpoint_id, task_id, "
+                "idx, channel, type, value) VALUES (?, '', 'c1', 't', 0, 'ch', 'x', ?)",
+                (run_id, b"{}"),
+            )
+        await saver.conn.commit()
+
+
+async def threads(settings: Any) -> tuple[list[str], list[str]]:
+    """Every thread id in each table, newest first. Both, because a run deleted from one
+    and left in the other is a store that disagrees with itself."""
+    from okf_loremaster.graph.build import checkpointer
+
+    async with checkpointer(settings) as saver:
+        await saver.setup()
+        out = []
+        for table in ("checkpoints", "writes"):
+            cursor = await saver.conn.execute(
+                f"SELECT DISTINCT thread_id FROM {table} ORDER BY thread_id DESC"
+            )
+            out.append([str(row[0]) for row in await cursor.fetchall()])
+        return (out[0], out[1])
+
+
+async def test_retention_keeps_the_newest_runs_and_drops_the_rest(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """Two days of ordinary use reached 3 GB before anything dropped a finished run: a
+    build costs 100 to 350 MB of checkpoints, because the whole state is serialized once
+    per node and by then it holds abstracts, full texts and extractions."""
+    settings = run_settings(settings_factory, tmp_path)
+    ids = [f"2026080{day}-120000-aaaa" for day in range(1, 6)]
+    await seed_runs(settings, *ids)
+
+    result = await prune_checkpoints(settings, keep=2)
+
+    assert result.runs == 3
+    kept, kept_writes = await threads(settings)
+    assert kept == ids[-1:-3:-1], "kept by recency, not by insertion order"
+    assert kept_writes == kept, "a thread left in `writes` is a store disagreeing with itself"
+
+
+async def test_retention_is_by_count_and_not_by_age(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """What makes a checkpoint worth keeping is being recent relative to the others.
+    Somebody resuming picks from the last few runs, not the last few days, and a
+    fortnight away from the tool should not mean coming back to an empty store."""
+    settings = run_settings(settings_factory, tmp_path)
+    await seed_runs(settings, "20200101-120000-aaaa", "20200102-120000-bbbb")
+
+    assert (await prune_checkpoints(settings, keep=5)).runs == 0
+    kept, _ = await threads(settings)
+    assert len(kept) == 2
+
+
+async def test_retention_can_be_turned_off(settings_factory: Any, tmp_path: Path) -> None:
+    settings = run_settings(settings_factory, tmp_path)
+    ids = [f"2026080{day}-120000-aaaa" for day in range(1, 6)]
+    await seed_runs(settings, *ids)
+
+    assert (await prune_checkpoints(settings, keep=0)).runs == 0
+    kept, _ = await threads(settings)
+    assert len(kept) == len(ids)
+
+
+async def test_a_run_survives_retention_still_resumable(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deleting other threads must not damage the one kept. Whole runs only, and never
+    the newest ones — a retention pass that left a resumable run half-deleted would fail
+    at the point of resuming it, long after the pass that broke it."""
+    settings = run_settings(settings_factory, tmp_path)
+    run = await full_run(settings_factory, tmp_path, monkeypatch)
+    await seed_runs(settings, "20200101-120000-aaaa", "20200102-120000-bbbb")
+
+    assert (await prune_checkpoints(settings, keep=1)).runs == 2
+
+    found = await find_run(settings, run.state["run_id"])
+    assert found is not None
+    assert found.prompt == PROMPT
+
+
+async def test_a_resumed_run_prunes_nothing(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retention keeps the newest runs and a resumed one is, by definition, not the
+    newest — so a build that pruned on the way in could delete the very thread it was
+    about to replay."""
+    from fake_ncbi import FakeNCBI
+
+    run = await full_run(settings_factory, tmp_path, monkeypatch)
+    settings = run_settings(settings_factory, tmp_path).model_copy(
+        update={"checkpoint_keep_runs": 1}
+    )
+    await seed_runs(settings, "20200101-120000-aaaa")
+
+    await build_run(
+        RunOptions(resume=run.state["run_id"], out=tmp_path / "run"),
+        console=Console(file=io.StringIO(), width=160, no_color=True),
+        settings=settings,
+        transport=FakeNCBI().transport(),
+    )
+
+    kept, _ = await threads(settings)
+    assert "20200101-120000-aaaa" in kept, "the resume pruned on its way in"

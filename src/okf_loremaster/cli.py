@@ -393,11 +393,12 @@ def runs(
     from rich.table import Table
 
     from okf_loremaster.config import load_settings
-    from okf_loremaster.run import list_runs
+    from okf_loremaster.run import list_runs, store_size
 
     with _reported():
         settings = load_settings()
         past = asyncio.run(list_runs(settings, limit=limit))
+        held = store_size(settings)
 
     if not past:
         console.print(
@@ -432,6 +433,17 @@ def runs(
             f"[cyan]okf-loremaster build --resume {unfinished.run_id}[/cyan]"
             f"  [dim](the question is read back from the run)[/dim]"
         )
+
+    # What the store costs, next to what bounds it. A run's checkpoints are hundreds of
+    # megabytes and nothing outside this command ever mentions them, so without a number
+    # here the only way to find out is to go looking in the cache directory.
+    keep = settings.checkpoint_keep_runs
+    console.print(
+        f"\n[dim]checkpoints:[/dim] {held / 1_048_576:,.0f} MB [dim]in "
+        f"{settings.cache_dir}, keeping the newest "
+        + (f"{keep} run(s)" if keep > 0 else "— retention off")
+        + "[/dim]"
+    )
 
 if __name__ == "__main__":
     app()

@@ -153,6 +153,12 @@ class Settings(BaseSettings):
     cache_dir: Path = Field(default_factory=lambda: user_cache_path("okf-loremaster"))
     output_dir: Path = Path("bundles")
 
+    # How many past runs the checkpoint store keeps. A run costs 100 to 350 MB there,
+    # because LangGraph serializes the whole state — candidates, abstracts, full texts,
+    # extractions — once per node, and nothing expires. Applied when a build starts, so
+    # the store holds this many plus the one being written. Set to 0 to keep everything.
+    checkpoint_keep_runs: int = 5
+
     # --- Accessors ---------------------------------------------------------
 
     def model_for(self, role: Role) -> str:

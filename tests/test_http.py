@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import ssl
 import time
 from pathlib import Path
@@ -136,6 +137,56 @@ def test_expired_entries_are_ignored(tmp_path: Path) -> None:
     path.write_text(json.dumps(payload))
 
     assert cache.get(key) is None
+
+
+def expire(path: Path, days: float) -> None:
+    """Age one entry, both ways it is read: `stored_at` is what `get` checks, mtime is
+    what `sweep` checks, and an entry aged in only one of them tests neither."""
+    payload = json.loads(path.read_text())
+    payload["stored_at"] = time.time() - 86400 * days
+    path.write_text(json.dumps(payload))
+    os.utime(path, (payload["stored_at"], payload["stored_at"]))
+
+
+def test_sweeping_deletes_what_the_ttl_already_expired(tmp_path: Path) -> None:
+    """The TTL expired reads and nothing expired the files. An entry past it was ignored
+    on lookup and then stayed forever, because the only thing that overwrites one is the
+    same URL being asked for again — so a directory that looked like a month of cache was
+    every response the tool had ever seen."""
+    cache = DiskCache(tmp_path, ttl_days=1)
+    for term in ("old", "new"):
+        cache.put(DiskCache.key("GET", URL, {"term": term}), status=200, text=term, content_type="")
+    stale = next(p for p in tmp_path.rglob("*.json") if json.loads(p.read_text())["text"] == "old")
+    expire(stale, 2)
+
+    files, freed = cache.sweep()
+
+    assert files == 1
+    assert freed > 0
+    assert not stale.exists()
+    fresh = DiskCache.key("GET", URL, {"term": "new"})
+    assert cache.get(fresh) is not None, "sweeping took an entry still inside the TTL"
+
+
+def test_sweeping_a_disabled_cache_deletes_nothing(tmp_path: Path) -> None:
+    """Disabling the cache is how a run is made to re-fetch everything, not how its disk
+    is reclaimed — the entries are somebody else's to keep."""
+    enabled = DiskCache(tmp_path, ttl_days=1)
+    enabled.put(DiskCache.key("GET", URL, {"term": "x"}), status=200, text="x", content_type="")
+    expire(next(tmp_path.rglob("*.json")), 2)
+
+    assert DiskCache(tmp_path, ttl_days=1, enabled=False).sweep() == (0, 0)
+    assert list(tmp_path.rglob("*.json"))
+
+
+def test_a_cache_with_no_ttl_sweeps_nothing(tmp_path: Path) -> None:
+    """`ttl_days=0` is "these never go stale", and nothing expired cannot be swept."""
+    cache = DiskCache(tmp_path, ttl_days=0)
+    cache.put(DiskCache.key("GET", URL, {"term": "x"}), status=200, text="x", content_type="")
+    expire(next(tmp_path.rglob("*.json")), 3650)
+
+    assert cache.sweep() == (0, 0)
+    assert list(tmp_path.rglob("*.json"))
 
 
 def test_a_disabled_cache_never_answers(tmp_path: Path) -> None:

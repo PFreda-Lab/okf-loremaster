@@ -197,6 +197,39 @@ class DiskCache:
             # A cache that cannot be written is a slow run, not a failed one.
             return
 
+    def sweep(self) -> tuple[int, int]:
+        """Delete entries past the TTL. Returns how many files and how many bytes.
+
+        The TTL expired reads and nothing ever expired the files. An entry past it is
+        ignored on lookup and then stays on disk indefinitely, because the only thing
+        that overwrites one is the same URL being requested again — so a directory that
+        looks like a month of cache is really every response this tool has ever seen.
+        This is what makes the configured lifetime mean what it says.
+
+        Judged by modification time rather than by the `stored_at` inside each entry, so
+        a sweep is one stat per file instead of a parse. They agree: an entry is written
+        once, under a temporary name, and renamed into place without being touched again.
+
+        Best effort throughout, on the same grounds as `put` — a cache that cannot be
+        tidied is disk, not a failed run.
+        """
+        if not self._enabled or self._ttl <= 0:
+            return (0, 0)
+        cutoff = time.time() - self._ttl
+        files = 0
+        freed = 0
+        for path in self._root.glob("*/*.json"):
+            try:
+                stat = path.stat()
+                if stat.st_mtime > cutoff:
+                    continue
+                path.unlink()
+            except OSError:
+                continue
+            files += 1
+            freed += stat.st_size
+        return (files, freed)
+
 
 @dataclass
 class HttpClient:
