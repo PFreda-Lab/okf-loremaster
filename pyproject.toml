@@ -30,6 +30,10 @@ dependencies = [
     "platformdirs>=4.2",
 ]
 
+[project.urls]
+Homepage = "https://github.com/PFreda-Lab/okf-loremaster"
+Repository = "https://github.com/PFreda-Lab/okf-loremaster"
+
 [project.optional-dependencies]
 # Kept out of the base install: chromadb + sentence-transformers pull onnxruntime and torch.
 # The OKF bundle is the primary product; the vector index is derived and optional.
