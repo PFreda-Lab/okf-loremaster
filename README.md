@@ -333,6 +333,34 @@ query no earlier round has already run, the search repeats for that topic alone.
 matter: without the second, a topic that is thin because the literature is thin would re-run the
 same searches, arrive at the same shortfall, and have paid twice for it.
 
+### How the pool is ranked
+
+`rank` decides which candidates reach the screener, and screening is the largest cost in a run. It
+is all code, and deterministic — the same corpus and charter give the same pool. Six weighted
+signals, summing to 1.0:
+
+| Signal | Weight | What it measures |
+|---|---|---|
+| `position` | 0.30 | the best rank the paper reached in any query, decayed rather than cut off |
+| `agreement` | 0.25 | how many independent queries found it — convergence is evidence |
+| `recency` | 0.15 | publication year, against the charter's floor or 20 years back |
+| `citation` | 0.15 | iCite RCR where available, otherwise log-scaled citation count |
+| `abstract` | 0.10 | whether there is an abstract to screen at all |
+| `article` | 0.05 | primary research, versus a comment, editorial or erratum |
+
+**The weights are constants, not settings.** A knob per signal invites tuning the ranking against
+one project's corpus, which is exactly what would stop it generalizing.
+
+**A signal that wasn't measured scores 0.5, not 0.** If iCite is unreachable, every paper gets the
+same neutral citation score, and a constant added to every score changes no ordering — so the
+signal drops out instead of quietly becoming a second recency term.
+
+Two passes then run on top of that ordering. **MMR** (λ = 0.7) trades a little relevance for
+coverage, so a cluster of near-identical reviews contributes its best member rather than its first
+six. **A per-topic quota** reserves capacity for each topic before the pool fills, so a topic whose
+queries match ten thousand papers can't crowd out one that matches two hundred — unused quota is
+released back rather than held empty. `--dry-run` prints what both passes changed.
+
 ---
 
 ## Install
