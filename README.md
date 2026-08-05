@@ -365,10 +365,10 @@ signal drops out instead of quietly becoming a second recency term.
 
 Two passes then run on top of that ordering.
 
-**Maximal marginal relevance** — take the best paper that isn't already covered by what you've
-taken — trades a little relevance for coverage. The dial is λ, at 0.7 here on a scale where 1.0
-would mean pure relevance and no coverage at all. A cluster of near-identical reviews contributes
-its best member rather than its first six.
+**Maximal marginal relevance (MMR)** — take the best paper that isn't already covered by what you've
+already taken — trades a little relevance for coverage. MMR's dial is lambda (λ), set to 0.7 here on
+a scale where 1.0 would mean pure relevance and no coverage at all. The effect is that a cluster of
+near-identical reviews contributes its best member rather than its first six.
 
 **A per-topic quota** reserves capacity for each topic before the pool fills, so a topic whose
 queries match ten thousand papers can't crowd out one that matches two hundred. Unused quota is
