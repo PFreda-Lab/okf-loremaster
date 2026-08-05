@@ -27,6 +27,11 @@ BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 EFETCH_BATCH = 200
 # esearch will not return more than this many ids in one call, whatever retmax says.
 ESEARCH_MAX_RETMAX = 10_000
+# Which papers a capped query returns, and so the one parameter that decides whether
+# repeating a search gets the same corpus. Named rather than written inline because
+# `search.md` reports it: PubMed recomputes this ranking as its index grows, and a bundle
+# that does not say how its results were ordered cannot be replayed honestly.
+ESEARCH_SORT = "relevance"
 
 # PubMed marks retractions in two places and they do not always agree: the retracted
 # article usually gains this publication type, but sometimes only carries a
@@ -151,7 +156,7 @@ class EUtilsClient:
         db: str = "pubmed",
         retmax: int = 200,
         retstart: int = 0,
-        sort: str = "relevance",
+        sort: str = ESEARCH_SORT,
         node: str = "search",
     ) -> ESearchResult:
         params = {

@@ -31,6 +31,8 @@ from okf_loremaster.okf.layout import (
     PREDICTORS_FILENAME,
     RESERVED_FILENAMES,
     ROOT_INDEX_TYPE,
+    SEARCH_FILENAME,
+    SEARCH_STRATEGY_TYPE,
     TOPIC_INDEX_TYPE,
     UNVERIFIED_CELL,
 )
@@ -66,6 +68,8 @@ __all__ = [
     "PREDICTOR_INDEX_TYPE",
     "RESERVED_FILENAMES",
     "ROOT_INDEX_TYPE",
+    "SEARCH_FILENAME",
+    "SEARCH_STRATEGY_TYPE",
     "TOPIC_INDEX_TYPE",
     "UNVERIFIED_CELL",
     "BundleReport",

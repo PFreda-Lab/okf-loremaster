@@ -20,6 +20,7 @@ from typing import Any
 import pytest
 import yaml
 
+from okf_loremaster.emitters.okf import search_markdown
 from okf_loremaster.okf.frontmatter import load, parse, split
 from okf_loremaster.okf.layout import (
     BODY_SECTIONS,
@@ -30,16 +31,24 @@ from okf_loremaster.okf.layout import (
     LOG_FILENAME,
     PREDICTOR_INDEX_TYPE,
     PREDICTORS_FILENAME,
+    SEARCH_FILENAME,
+    SEARCH_STRATEGY_TYPE,
     UNVERIFIED_CELL,
 )
 from okf_loremaster.okf.reader import fact_list, markdown_table, read_bundle
 from okf_loremaster.okf.validate import validate_bundle
 from okf_loremaster.review import HUMAN_PREFIX, Signoff
-from okf_loremaster.schemas import ConceptRecord, StrengthGrade, VerificationSummary
+from okf_loremaster.schemas import (
+    ConceptRecord,
+    ExecutedQuery,
+    RunManifest,
+    StrengthGrade,
+    VerificationSummary,
+)
 from test_verification import fabricating
 
 from fake_ncbi import TOPICS
-from graph_runs import TARGET, Run, full_run, scripted_run
+from graph_runs import POOL_SIZE, TARGET, Run, charter_for, full_run, scripted_run
 
 # What a flat frontmatter value may open with once the emitter has had its way: a quote
 # for a scalar, a bracket or brace for the nested blocks OKF v0.2 requires.
@@ -86,6 +95,7 @@ async def test_the_bundle_has_every_file_a_consumer_is_promised(
         LOG_FILENAME,
         CHARTER_FILENAME,
         PREDICTORS_FILENAME,
+        SEARCH_FILENAME,
     ):
         assert (bundle / filename).is_file(), filename
 
@@ -410,6 +420,141 @@ async def test_the_descriptor_and_the_root_index_both_point_at_the_predictor_ind
     payload = yaml.safe_load((bundle / DESCRIPTOR_FILENAME).read_text(encoding="utf-8"))
     assert payload["predictors"] == PREDICTORS_FILENAME
     assert PREDICTORS_FILENAME in (bundle / INDEX_FILENAME).read_text(encoding="utf-8")
+
+
+# --- the search strategy ----------------------------------------------------
+
+
+async def test_the_search_strategy_is_a_root_file_and_not_a_document(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It describes how the whole corpus was found, so it belongs beside the topic
+    folders rather than inside one — and the `domain` trap is the same one
+    `predictors.md` sits next to."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    fields, body = load((bundle / SEARCH_FILENAME).read_text(encoding="utf-8"))
+    assert fields["type"] == SEARCH_STRATEGY_TYPE
+    assert fields["title"] and fields["description"]
+    assert "domain" not in fields
+    assert body.strip()
+
+    parsed = read_bundle(bundle)
+    assert all(document.path.name != SEARCH_FILENAME for document in parsed.documents())
+    assert len(list(parsed.documents())) == TARGET
+
+
+async def test_every_query_reaches_the_search_strategy_with_what_pubmed_made_of_it(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The property the file exists for. A term is reproducible only alongside its
+    translation: PubMed rewrites a field tag it does not know instead of rejecting it,
+    so a term printed on its own cannot be told apart from one that quietly asked
+    something far broader."""
+    run, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    text = (bundle / SEARCH_FILENAME).read_text(encoding="utf-8")
+    executed = run.state["executed"]
+    assert executed, "the golden run has to have searched for this to mean anything"
+
+    for query in executed:
+        assert query.term in text, query.term
+        assert query.translation in text, query.translation
+        if query.rationale:
+            assert query.rationale in text, query.rationale
+
+
+async def test_the_search_strategy_names_the_two_things_that_decide_a_replay(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cap and the order it applies to. Without both, a query with more hits than
+    the cap looks exactly like one taken whole, and the difference is the difference
+    between a search that repeats and one that only mostly does."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    text = (bundle / SEARCH_FILENAME).read_text(encoding="utf-8")
+    assert "relevance" in text
+    assert str(POOL_SIZE) in text  # `per_query_retmax`, which the golden run leaves at 200
+
+
+async def test_the_descriptor_and_the_root_index_both_point_at_the_search_strategy(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same reason as the predictor index: a file that is not a document is invisible to
+    a consumer walking documents unless something at the root names it."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    payload = yaml.safe_load((bundle / DESCRIPTOR_FILENAME).read_text(encoding="utf-8"))
+    assert payload["search"] == SEARCH_FILENAME
+    assert SEARCH_FILENAME in (bundle / INDEX_FILENAME).read_text(encoding="utf-8")
+
+
+def _rendered(*executed: ExecutedQuery, retmax: int = 200) -> str:
+    """`search.md` for a run that did nothing but these searches."""
+    return search_markdown(
+        charter_for(),
+        RunManifest(run_id="test", queries=list(executed), retmax=retmax, sort="relevance"),
+    )
+
+
+def test_a_query_taken_whole_and_one_cut_off_by_the_cap_do_not_read_alike() -> None:
+    """A reader comparing two runs needs to know which queries could have drifted. The
+    uncapped ones cannot; saying so is most of the value of printing either."""
+    text = _rendered(
+        ExecutedQuery(term="whole[tiab]", count=12, retrieved=12),
+        ExecutedQuery(term="cut[tiab]", count=900, retrieved=200),
+    )
+    assert "all 12 were retrieved" in text
+    assert "The first 200 were retrieved" in text
+    assert "the other 700 were never seen by this run" in text
+
+
+def test_a_query_that_matched_nothing_says_so_rather_than_printing_a_zero() -> None:
+    """PubMed reports an empty search as a successful one, so a bare `0` in a table is
+    the one result a reader is most likely to skim past."""
+    text = _rendered(ExecutedQuery(term="nothing[tiab]", count=0, retrieved=0))
+    assert "no papers matched" in text
+    assert "reports an empty search as a successful one" in text
+
+
+def test_a_suspect_query_carries_its_verdict_and_pubmeds_own_report() -> None:
+    """Two sources saying the same thing, kept separate on purpose: one is a conclusion
+    drawn from comparing the term with its expansion, the other is a list the service
+    returned. A reader deciding whether to trust the query wants both."""
+    text = _rendered(
+        ExecutedQuery(
+            term="x[nosuchfield]",
+            translation='"x"[All Fields]',
+            count=9_000,
+            retrieved=200,
+            suspect=True,
+            note="PubMed rewrote the field tag",
+            fields_not_found=["nosuchfield"],
+        )
+    )
+    assert "**Suspect.** PubMed rewrote the field tag" in text
+    assert "`nosuchfield` as a field it does not have" in text
+
+
+def test_the_round_is_named_only_when_there_was_more_than_one() -> None:
+    """A single-round run has no rounds to distinguish, and a `(round 1)` on every
+    heading of one is noise that reads as though something were missing."""
+    one = _rendered(ExecutedQuery(term="a[tiab]", count=1, retrieved=1, search_round=1))
+    assert "round 1" not in one
+
+    two = _rendered(
+        ExecutedQuery(term="a[tiab]", count=1, retrieved=1, search_round=1),
+        ExecutedQuery(term="b[tiab]", count=1, retrieved=1, search_round=2),
+    )
+    assert "(round 1)" in two
+    assert "(round 2)" in two
+
+
+def test_a_query_with_no_topic_is_said_to_be_for_the_whole_task() -> None:
+    """The planner is allowed to write a query that fills no single topic, and a blank
+    where a heading should be reads as a bug rather than as a deliberate breadth."""
+    text = _rendered(ExecutedQuery(term="broad[tiab]", count=5, retrieved=5, topic=""))
+    assert "Across the whole task" in text
 
 
 # --- the catalog ------------------------------------------------------------

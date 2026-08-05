@@ -75,7 +75,7 @@ async def search_node(state: RunState, deps: Deps) -> dict[str, Any]:
         plan = await _plan(deps, charter, state, warnings)
         query_topic.update({q.term: q.topic for q in plan.queries})
 
-        executed, hits = await _execute(deps, plan, warnings)
+        executed, hits = await _execute(deps, plan, warnings, search_round=rounds + 1)
         found = await _fetch(deps, hits)
         candidates = _merge(prior_candidates, found)
 
@@ -223,7 +223,7 @@ def _finalize(planned: QueryPlan, charter: Charter, deps: Deps, warnings: list[s
 
 
 async def _execute(
-    deps: Deps, plan: QueryPlan, warnings: list[str]
+    deps: Deps, plan: QueryPlan, warnings: list[str], *, search_round: int = 1
 ) -> tuple[list[ExecutedQuery], dict[str, dict[str, int]]]:
     """Run every query. Returns each query's record, and PMID to {query term: rank}.
 
@@ -248,7 +248,14 @@ async def _execute(
         result = await deps.clients.eutils.esearch(
             query.term, retmax=deps.per_query_retmax, node=NODE
         )
-        record = queries.executed(query.term, result, retrieved=len(result.ids))
+        record = queries.executed(
+            query.term,
+            result,
+            retrieved=len(result.ids),
+            rationale=query.rationale,
+            topic=query.topic,
+            search_round=search_round,
+        )
         executed.append(record)
         if record.suspect:
             note = f"{record.note} — query: {query.term}"

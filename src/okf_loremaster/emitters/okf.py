@@ -54,6 +54,8 @@ from okf_loremaster.okf.layout import (
     PREDICTORS_FILENAME,
     QUOTE_LEAD,
     ROOT_INDEX_TYPE,
+    SEARCH_FILENAME,
+    SEARCH_STRATEGY_TYPE,
     SITE_COLUMNS,
     TOPIC_INDEX_TYPE,
     UNVERIFIED_CELL,
@@ -63,6 +65,7 @@ from okf_loremaster.recurrence import MIN_PAPERS, index_predictors
 from okf_loremaster.schemas import (
     Charter,
     ConceptRecord,
+    ExecutedQuery,
     Extraction,
     NullFinding,
     OutcomeGroup,
@@ -91,6 +94,7 @@ __all__ = [
     "log_markdown",
     "predictor_index",
     "root_index",
+    "search_markdown",
     "strength_cell",
     "topic_index",
     "write_bundle",
@@ -183,6 +187,7 @@ def write_bundle(
     written.append(_write(path / DESCRIPTOR_FILENAME, descriptor(grouped, charter=charter,
                                                                  manifest=manifest)))
     written.append(_write(path / LOG_FILENAME, log or log_markdown(charter, manifest)))
+    written.append(_write(path / SEARCH_FILENAME, search_markdown(charter, manifest)))
     # Written here as well as by the run directory, so the descriptor's charter pointer
     # resolves for a bundle that was moved or copied on its own.
     written.append(_write(path / CHARTER_FILENAME, charter.to_yaml()))
@@ -666,6 +671,8 @@ def root_index(
         "",
         f"- [{PREDICTORS_FILENAME}]({PREDICTORS_FILENAME}) — what recurs across the "
         f"topics, and which row of which paper to read it in",
+        f"- [{SEARCH_FILENAME}]({SEARCH_FILENAME}) — every query behind this bundle, why "
+        f"it was asked, and what PubMed made of it",
         f"- [{LOG_FILENAME}]({LOG_FILENAME}) — how this bundle was built",
         f"- `{CATALOG_FILENAME}` — one JSON row per document",
         f"- [{DESCRIPTOR_FILENAME}]({DESCRIPTOR_FILENAME}) — what a consumer reads on attach",
@@ -866,6 +873,229 @@ def log_markdown(charter: Charter, manifest: RunManifest, *, verification: str =
     return render(fields) + "\n" + "\n".join(body)
 
 
+def search_markdown(charter: Charter, manifest: RunManifest) -> str:
+    """`search.md` — the search written out to be repeated by hand.
+
+    `log.md` already lists the same queries, two lines each, as part of a run's
+    forensics. This file exists because a methods section and a build log are read by
+    different people looking for different things: one wants to know what happened in
+    this run, the other wants to run the search again and is entitled to know what
+    would come back differently and why. So everything here is spelled out — what each
+    field is, which of them PubMed chose rather than us, and which of the three things
+    that decide a replay are outside anyone's control.
+
+    Nothing is computed that the run did not already record. `translation`, `rationale`,
+    `topic` and `search_round` all ride on `ExecutedQuery`, and the retrieval parameters
+    on the manifest, precisely so that this can be written after the plan is gone.
+    """
+    run = manifest.run_id or "this run"
+    fields: dict[str, Any] = {
+        "type": SEARCH_STRATEGY_TYPE,
+        "title": f"Search strategy — {run}",
+        "description": (
+            "Every PubMed query this bundle was built from, why it was asked, and what "
+            "PubMed actually ran — enough to repeat the search by hand."
+        ),
+    }
+
+    body = [f"# Search strategy — {run}", ""]
+    body += _search_preamble(charter, manifest)
+    body += _search_how_to_read(manifest)
+    body += _search_replay(manifest)
+    body += _search_queries(charter, manifest)
+    return render(fields) + "\n" + "\n".join(body)
+
+
+def _search_preamble(charter: Charter, manifest: RunManifest) -> list[str]:
+    """What ran, when, and against what — one paragraph before any detail."""
+    queries = manifest.queries
+    when = manifest.started_at.date().isoformat() if manifest.started_at else "an unrecorded date"
+    counts = manifest.counts
+    lines = [
+        f"{_count(len(queries), 'query', 'queries')} ran against PubMed through NCBI's "
+        f"E-utilities on {when}. Between them they matched "
+        f"{sum(q.count for q in queries):,} papers, retrieved {counts.found:,}, and left "
+        f"{counts.unique:,} distinct ones once duplicates were folded together. "
+        f"Screening, curation and extraction narrowed those to the {counts.emitted:,} "
+        "papers in this bundle; that part of the story is in "
+        f"[{LOG_FILENAME}]({LOG_FILENAME}).",
+        "",
+        "No web page was scraped. Every search went to `esearch.fcgi` and every record "
+        "came back from `efetch.fcgi`, so any term below can be repeated in a browser by "
+        "pasting it into the PubMed search box.",
+        "",
+    ]
+
+    applied = _shared_filters(charter)
+    if applied:
+        lines += [
+            "Every query carries the same filters, appended after the model wrote the "
+            f"term rather than folded into it: {applied}. Identical across the plan on "
+            "purpose — it keeps them out of the way when you are reading what a query "
+            "actually asks.",
+            "",
+        ]
+    return lines
+
+
+def _shared_filters(charter: Charter) -> str:
+    """The language and date filters `queries.with_filters` appends, in English."""
+    parts = []
+    if charter.languages:
+        codes = ", ".join(f"`{code}[la]`" for code in charter.languages)
+        parts.append(f"{codes} for language")
+    if charter.min_year:
+        parts.append(
+            f"`{charter.min_year}:3000[dp]` for anything published since {charter.min_year}"
+        )
+    return " and ".join(parts)
+
+
+def _search_how_to_read(manifest: RunManifest) -> list[str]:
+    """A key to the four fields under each query, and what each one is evidence of."""
+    ordering = f"`sort={manifest.sort}`" if manifest.sort else "PubMed's default order"
+    return [
+        "## How to read a query",
+        "",
+        "- **Why** — what the query was reaching for. Written by the model that planned "
+        "it, before it knew what it would find.",
+        "- **Sent** — the term exactly as it left this tool. Copy it whole.",
+        "- **PubMed ran** — PubMed's own expansion of that term, MeSH headings "
+        "substituted and every field tag resolved. It is recorded for every query, not "
+        "only odd-looking ones, because PubMed does not reject a field tag it does not "
+        "recognize: it silently rewrites `x[nosuchfield]` into `\"x\"[All Fields]`, "
+        "returns far more papers than intended, and reports no error at all. When a "
+        "term and its expansion look nothing alike, this is the only place that shows, "
+        "and the query is marked **suspect**.",
+        "- **Result** — how many papers matched, and how many of them were actually "
+        f"taken. Retrieval was capped at {manifest.retmax or 'no'} per query, ordered by "
+        f"{ordering}, so a query that matched more than the cap contributed only the "
+        "top slice of what it found.",
+        "",
+    ]
+
+
+def _search_replay(manifest: RunManifest) -> list[str]:
+    """What repeating this search will and will not give you.
+
+    Stated rather than implied. A search strategy printed without its caveats reads as
+    a promise of the same corpus, and two of the three things that decide that are
+    nobody's to control.
+    """
+    cap = manifest.retmax or 0
+    over = [q for q in manifest.queries if cap and q.count > cap]
+    exact = len(manifest.queries) - len(over)
+    lines = [
+        "## Will this reproduce?",
+        "",
+        "The terms will. The corpus may not, and it is worth knowing why before you "
+        "compare two runs.",
+        "",
+        "1. **The terms are exact.** They are stored as sent, and PubMed's query syntax "
+        "is stable. Pasting one into PubMed today asks the same question it asked here.",
+    ]
+    if cap:
+        whole = _count(exact, "query", "queries")
+        capped = _count(len(over), "query", "queries")
+        lines.append(
+            f"2. **The cap is not a tie-breaker, it is a filter.** {whole} matched {cap} "
+            f"papers or fewer and so were taken whole — those are exact. {capped} matched "
+            f"more, and only the first {cap} were kept."
+        )
+        lines.append(
+            "3. **PubMed's relevance ranking is not frozen.** It is recomputed as the "
+            "index grows, so for the capped queries above, repeating the search later "
+            "can return a different set of the same size. The uncapped ones are "
+            "unaffected. This is the reason a bundle records the date it was searched "
+            "rather than only the terms."
+        )
+    else:
+        lines.append(
+            "2. **PubMed keeps growing.** A query repeated later matches everything it "
+            "matched before plus whatever has been indexed since, which is why a bundle "
+            "records the date it was searched rather than only its terms."
+        )
+    lines.append("")
+    return lines
+
+
+def _search_queries(charter: Charter, manifest: RunManifest) -> list[str]:
+    """One section per query, in the order they ran."""
+    lines = ["## The queries", ""]
+    if not manifest.queries:
+        return [*lines, "No queries were executed.", ""]
+
+    rounds = {query.search_round for query in manifest.queries if query.search_round}
+    for number, query in enumerate(manifest.queries, start=1):
+        heading = f"### {number}. {_query_heading(charter, query)}"
+        if len(rounds) > 1 and query.search_round:
+            heading += f" (round {query.search_round})"
+        lines += [heading, ""]
+        if query.rationale:
+            lines += [f"**Why** — {inline(query.rationale)}", ""]
+        lines += ["**Sent**", "", "```text", query.term, "```", ""]
+        if query.translation:
+            lines += ["**PubMed ran**", "", "```text", query.translation, "```", ""]
+        lines += [f"**Result** — {_search_result(query, manifest.retmax)}", ""]
+        lines += _search_flags(query)
+    return lines
+
+
+def _query_heading(charter: Charter, query: ExecutedQuery) -> str:
+    """The topic a query was meant to fill, in the charter's words."""
+    if not query.topic:
+        return "Across the whole task"
+    return _topic_title(charter, query.topic)
+
+
+def _search_result(query: ExecutedQuery, retmax: int) -> str:
+    """How many matched and how many were taken, said in English rather than two cells."""
+    if query.count == 0:
+        return (
+            "no papers matched. Not an error — PubMed reports an empty search as a "
+            "successful one — but a term that matches nothing usually has a phrase in it "
+            "longer than any paper would print."
+        )
+    if query.retrieved >= query.count:
+        return f"{query.count:,} papers matched, and all {query.retrieved:,} were retrieved."
+    held = query.count - query.retrieved
+    return (
+        f"{query.count:,} papers matched. The first {query.retrieved:,} were retrieved"
+        + (f" (the cap is {retmax:,})" if retmax else "")
+        + f"; the other {held:,} were never seen by this run."
+    )
+
+
+def _search_flags(query: ExecutedQuery) -> list[str]:
+    """Anything PubMed did to the query that a reader would otherwise have to notice."""
+    lines: list[str] = []
+    if query.suspect:
+        lines += [
+            f"> **Suspect.** {inline(query.note) or 'the expansion looks nothing like the term'}"
+            " — read the expansion above before trusting this query's share of the corpus.",
+            "",
+        ]
+    if query.fields_not_found:
+        tags = ", ".join(f"`{tag}`" for tag in query.fields_not_found)
+        # PubMed's own account rather than ours, which is why it is printed even when the
+        # suspect line above already says the same thing in different words. The two come
+        # from different places — one is a verdict we reached by comparing the term with
+        # its expansion, the other is a list the service returned — and a reader deciding
+        # whether to trust this query is better served by both than by the tidier one.
+        lines += [
+            f"> PubMed's own response reports {tags} as a field it does not have. It "
+            "searched the clause as plain text instead, which is broader than what was "
+            "asked for.",
+            "",
+        ]
+    return lines
+
+
+def _count(number: int, singular: str, plural: str) -> str:
+    """`1 query` / `10 queries`, so a sentence reads right at either end."""
+    return f"{number:,} {singular if number == 1 else plural}"
+
+
 def _topic_title(charter: Charter, slug: str) -> str:
     """The human name of a topic, falling back to its slug.
 
@@ -896,6 +1126,10 @@ def descriptor(
         # v0.2 has a reader ignore keys it does not know, so this costs nothing to a
         # consumer that has never heard of it and saves a directory listing to one that has.
         "predictors": PREDICTORS_FILENAME,
+        # Declared for the same reason, and worth its own key rather than a mention in
+        # the log: a consumer asking "where did this corpus come from" is asking a
+        # question about method, and the answer should not require reading a build log.
+        "search": SEARCH_FILENAME,
         "domains": {slug: _topic_title(charter, slug) for slug in grouped},
         "documents": sum(len(items) for items in grouped.values()),
         "tool": "okf-loremaster",

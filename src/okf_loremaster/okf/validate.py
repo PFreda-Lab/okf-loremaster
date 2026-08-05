@@ -44,6 +44,7 @@ from okf_loremaster.okf.layout import (
     LOG_FILENAME,
     PREDICTORS_FILENAME,
     RESERVED_FILENAMES,
+    SEARCH_FILENAME,
     vector_store_path,
 )
 from okf_loremaster.okf.reader import OkfBundle, OkfDocument, read_bundle
@@ -184,6 +185,7 @@ def _check_root(bundle: OkfBundle, findings: list[Finding]) -> None:
         (DESCRIPTOR_FILENAME, "a consumer detects the bundle without it, but records nothing"),
         (LOG_FILENAME, "the build history is not recoverable from the bundle alone"),
         (CHARTER_FILENAME, "what the bundle was built for is not recoverable from it"),
+        (SEARCH_FILENAME, "the search cannot be repeated or reported from the bundle alone"),
     ):
         if not (bundle.path / filename).exists():
             findings.append(Finding(Severity.WARNING, f"no {filename} — {what}", bundle.path))
@@ -197,21 +199,22 @@ def _check_root(bundle: OkfBundle, findings: list[Finding]) -> None:
             )
         )
 
-    # The same trap, for the one other file at the root that carries frontmatter. A
-    # `domain` here would make `predictors.md` a document whose folder does not exist,
-    # which is what a consumer checking rule 2 — `domain` equals the containing folder —
-    # would reject the whole bundle over. Read directly rather than through the reader,
-    # which only walks the topic folders and so cannot see this file at all.
-    predictors = bundle.path / PREDICTORS_FILENAME
-    if predictors.exists() and "domain" in _root_fields(predictors):
-        findings.append(
-            Finding(
-                Severity.ERROR,
-                f"{PREDICTORS_FILENAME} carries a `domain` key, but it cuts across every "
-                f"domain and sits in none",
-                predictors,
+    # The same trap, for the other root files that carry frontmatter. A `domain` here
+    # would make one of them a document whose folder does not exist, which is what a
+    # consumer checking rule 2 — `domain` equals the containing folder — would reject the
+    # whole bundle over. Read directly rather than through the reader, which only walks
+    # the topic folders and so cannot see these files at all.
+    for filename in (PREDICTORS_FILENAME, SEARCH_FILENAME):
+        root_file = bundle.path / filename
+        if root_file.exists() and "domain" in _root_fields(root_file):
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    f"{filename} carries a `domain` key, but it cuts across every domain "
+                    f"and sits in none",
+                    root_file,
+                )
             )
-        )
 
 
 def _root_fields(path: Path) -> dict[str, str]:

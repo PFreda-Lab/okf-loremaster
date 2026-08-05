@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from okf_loremaster import __version__
+from okf_loremaster.clients.eutils import ESEARCH_SORT
 from okf_loremaster.config import ConfigError, Role
 from okf_loremaster.emitters.okf import log_markdown, write_bundle
 from okf_loremaster.graph.state import Deps, RunState, span
@@ -102,6 +103,8 @@ def manifest_for(
         counts=_counts(state, records),
         topics=_topics(charter, records),
         queries=list(state.get("executed") or []),
+        retmax=deps.per_query_retmax,
+        sort=ESEARCH_SORT,
         cost=_cost(deps),
         stale_after=None,
         warnings=list(state.get("warnings") or []),

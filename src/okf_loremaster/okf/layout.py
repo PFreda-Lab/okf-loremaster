@@ -34,6 +34,8 @@ __all__ = [
     "QUOTE_LEAD",
     "RESERVED_FILENAMES",
     "ROOT_INDEX_TYPE",
+    "SEARCH_FILENAME",
+    "SEARCH_STRATEGY_TYPE",
     "SITE_COLUMNS",
     "TOPIC_INDEX_TYPE",
     "UNVERIFIED_CELL",
@@ -48,6 +50,11 @@ CATALOG_FILENAME = "_catalog.jsonl"
 DESCRIPTOR_FILENAME = "resource_descriptor.yaml"
 CHARTER_FILENAME = "charter.yaml"
 PREDICTORS_FILENAME = "predictors.md"
+# The search, written out to be repeated by hand. Separate from `log.md`, which reports
+# the same queries in two lines each as part of a run's forensics; this one explains what
+# every field means and what will and will not reproduce, because a methods section and a
+# build log are read by different people looking for different things.
+SEARCH_FILENAME = "search.md"
 
 # Files at the root of a bundle or a topic that are ours to regenerate, never documents.
 RESERVED_FILENAMES = frozenset(
@@ -58,6 +65,7 @@ RESERVED_FILENAMES = frozenset(
         DESCRIPTOR_FILENAME,
         CHARTER_FILENAME,
         PREDICTORS_FILENAME,
+        SEARCH_FILENAME,
     }
 )
 
@@ -70,6 +78,8 @@ TOPIC_INDEX_TYPE = "Topic Index"
 # folder it sits in, and this one sits at the corpus root beside the folders. That is what
 # keeps a file which cuts across every topic from being read as a paper in none of them.
 PREDICTOR_INDEX_TYPE = "Predictor Index"
+# `search.md`. Carries no `domain` for the same reason `predictors.md` does not.
+SEARCH_STRATEGY_TYPE = "Search Strategy"
 
 # `# ` headings, in this order, in every concept file.
 BODY_SECTIONS = (

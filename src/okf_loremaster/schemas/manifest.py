@@ -113,6 +113,16 @@ class RunManifest(Model):
     counts: BundleCounts = Field(default_factory=BundleCounts)
     topics: list[TopicSummary] = Field(default_factory=list)
     queries: list[ExecutedQuery] = Field(default_factory=list)
+
+    # How each query was retrieved, which is what decides whether repeating one gets the
+    # same papers. `retmax` caps every query, so a query with more hits than the cap
+    # contributed only its first N — and `sort` is what "first" means. PubMed's relevance
+    # ranking is recomputed as the index grows, so a capped query repeated later can
+    # return a different N of the same hits while a query under the cap is exact. Recorded
+    # per run rather than per query because the search node applies one value to all of
+    # them; if that ever stops being true these move onto `ExecutedQuery`.
+    retmax: int = 0
+    sort: str = ""
     cost: CostSummary = Field(default_factory=CostSummary)
 
     # Resolved at index time, not read from config: the descriptor has to name the

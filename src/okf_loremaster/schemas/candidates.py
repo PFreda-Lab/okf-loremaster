@@ -61,6 +61,12 @@ class ExecutedQuery(Model):
     `"x"[All Fields]`, returns orders of magnitude more hits, and reports an empty
     error list while doing it. A query can be malformed and successful at once, and the
     translation is the only evidence.
+
+    `rationale`, `topic` and `search_round` are carried over from the `PlannedQuery` so
+    that this record answers the whole question on its own. They are not used to run
+    anything — they exist because `search.md` is written from these objects after the
+    plan has gone out of scope, and a query with no account of why it was asked is a
+    string a reader has to reverse-engineer.
     """
 
     term: str
@@ -71,6 +77,11 @@ class ExecutedQuery(Model):
     # Set by the search node when the translation looks nothing like the query.
     suspect: bool = False
     note: str = ""
+    rationale: str = ""
+    topic: str = ""
+    # 1 for the opening plan, 2 for a gap round. Zero means a record written before this
+    # was tracked, which reads as "unknown" rather than as a round.
+    search_round: int = 0
 
 
 class Candidate(Model):

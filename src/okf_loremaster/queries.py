@@ -338,8 +338,21 @@ def inspect_translation(term: str, result: ESearchResult) -> tuple[bool, str]:
     return False, ""
 
 
-def executed(term: str, result: ESearchResult, *, retrieved: int) -> ExecutedQuery:
-    """Record one search, translation and verdict included."""
+def executed(
+    term: str,
+    result: ESearchResult,
+    *,
+    retrieved: int,
+    rationale: str = "",
+    topic: str = "",
+    search_round: int = 0,
+) -> ExecutedQuery:
+    """Record one search, translation and verdict included.
+
+    The last three arguments come off the `PlannedQuery` and are carried rather than
+    used: once the plan goes out of scope this record is all that is left of the query,
+    and `search.md` is written from it long afterward.
+    """
     suspect, note = inspect_translation(term, result)
     return ExecutedQuery(
         term=term,
@@ -349,4 +362,7 @@ def executed(term: str, result: ESearchResult, *, retrieved: int) -> ExecutedQue
         fields_not_found=list(result.fields_not_found),
         suspect=suspect,
         note=note,
+        rationale=rationale,
+        topic=topic,
+        search_round=search_round,
     )

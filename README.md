@@ -28,6 +28,8 @@ bundles/hf-readmission/
 ├── okf/                  # the corpus: markdown, one file per paper
 │   ├── index.md
 │   ├── predictors.md     # what recurs across the topics, and where to read it
+│   ├── search.md         # every query, why it was asked, and what PubMed made of it
+│   ├── log.md            # what ran, what it found, what it cost
 │   ├── _catalog.jsonl
 │   ├── resource_descriptor.yaml
 │   └── <topic>/          # one folder per topic, each with its own index.md
@@ -170,6 +172,50 @@ of *one* relationship — a null beside an effect is not that. Two spellings bec
 an exact normalized match, or on a qualifier that narrows a phrase without flipping it — so
 `short sleep duration` and `long sleep duration` stay two entries rather than becoming one U-shaped
 contradiction. Every merge prints the forms it absorbed, so you can disagree with it.
+
+### Where the corpus came from
+
+A curated set of papers is an argument about the literature, and an argument whose search you cannot
+inspect is one you have to take on trust. `search.md` is written so you do not have to. Every query
+appears with what it was reaching for, the term exactly as it was sent, PubMed's own expansion of
+it, and what came back:
+
+````markdown
+### 2. Anesthesia Technique and Intraoperative Management
+
+**Why** — Intraoperative anesthetic depth as a modifiable exposure.
+
+**Sent**
+
+```text
+("depth of anesthesia"[tiab] AND "postoperative delirium"[tiab]) AND eng[la] AND 2015:3000[dp]
+```
+
+**PubMed ran**
+
+```text
+"depth of anesthesia"[Title/Abstract] AND "postoperative delirium"[Title/Abstract]
+AND (english[Filter]) AND 2015:3000[Date - Publication]
+```
+
+**Result** — 438 papers matched. The first 200 were retrieved (the cap is 200); the other 238
+were never seen by this run.
+````
+
+**The expansion is there because PubMed will not tell you when a query is wrong.** A field tag it
+does not recognize is not rejected — `x[nosuchfield]` is quietly rewritten to `"x"[All Fields]`,
+matches far more papers than intended, and comes back with an empty error list. The only evidence
+is `query_translation`, so it is recorded for every query rather than for the odd-looking ones, and
+a query whose expansion looks nothing like its term is marked **suspect** on the page.
+
+**It also says what will not reproduce.** Retrieval is capped per query and ordered by PubMed's
+relevance ranking, which is recomputed as the index grows — so a query that matched more than the
+cap can return a different slice months later, while one that came back whole is exact. `search.md`
+counts both kinds and says which is which, because a methods section that implies more repeatability
+than it has is worse than one that admits the limit.
+
+`log.md` still carries the same queries in two lines each, alongside the funnel, the cost and the
+warnings. That file is for finding out what a run did; this one is for running the search again.
 
 ---
 
@@ -520,7 +566,8 @@ for any bundle that finished.
 2. **`domain` equals the folder name.** A mismatch is an error, not a silent fix — it is nearly
    always a copy-paste bug, and it hides a paper where nobody looks.
 3. **`index.md` is reserved** at the root and in each topic, and is regenerated. Never a document.
-   So are `predictors.md`, `_catalog.jsonl` and `resource_descriptor.yaml` at the root.
+   So are `predictors.md`, `search.md`, `log.md`, `_catalog.jsonl` and `resource_descriptor.yaml`
+   at the root.
 4. **`title`, `description` and `tags` are the search surface.** Retrieval is fuzzy token matching
    over title + description + tags + journal, so a paper titled "Study 3 final" is unfindable.
    `description` is in there because it states a *finding* rather than a subject.
@@ -537,12 +584,13 @@ for any bundle that finished.
 The word for a folder is **topic** in conversation and `domain` in frontmatter. `_catalog.jsonl`
 sits outside a `*.md` walk by design and carries one row per document.
 
-**`predictors.md` is something to look for, never something to expect.** A consumer that has never
-heard of it walks straight past: rule 2 keeps it out of every topic folder, rule 4 keeps it out of
-search, and rule 8 means the `predictors:` key in the descriptor costs nothing to a reader that
-does not know it. One that does know it gets the corpus's cross-topic entry point for free. It is
-the one file in the bundle with no `domain`, and it cannot have one — it cuts across every topic
-and sits in none of them, which the validator enforces rather than assumes.
+**`predictors.md` and `search.md` are things to look for, never things to expect.** A consumer that
+has never heard of either walks straight past: rule 2 keeps them out of every topic folder, rule 4
+keeps them out of search, and rule 8 means the `predictors:` and `search:` keys in the descriptor
+cost nothing to a reader that does not know them. One that does gets the corpus's cross-topic entry
+point and its provenance for free. They are the two files in the bundle with no `domain`, and
+neither can have one — they cut across every topic and sit in none of them, which the validator
+enforces rather than assumes.
 
 `tests/test_afce_contract.py` re-implements a consumer from these rules — its own line parser, its
 own resolver, its own matching — and checks a finished bundle against it, rather than reading the
@@ -575,7 +623,7 @@ specifically, so an unsigned bundle is *unverified* rather than merely unannotat
 
 ## Status
 
-Runs end to end and writes a validated bundle. 1,570 tests, none of which touch the network.
+Runs end to end and writes a validated bundle. 1,579 tests, none of which touch the network.
 
 ```bash
 conda run -n okf-loremaster pytest
