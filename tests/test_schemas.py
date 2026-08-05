@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from okf_loremaster.clients import Clients
 from okf_loremaster.okf.layout import FULL_TEXT_BASIS
 from okf_loremaster.schemas import (
+    MAX_BODY_WORDS,
     MAX_BOTTOM_LINE_SENTENCES,
     MAX_DESCRIPTION_CHARS,
     MAX_NULL_FINDINGS,
@@ -272,6 +273,43 @@ def test_a_generous_paper_still_fits_under_every_list_ceiling() -> None:
     assert len(trimmed.null_findings) == MAX_NULL_FINDINGS
     assert len(trimmed.vocabulary_hints) == MAX_VOCABULARY_HINTS
     assert not [w for w in warnings if "dropped" in w]
+
+
+def test_the_body_guideline_sits_above_what_every_other_budget_allows() -> None:
+    """Otherwise it fires on documents that are already inside every cap it could cut.
+
+    A flat 400 did exactly that on 11 of 12 papers in a smoke run, because it predated
+    `expand_quote` replacing a ten-word quote with the sentence it opens. There is no
+    lever left at this point — the next cut would be a table mid-row — so a guideline
+    below the sum of the caps is a warning nobody can act on.
+    """
+    full = Extraction(
+        predictors=[a_row(predictor=f"factor {i}") for i in range(MAX_PREDICTOR_ROWS)],
+        null_findings=[
+            NullFinding(
+                predictor=f"null {i}",
+                outcome="the modeled outcome",
+                detail="no association after adjustment for the usual covariates",
+            )
+            for i in range(MAX_NULL_FINDINGS)
+        ],
+        bottom_line="One sentence about it. And a second one.",
+        caveats="Single center. Retrospective. Unmeasured confounding is likely.",
+    )
+
+    assert full.body_overrun() is None
+
+
+def test_one_runaway_cell_is_what_the_body_guideline_reports() -> None:
+    """And it reports rather than cuts, so the number is the overrun, not a flag."""
+    over = Extraction(predictors=[a_row(operationalization="word " * (MAX_BODY_WORDS + 50))])
+
+    overrun = over.body_overrun()
+    assert overrun is not None and overrun > MAX_BODY_WORDS
+    # Nothing was removed to get there: the guideline is measured, not enforced.
+    trimmed, warnings = over.enforce_budgets()
+    assert warnings == []
+    assert trimmed.predictors[0].operationalization == over.predictors[0].operationalization
 
 
 def test_predictor_order_is_the_models_order_not_resorted() -> None:

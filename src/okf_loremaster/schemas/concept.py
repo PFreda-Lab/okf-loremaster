@@ -287,6 +287,21 @@ class Extraction(Model):
         prose = [self.bottom_line, self.population, self.outcome_definition, self.caveats]
         return sum(word_count(text) for text in prose + cells)
 
+    def body_overrun(self) -> int | None:
+        """Words over `MAX_BODY_WORDS`, or None if inside it. Nothing is cut.
+
+        Deliberately not part of `enforce_budgets`: every field there loses something,
+        and this loses nothing. Reporting the two together made "trimmed" the word for
+        both, so a run that cut nothing at all said it had trimmed eleven papers.
+
+        There is no lever left by the time this is measured — every list and every prose
+        field is already inside its own cap, so the only remaining cut would be a table
+        mid-row. `MAX_BODY_WORDS` sits above the sum of those caps, which makes an
+        overrun here mean one cell ran on rather than the document being full.
+        """
+        words = self.body_words()
+        return words if words > MAX_BODY_WORDS else None
+
     def enforce_budgets(self) -> tuple[Self, list[str]]:
         """Trim to the length budgets, returning the trimmed copy and what was cut.
 
@@ -294,6 +309,8 @@ class Extraction(Model):
         that ran on, and re-asking pays for a whole second reading to fix a formatting
         problem.
         Dropped predictor rows are named in the warning so nothing vanishes quietly.
+        The returned list is what was actually removed and nothing else — see
+        `body_overrun` for the guideline that removes nothing.
         """
         trimmed = self.model_copy(deep=True)
         warnings: list[str] = []
@@ -345,13 +362,6 @@ class Extraction(Model):
         if len(trimmed.tags) > MAX_TAGS:
             trimmed.tags = trimmed.tags[:MAX_TAGS]
             warnings.append(f"tags truncated to {MAX_TAGS}")
-
-        words = trimmed.body_words()
-        if words > MAX_BODY_WORDS:
-            # Not truncated further: every field is already within its own budget, so
-            # the only remaining lever would be cutting a table mid-row. Flagged so a
-            # persistent overrun shows up in `validate` rather than nowhere.
-            warnings.append(f"body is ~{words} words, over the ~{MAX_BODY_WORDS} word guideline")
 
         return trimmed, warnings
 

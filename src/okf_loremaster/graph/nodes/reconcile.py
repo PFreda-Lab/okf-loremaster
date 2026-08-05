@@ -30,6 +30,7 @@ from typing import Any
 from okf_loremaster.config import ConfigError, Role
 from okf_loremaster.graph.state import Deps, RunState, span
 from okf_loremaster.schemas import (
+    MAX_BODY_WORDS,
     Candidate,
     Charter,
     ConceptRecord,
@@ -65,7 +66,11 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
         records: list[ConceptRecord] = []
         summary = VerificationSummary()
         dropped: list[str] = []
-        trimmed_papers = 0
+        # What was cut, named, and what merely ran long. Two lists because they are two
+        # different facts about a paper and were one warning for as long as they shared
+        # a list.
+        cuts: list[str] = []
+        overruns: list[int] = []
 
         for slug, pmids in topics.items():
             kept: list[str] = []
@@ -75,7 +80,7 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
                 if extraction is None or candidate is None:
                     dropped.append(pmid)
                     continue
-                record, was_trimmed = _reconcile_one(
+                record, notes, overrun = _reconcile_one(
                     slug,
                     candidate,
                     extraction,
@@ -84,7 +89,9 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
                     stamp,
                     charter,
                 )
-                trimmed_papers += int(was_trimmed)
+                cuts += [f"{pmid} {note}" for note in notes]
+                if overrun is not None:
+                    overruns.append(overrun)
                 records.append(record)
                 kept.append(pmid)
             topics[slug] = kept
@@ -94,7 +101,8 @@ async def reconcile_node(state: RunState, deps: Deps) -> dict[str, Any]:
             warnings,
             summary,
             dropped=dropped,
-            trimmed=trimmed_papers,
+            cuts=cuts,
+            overruns=overruns,
         )
         report["summary"] = f"{len(records)} record(s); {summary.line()}"
 
@@ -114,7 +122,7 @@ def _reconcile_one(
     summary: VerificationSummary,
     stamp: str,
     charter: Charter | None,
-) -> tuple[ConceptRecord, bool]:
+) -> tuple[ConceptRecord, list[str], int | None]:
     trimmed, budget_notes = extraction.enforce_budgets()
 
     # No stored source means the paper was never retrieved, which the graph makes
@@ -154,7 +162,10 @@ def _reconcile_one(
     # Set after construction because the entries are derived from the identifiers the
     # record was just given.
     record.sources = record.default_sources()
-    return record, bool(budget_notes)
+    # The notes themselves, not a boolean. `enforce_budgets` names the predictor rows and
+    # null findings it drops, and collapsing that to "something was trimmed" threw away
+    # the only record of what had left the bundle.
+    return record, budget_notes, check.extraction.body_overrun()
 
 
 def _provenance(deps: Deps) -> str:
@@ -179,7 +190,8 @@ def _report(
     summary: VerificationSummary,
     *,
     dropped: list[str],
-    trimmed: int,
+    cuts: list[str],
+    overruns: list[int],
 ) -> None:
     """One warning per category, never one per row."""
     if summary.effects_dropped:
@@ -224,8 +236,19 @@ def _report(
         warnings.append(note)
         deps.warn(NODE, note)
 
-    if trimmed:
-        note = f"{trimmed} extraction(s) ran over a length budget and were trimmed"
+    if cuts:
+        note = f"{len(cuts)} length budget(s) cut something: " + "; ".join(cuts[:MAX_EXAMPLES])
+        if len(cuts) > MAX_EXAMPLES:
+            note += f"; and {len(cuts) - MAX_EXAMPLES} more"
+        warnings.append(note)
+        deps.warn(NODE, note)
+
+    if overruns:
+        note = (
+            f"{len(overruns)} extraction(s) are over the ~{MAX_BODY_WORDS} word body "
+            f"guideline, the largest at ~{max(overruns)} words; nothing was cut, since "
+            f"every field is already inside its own budget"
+        )
         warnings.append(note)
         deps.warn(NODE, note)
 

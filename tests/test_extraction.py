@@ -25,6 +25,7 @@ from okf_loremaster.extraction_cache import ExtractionCache, fingerprint
 from okf_loremaster.graph.nodes import extract_node, fulltext_node, reconcile_node
 from okf_loremaster.graph.state import RunState
 from okf_loremaster.schemas import (
+    MAX_BODY_WORDS,
     MAX_PREDICTOR_ROWS,
     Candidate,
     Extraction,
@@ -559,7 +560,33 @@ async def test_length_budgets_are_applied_before_verification_not_after(
     # The count describes the bundle. Verified first, it would have been 20 — a number
     # for rows that no reader of the bundle can ever see.
     assert update["verification"].rows == MAX_PREDICTOR_ROWS
-    assert any("ran over a length budget" in note for note in update["warnings"])
+    # Names what left the bundle, not that something did: the warning carries the PMID
+    # and the field, because "8 rows were dropped" is unactionable on its own.
+    cut = next(note for note in update["warnings"] if "cut something" in note)
+    assert OPEN in cut and "predictor" in cut
+    # And says nothing about the body guideline, which cut nothing here.
+    assert not any("body guideline" in note for note in update["warnings"])
+
+
+async def test_a_runaway_document_is_reported_apart_from_what_was_cut(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """Two facts about a paper, and one warning for as long as they shared a list.
+
+    Something removed from the bundle and something merely long are not the same news,
+    and reporting them together made "trimmed" the word for both — so a run that cut
+    nothing said it had trimmed eleven of twelve papers.
+    """
+    sprawling = read_of(OPEN, population="word " * (MAX_BODY_WORDS + 50))
+
+    async with node_deps(settings_factory, tmp_path) as deps:
+        update = await reconcile_node(reconcile_state({OPEN: sprawling}), deps)
+
+    note = next(n for n in update["warnings"] if "body guideline" in n)
+    assert "nothing was cut" in note
+    assert not any("cut something" in n for n in update["warnings"])
+    # And it is still in the bundle, whole.
+    assert update["records"][0].extraction.body_words() > MAX_BODY_WORDS
 
 
 async def test_every_code_a_paper_gave_survives_reconcile_attached_to_its_concept(

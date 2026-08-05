@@ -40,7 +40,6 @@ MAX_BOTTOM_LINE_SENTENCES = 2
 MAX_PREDICTOR_ROWS = 12
 MAX_CAVEAT_SENTENCES = 3
 MAX_TAGS = 8
-MAX_BODY_WORDS = 400
 
 # The two lists that used to have no ceiling at all — not in the prompt, not here, not on
 # the model. Left open, they are what a reply spends its last tokens on, and a reply that
@@ -62,6 +61,37 @@ MAX_VOCABULARY_HINTS = 8
 # catches a plausible one; a located quote is sliced out of the source, so it is verbatim
 # by construction.
 MAX_QUOTE_WORDS = 10
+
+# --- the body guideline, which is derived rather than chosen ------------------
+#
+# Every list and every prose field above has a hard cap, so once they have all been
+# applied the only way a document can still be long is that an individual *cell* ran on
+# — a paragraph-length operationalization, or a quote whose located sentence turned out
+# to be a whole paragraph. That is what `MAX_BODY_WORDS` is for, and it is the one
+# number here that truncates nothing: there is no lever left that would not cut a table
+# mid-row. It is a signal, and a signal that fires on everything is not one.
+#
+# The flat 400 this replaces fired on 11 of 12 papers in a smoke run, because it was set
+# when `quote` held the ten words the model wrote rather than the sentence `expand_quote`
+# now stores in its place. Nothing was wrong with the documents.
+#
+# The three figures below are the 90th percentile, measured 2026-08-04 over 1,038
+# predictor rows and 401 null findings in two finished bundles. The 90th and not the
+# median on purpose: a verbose document sitting at every cap is still a legitimate
+# document, and must not warn. At these values the guideline fires on 10% of the
+# documents in those bundles, and the ones it fires on are runaways — the worst is 6,363
+# words. The flat 400 fired on 81% of them.
+P90_PREDICTOR_ROW_WORDS = 110
+P90_NULL_FINDING_WORDS = 34
+# `bottom_line` at its two sentences and `caveats` at its three, plus `population` and
+# `outcome_definition`, which have no cap of their own and render inside the same section.
+P90_PROSE_WORDS = 227
+
+MAX_BODY_WORDS = (
+    MAX_PREDICTOR_ROWS * P90_PREDICTOR_ROW_WORDS
+    + MAX_NULL_FINDINGS * P90_NULL_FINDING_WORDS
+    + P90_PROSE_WORDS
+)
 
 # The one budget here that bounds an input rather than an output: how much of a paper an
 # extraction prompt may carry. At roughly four characters a token that is about 6,000
