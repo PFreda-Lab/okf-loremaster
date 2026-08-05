@@ -2,7 +2,7 @@
 
 **Turns a research question into a browsable, cited, machine-readable evidence corpus.**
 
-It searches PubMed and PMC, screens the results down to a corpus a person could actually read,
+It searches PubMed and PubMed Central, screens the results down to a corpus a person could read,
 pulls structured evidence out of the full text where the license allows, and writes a folder of
 markdown in [Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
 (OKF v0.2) — plus a vector index built from those same files.
@@ -192,9 +192,9 @@ were never seen by this run.
 **PubMed won't tell you when a query is wrong.** A field tag it doesn't recognize isn't rejected —
 `x[nosuchfield]` is quietly rewritten to `"x"[All Fields]`, matches far more papers than intended,
 and comes back with an empty error list. So every expansion is checked. If PubMed only wrote out
-tags the term already carried, you get the one-line note above. If it reached for a field or a MeSH
-heading the term never asked for, the expansion is printed in full and the query is marked
-**suspect**.
+tags the term already carried, you get the one-line note above. If it reached for a field, or for a
+Medical Subject Heading (MeSH — PubMed's own controlled vocabulary), that the term never asked for,
+the expansion is printed in full and the query is marked **suspect**.
 
 **It also says what won't reproduce.** Retrieval is capped per query and ordered by PubMed's
 relevance ranking, which is recomputed as the index grows — so a query that matched more than the
@@ -256,7 +256,7 @@ handful. What keeps it honest is not its tier but the code after it: every numbe
 the text it actually read, every quote sliced out of that text, anything not found removed and the
 row's confidence lowered. A more expensive model does not pass that check any better.
 
-**Everything else is ordinary code**: deduplication, ranking, MMR diversification, license logic,
+**Everything else is ordinary code**: deduplication, ranking, diversification, license logic,
 the numeric re-check, `predictors.md`, file writing, validation, embedding and indexing. No agent
 supervises another, and no agent decides when a run ends — the graph does.
 
@@ -344,9 +344,14 @@ signals, summing to 1.0:
 | `position` | 0.30 | the best rank the paper reached in any query, decayed rather than cut off |
 | `agreement` | 0.25 | how many independent queries found it — convergence is evidence |
 | `recency` | 0.15 | publication year, against the charter's floor or 20 years back |
-| `citation` | 0.15 | iCite RCR where available, otherwise log-scaled citation count |
+| `citation` | 0.15 | how much the paper has been read — see below |
 | `abstract` | 0.10 | whether there is an abstract to screen at all |
 | `article` | 0.05 | primary research, versus a comment, editorial or erratum |
+
+**The citation signal prefers the Relative Citation Ratio**, which is NIH's iCite service scoring a
+paper against others of the same age in the same field, with 1.0 being the average NIH-funded paper.
+A raw count can't compare a 2019 paper with a 2023 one. Where iCite has no ratio for a paper, the
+raw count is used on a log scale, so the hundredth citation moves the score far less than the first.
 
 **The weights are constants, not settings.** A knob per signal invites tuning the ranking against
 one project's corpus, which is exactly what would stop it generalizing.
@@ -355,10 +360,15 @@ one project's corpus, which is exactly what would stop it generalizing.
 same neutral citation score, and a constant added to every score changes no ordering — so the
 signal drops out instead of quietly becoming a second recency term.
 
-Two passes then run on top of that ordering. **MMR** (λ = 0.7) trades a little relevance for
-coverage, so a cluster of near-identical reviews contributes its best member rather than its first
-six. **A per-topic quota** reserves capacity for each topic before the pool fills, so a topic whose
-queries match ten thousand papers can't crowd out one that matches two hundred — unused quota is
+Two passes then run on top of that ordering.
+
+**Maximal marginal relevance** — take the best paper that isn't already covered by what you've
+taken — trades a little relevance for coverage. The dial is λ, at 0.7 here on a scale where 1.0
+would mean pure relevance and no coverage at all. A cluster of near-identical reviews contributes
+its best member rather than its first six.
+
+**A per-topic quota** reserves capacity for each topic before the pool fills, so a topic whose
+queries match ten thousand papers can't crowd out one that matches two hundred. Unused quota is
 released back rather than held empty. `--dry-run` prints what both passes changed.
 
 ---
@@ -496,7 +506,7 @@ paper is recorded as it comes back, so an interrupted run keeps every paper it a
 says what it skipped (`142 of 187 paper(s) were already read, and cost nothing`). That same record
 makes rerunning cheap — ask the same question of the same papers in a brand new run and the reading
 is free. Change the question, or retrieve a longer full text, and they are read again: it is the
-request that is remembered, not the PMID.
+request that is remembered, not the PubMed identifier (PMID).
 
 Runs live in a local cache directory — `okf-loremaster init` prints where. It holds run state, not
 bundles: deleting it loses the ability to resume, and nothing else.
@@ -587,8 +597,8 @@ through config and is pinned by revision.
 
 Uses NCBI's public APIs — E-utilities, BioC, PubTator, iCite — at their documented rate limits,
 through **one shared limiter** because the limit is per IP across all of them, and **never scrapes
-PubMed or PMC web pages**. Set `OKF_LOREMASTER_NCBI_EMAIL` so NCBI can reach you, as their access
-policy asks.
+PubMed or PubMed Central web pages**. Set `OKF_LOREMASTER_NCBI_EMAIL` so NCBI can reach you, as
+their access policy asks.
 
 Every bundle carries a `stale_after` date, the digest of the charter it came from, the models that
 wrote it, and, with `--review`, who signed it off. Most PubMed records are abstracts under publisher
