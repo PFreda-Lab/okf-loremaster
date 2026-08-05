@@ -589,6 +589,39 @@ async def test_a_runaway_document_is_reported_apart_from_what_was_cut(
     assert update["records"][0].extraction.body_words() > MAX_BODY_WORDS
 
 
+async def test_each_verification_warning_names_only_the_casualties_it_counted(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """One untagged list of examples, attached to whichever warning printed first.
+
+    A real run said `removed 1 effect size(s) ... —` and then named five *intervals*,
+    while the warning that had dropped ten of them named none. A count and a list about
+    different checks read as one claim, and the one they read as is wrong.
+    """
+    faithful = read_of(OPEN)
+    kept = faithful.predictors[0]
+
+    invented_effect = kept.model_copy(
+        update={"predictor": "made-up magnitude", "effect": 99.99, "effect_raw": "99.99"}
+    )
+    invented_interval = kept.model_copy(
+        update={"predictor": "made-up interval", "ci_low": 88.81, "ci_high": 88.93}
+    )
+    mixed = read_of(OPEN, predictors=[invented_effect, invented_interval])
+
+    async with node_deps(settings_factory, tmp_path) as deps:
+        update = await reconcile_node(reconcile_state({OPEN: mixed}), deps)
+
+    effect_note = next(n for n in update["warnings"] if "effect size(s)" in n)
+    interval_note = next(n for n in update["warnings"] if "confidence interval(s)" in n)
+
+    assert "made-up magnitude" in effect_note
+    assert "made-up interval" not in effect_note, "the interval belongs to the other warning"
+    # And the warning that used to name nothing now names its own.
+    assert "made-up interval" in interval_note
+    assert "made-up magnitude" not in interval_note
+
+
 async def test_every_code_a_paper_gave_survives_reconcile_attached_to_its_concept(
     settings_factory: Any, tmp_path: Path
 ) -> None:

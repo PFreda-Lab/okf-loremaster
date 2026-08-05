@@ -36,6 +36,10 @@ __all__ = ["ConsoleReviewer", "signoff_caption", "signoff_view"]
 # rest are in the bundle's own `log.md` and root index, which is where they live anyway.
 MAX_WARNINGS = 12
 
+# Named casualties printed under the verification line, across every check. The line
+# above them already carries the counts.
+MAX_EXAMPLES = 5
+
 
 def signoff_view(
     records: Sequence[ConceptRecord],
@@ -155,8 +159,8 @@ def _verification(verification: VerificationSummary | None) -> list[RenderableTy
         Text.from_markup(f"{mark}  numeric verification: {verification.line()}")
     ]
     view.extend(
-        Text.from_markup(f"[dim]      {escape(example)}[/dim]")
-        for example in verification.examples
+        Text.from_markup(f"[dim]      {escape(example.note)}[/dim]")
+        for example in verification.examples[:MAX_EXAMPLES]
     )
     return view
 

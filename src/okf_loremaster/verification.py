@@ -48,6 +48,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from okf_loremaster.schemas import (
+    CODE,
+    EFFECT,
+    INTERVAL,
+    QUOTE,
     CodedAs,
     Extraction,
     NullFinding,
@@ -289,6 +293,15 @@ class RowCheck:
     def clean(self) -> bool:
         return not (self.quote_missing or self.effect_missing or self.interval_missing)
 
+    @property
+    def kind(self) -> str:
+        """Which check took something from this row, in the order `note` reports them."""
+        if self.effect_missing:
+            return EFFECT
+        if self.interval_missing:
+            return INTERVAL
+        return QUOTE
+
     def note(self) -> str:
         if self.effect_missing:
             return f"{self.predictor!r}: {self.claimed} is not in the source text"
@@ -330,10 +343,18 @@ class ExtractionCheck:
             and all(row.clean for row in self.rows)
         )
 
-    def notes(self) -> tuple[str, ...]:
-        rows = tuple(row.note() for row in self.rows if not row.clean)
+    def notes(self) -> tuple[tuple[str, str], ...]:
+        """`(kind, note)` per casualty, so a warning can name only its own.
+
+        Tagged rather than plain, because these are read two ways. The run summary prints
+        them all under a header that already carries the counts, where the mix is fine.
+        A *warning* names one check, and for as long as this was an untagged list it
+        attached the whole mix to the effect warning — which then said it had removed one
+        effect size and went on to name five dropped intervals.
+        """
+        rows = tuple((row.kind, row.note()) for row in self.rows if not row.clean)
         codes = tuple(
-            f"{concept!r}: {system} {code} is not in the source text"
+            (CODE, f"{concept!r}: {system} {code} is not in the source text")
             for concept, system, code in self.codes_missing
         )
         return rows + codes

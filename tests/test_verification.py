@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from okf_loremaster.schemas import (
+    CODE,
     MAX_LOCATED_QUOTE_WORDS,
     CodedAs,
     Confidence,
@@ -390,7 +391,8 @@ def test_a_code_the_paper_never_printed_is_dropped_and_its_concept_kept() -> Non
     assert [h.concept for h in check.extraction.vocabulary_hints] == ["type 2 diabetes"]
     assert check.extraction.vocabulary_hints[0].codes == []
     assert not check.clean
-    assert any("E10.9 is not in the source text" in note for note in check.notes())
+    # Tagged with the check that took it, so the code warning names it and no other does.
+    assert (CODE, "'type 2 diabetes': icd10 E10.9 is not in the source text") in check.notes()
 
 
 def test_one_invented_code_does_not_take_a_real_one_with_it() -> None:

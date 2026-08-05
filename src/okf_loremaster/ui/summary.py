@@ -26,6 +26,11 @@ __all__ = ["render_bundle", "render_extraction", "render_topics"]
 # and a wall of them is a wall nobody reads; the rest are in the bundle's own log.
 MAX_WARNINGS = 12
 
+# Named casualties printed under the verification line, across every check. The line
+# above them already carries the counts, so these are here to show the shape of the
+# problem rather than to enumerate it.
+MAX_EXAMPLES = 5
+
 
 def render_topics(console: Console, state: RunState) -> None:
     """Print the final placement, and what came up short."""
@@ -114,8 +119,8 @@ def render_extraction(console: Console, state: RunState) -> None:
         console.print(f"[green]ok[/green]  numeric verification: {summary.line()}")
         return
     console.print(f"[yellow]![/yellow]  numeric verification: {summary.line()}")
-    for example in summary.examples:
-        console.print(f"[dim]      {escape(example)}[/dim]")
+    for example in summary.examples[:MAX_EXAMPLES]:
+        console.print(f"[dim]      {escape(example.note)}[/dim]")
 
 
 def render_bundle(console: Console, state: RunState) -> None:

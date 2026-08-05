@@ -18,7 +18,23 @@ from pydantic import Field
 
 from okf_loremaster.schemas.common import Model, TextBasis
 
-__all__ = ["PaperText", "VerificationSummary"]
+__all__ = [
+    "CODE",
+    "EFFECT",
+    "INTERVAL",
+    "QUOTE",
+    "PaperText",
+    "VerificationExample",
+    "VerificationSummary",
+]
+
+# Which check took something, for an example that has to find its way back to the one
+# warning that counted it. Strings rather than an enum because they are only ever
+# compared to each other and written to a checkpoint.
+EFFECT = "effect"
+INTERVAL = "interval"
+QUOTE = "quote"
+CODE = "code"
 
 
 class PaperText(Model):
@@ -48,6 +64,20 @@ class PaperText(Model):
         return self.basis is TextBasis.FULL_TEXT
 
 
+class VerificationExample(Model):
+    """One named casualty of numeric verification, and which check took it.
+
+    The kind travels with the note because the two are read apart. The run summary prints
+    every example under one header that already carries the counts, where the mix reads
+    correctly. A *warning* names one check — and for as long as this was an untagged list
+    of strings, `reconcile` attached the whole mix to the effect warning, which then said
+    it had removed one effect size and went on to name five dropped intervals.
+    """
+
+    kind: str
+    note: str
+
+
 class VerificationSummary(Model):
     """What deterministic checking did to a run's extractions."""
 
@@ -60,7 +90,11 @@ class VerificationSummary(Model):
     sample_sizes_dropped: int = 0
     # A handful of the offending rows, named. Not all of them: this gets printed, and a
     # run where every row failed should say so in one line rather than in two hundred.
-    examples: list[str] = Field(default_factory=list)
+    examples: list[VerificationExample] = Field(default_factory=list)
+
+    def examples_for(self, kind: str) -> list[str]:
+        """The notes from one check, for the warning that reports that check."""
+        return [example.note for example in self.examples if example.kind == kind]
 
     @property
     def clean(self) -> bool:

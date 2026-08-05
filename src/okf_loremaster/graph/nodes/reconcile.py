@@ -30,13 +30,18 @@ from typing import Any
 from okf_loremaster.config import ConfigError, Role
 from okf_loremaster.graph.state import Deps, RunState, span
 from okf_loremaster.schemas import (
+    CODE,
+    EFFECT,
+    INTERVAL,
     MAX_BODY_WORDS,
+    QUOTE,
     Candidate,
     Charter,
     ConceptRecord,
     Extraction,
     PaperText,
     TextBasis,
+    VerificationExample,
     VerificationSummary,
 )
 from okf_loremaster.strength import score_extraction
@@ -137,9 +142,13 @@ def _reconcile_one(
     summary.quotes_dropped += check.quotes_dropped
     summary.codes_dropped += check.codes_dropped
     summary.sample_sizes_dropped += int(check.sample_size_missing)
-    for note in check.notes():
-        if len(summary.examples) < MAX_EXAMPLES:
-            summary.examples.append(f"{candidate.pmid} {note}")
+    for kind, note in check.notes():
+        # Per kind rather than overall. A global cap spent by whichever check failed
+        # first leaves every warning after it counting casualties it cannot name.
+        if len(summary.examples_for(kind)) < MAX_EXAMPLES:
+            summary.examples.append(
+                VerificationExample(kind=kind, note=f"{candidate.pmid} {note}")
+            )
 
     basis = source.basis if source is not None else TextBasis.ABSTRACT
     record = ConceptRecord(
@@ -194,69 +203,70 @@ def _report(
     overruns: list[int],
 ) -> None:
     """One warning per category, never one per row."""
-    if summary.effects_dropped:
-        note = (
-            f"numeric verification removed {summary.effects_dropped} effect size(s) not "
-            f"found in the source text; those rows keep their claim at a lower confidence"
-        )
-        if summary.examples:
-            note += " — " + "; ".join(summary.examples)
+
+    def emit(note: str, kind: str = "") -> None:
+        """Append a warning, with the examples belonging to `kind` and no others.
+
+        The examples used to be one untagged list attached to whichever warning came
+        first, so the effect warning said it had removed one effect size and then named
+        five dropped intervals — a count and a list that were about different checks.
+        """
+        examples = summary.examples_for(kind) if kind else []
+        if examples:
+            note += " — " + "; ".join(examples)
         warnings.append(note)
         deps.warn(NODE, note)
+
+    if summary.effects_dropped:
+        emit(
+            f"numeric verification removed {summary.effects_dropped} effect size(s) not "
+            f"found in the source text; those rows keep their claim at a lower confidence",
+            EFFECT,
+        )
 
     if summary.intervals_dropped:
-        note = (
+        emit(
             f"numeric verification removed {summary.intervals_dropped} confidence "
-            f"interval(s) not found in the source text; the point estimates were kept"
+            f"interval(s) not found in the source text; the point estimates were kept",
+            INTERVAL,
         )
-        warnings.append(note)
-        deps.warn(NODE, note)
 
     if summary.quotes_dropped:
-        note = (
+        emit(
             f"{summary.quotes_dropped} quoted sentence(s) were not in the source text "
-            f"and were dropped"
+            f"and were dropped",
+            QUOTE,
         )
-        warnings.append(note)
-        deps.warn(NODE, note)
 
     if summary.codes_dropped:
-        note = (
+        emit(
             f"{summary.codes_dropped} vocabulary code(s) were not printed in the source "
-            f"text and were dropped; the concepts they were attached to were kept"
+            f"text and were dropped; the concepts they were attached to were kept",
+            CODE,
         )
-        warnings.append(note)
-        deps.warn(NODE, note)
 
     if summary.sample_sizes_dropped:
-        note = (
+        emit(
             f"{summary.sample_sizes_dropped} sample size(s) were not in the source text "
             f"and were dropped"
         )
-        warnings.append(note)
-        deps.warn(NODE, note)
 
     if cuts:
         note = f"{len(cuts)} length budget(s) cut something: " + "; ".join(cuts[:MAX_EXAMPLES])
         if len(cuts) > MAX_EXAMPLES:
             note += f"; and {len(cuts) - MAX_EXAMPLES} more"
-        warnings.append(note)
-        deps.warn(NODE, note)
+        emit(note)
 
     if overruns:
-        note = (
+        emit(
             f"{len(overruns)} extraction(s) are over the ~{MAX_BODY_WORDS} word body "
             f"guideline, the largest at ~{max(overruns)} words; nothing was cut, since "
             f"every field is already inside its own budget"
         )
-        warnings.append(note)
-        deps.warn(NODE, note)
 
     if dropped:
-        note = (
+        emit(
             f"{len(dropped)} paper(s) had no usable extraction and were dropped from "
             f"their topic, so topic counts are below what curation kept: "
             f"{', '.join(dropped[:MAX_EXAMPLES])}"
         )
-        warnings.append(note)
-        deps.warn(NODE, note)
