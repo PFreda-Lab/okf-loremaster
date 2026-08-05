@@ -393,6 +393,38 @@ def _icite_body(pmids: list[str]) -> str:
     return json.dumps({"data": rows})
 
 
+def elink_count(pmid: str) -> int:
+    """PubMed's cited-by count for a paper in the fake corpus.
+
+    Deliberately unequal to `_icite_body`'s `citation_count` for the same paper, so a
+    test can tell which service a ranking actually used rather than assuming.
+    """
+    _, n = _owner(pmid)
+    return (n * 2) % 40
+
+
+def _elink_body(pmids: list[str]) -> str:
+    """One linkset per id, `linksetdbs` omitted where the count is zero.
+
+    The omission is what the live service does, and it is the case worth reproducing:
+    an uncited paper is not absent from the response, it is present with nothing on it.
+    """
+    linksets = []
+    for pmid in pmids:
+        linkset: dict[str, Any] = {"dbfrom": "pubmed", "ids": [pmid]}
+        count = elink_count(pmid)
+        if count:
+            linkset["linksetdbs"] = [
+                {
+                    "dbto": "pubmed",
+                    "linkname": "pubmed_pubmed_citedin",
+                    "links": [str(900000 + i) for i in range(count)],
+                }
+            ]
+        linksets.append(linkset)
+    return json.dumps({"linksets": linksets})
+
+
 # --- the transport ----------------------------------------------------------
 
 
@@ -406,22 +438,34 @@ class FakeNCBI:
     `efetch` covered the whole plan, for instance, rather than one per query.
     """
 
-    def __init__(self, *, finds_nothing: bool = False) -> None:
+    def __init__(self, *, finds_nothing: bool = False, icite_fails: bool = False) -> None:
         self.esearch_terms: list[str] = []
         self.efetch_batches: list[list[str]] = []
         self.icite_batches: list[list[str]] = []
+        self.elink_batches: list[list[str]] = []
         self.bioc_requests: list[str] = []
         # PubMed answers a query that matches nothing with a perfectly successful
         # search of zero results, which is how a whole run once reached the end with
         # an empty pool and reported a valid bundle.
         self.finds_nothing = finds_nothing
+        # iCite is a separate host and fails independently — on some networks it fails
+        # every time while E-utilities answers normally throughout.
+        self.icite_fails = icite_fails
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
-        params = {key: values[-1] for key, values in parse_qs(request.url.query.decode()).items()}
+        query = parse_qs(request.url.query.decode())
+        params = {key: values[-1] for key, values in query.items()}
         path = request.url.path
+
+        if path.endswith("elink.fcgi"):
+            # Every `id`, not the last one. elink is asked with the key repeated, and
+            # collapsing that here would test a request the client never sends.
+            pmids = [p for p in query.get("id", []) if p]
+            self.elink_batches.append(pmids)
+            return httpx.Response(200, text=_elink_body(pmids))
 
         if path.endswith("esearch.fcgi"):
             term = params.get("term", "")
@@ -446,6 +490,8 @@ class FakeNCBI:
         if "icite" in (request.url.host or ""):
             pmids = [p for p in params.get("pmids", "").split(",") if p]
             self.icite_batches.append(pmids)
+            if self.icite_fails:
+                raise httpx.ConnectError("iCite is unreachable", request=request)
             return httpx.Response(200, text=_icite_body(pmids))
 
         return httpx.Response(404, text=f"unexpected request: {request.url}")

@@ -31,7 +31,7 @@ from okf_loremaster.run import RunOptions, build_run
 from okf_loremaster.schemas import Charter, Topic
 from okf_loremaster.ui.pauses import TOP_TITLES, ConsolePause
 
-from fake_ncbi import TOPICS, FakeNCBI, all_pmids
+from fake_ncbi import TOPICS, FakeNCBI, all_pmids, elink_count
 from graph_runs import full_run
 
 PROMPT = "identify predictors of a measured outcome after a procedure in adults"
@@ -250,6 +250,62 @@ async def test_the_pool_is_capped_and_topic_affinity_is_total(
     # Every paper was found by a topic-targeted query as well as the base one, so none
     # of them falls into the unassigned group.
     assert all(topic_affinity(item.candidate, query_topic) for item in pool)
+
+
+async def test_icite_answering_means_elink_is_never_asked(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fallback costs a request, so it must not run when there is nothing to fall back from."""
+    fake = FakeNCBI()
+    await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for(), fake=fake)
+
+    assert fake.icite_batches
+    assert not fake.elink_batches
+
+
+async def test_an_icite_outage_falls_back_to_pubmeds_own_cited_by_counts(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """iCite is a separate host and fails on its own, sometimes on every run of a network.
+
+    Without this the citation component scored every paper at the same neutral value —
+    correct, and worth nothing, since a constant added to every score changes no
+    ordering. E-utilities is answering normally throughout, so the count is one request
+    away on a host the run is already talking to.
+    """
+    fake = FakeNCBI(icite_fails=True)
+    run = await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for(), fake=fake)
+
+    assert fake.icite_batches, "iCite is still tried first — RCR is the better signal"
+    assert fake.elink_batches, "and elink only after it failed"
+
+    scored = run.state["scored"]
+    assert scored
+    assert {s.pmid: s.candidate.citation_count for s in scored} == {
+        s.pmid: elink_count(s.pmid) for s in scored
+    }
+    assert all(s.candidate.metrics_known for s in scored), "measured, not unknown"
+    assert all(s.candidate.rcr is None for s in scored), "a count is not a normalized ratio"
+    # And the run says which number its ranking is standing on, since the two are not
+    # comparable and a bundle that does not say cannot be read honestly.
+    assert any("cited-by counts" in warning for warning in run.state["warnings"])
+
+
+async def test_the_fallback_sends_one_id_parameter_per_paper(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Comma-joining is the trap, and it returns 200 with well-formed JSON either way.
+
+    Given `id=A,B,C`, elink answers with a single linkset holding the *union* of the
+    three papers' citing records — one number where there should be three, and larger
+    than any of them. Repeated `id=` is what asks the question actually intended.
+    """
+    fake = FakeNCBI(icite_fails=True)
+    await dry_run(settings_factory, tmp_path, monkeypatch, charter=charter_for(), fake=fake)
+
+    sent = [pmid for batch in fake.elink_batches for pmid in batch]
+    assert sent
+    assert not any("," in pmid for pmid in sent)
 
 
 async def test_the_run_is_reproducible(

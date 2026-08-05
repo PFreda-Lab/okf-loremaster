@@ -1,8 +1,12 @@
-"""NCBI E-utilities: `esearch` and `efetch`.
+"""NCBI E-utilities: `esearch`, `efetch`, and `elink`.
 
-Only these two. `esummary` returns a strict subset of what `efetch` gives us and the
+Only these three. `esummary` returns a strict subset of what `efetch` gives us and the
 pipeline never needs a title-only record, so carrying it would be an untested API
 surface with no caller.
+
+`elink` is here for one thing: a citation count when iCite cannot be reached. It is a
+weaker signal than iCite's and the ranker prefers iCite whenever it answers — see
+`cited_by_counts`.
 
 XML is parsed with the standard library's ElementTree, which does not expand internal
 or external entities — it raises on an undefined one — so the usual XML entity attacks
@@ -25,6 +29,18 @@ BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 # NCBI's documented ceiling for a URL-encoded id list. Larger sets are chunked.
 EFETCH_BATCH = 200
+# Small because the *response* is what breaks, not the request. elink answers with every
+# citing PMID in full and only a count is wanted from them, so the body grows with how
+# well-read the papers are rather than with how many were asked about: 100 uncited papers
+# came back in 4 KB, and 100 well-cited ones died mid-body at the same URL length. It
+# failed above ~20 KB, which 75 heavily-cited papers reached, so 50 leaves margin for a
+# corpus more cited than any measured here.
+ELINK_BATCH = 50
+
+# PubMed's own "cited by" links — the only citation count reachable over E-utilities.
+# Built from PMC's reference graph rather than a broader citation source, so counts run
+# low: consistent within one run, not comparable to a number from anywhere else.
+CITED_BY_LINKNAME = "pubmed_pubmed_citedin"
 # esearch will not return more than this many ids in one call, whatever retmax says.
 ESEARCH_MAX_RETMAX = 10_000
 # Which papers a capped query returns, and so the one parameter that decides whether
@@ -211,6 +227,67 @@ class EUtilsClient:
                 )
             )
         return records
+
+    async def cited_by_counts(
+        self,
+        pmids: Sequence[str],
+        *,
+        node: str = "rank",
+    ) -> dict[str, int]:
+        """How many PubMed records cite each id. Empty when the response parsed to nothing.
+
+        Ids go as repeated `id=` parameters, never comma-joined. Both forms return 200
+        and well-formed JSON, and the comma-joined one silently answers a different
+        question: it collapses every id into one linkset holding the *union* of their
+        citing records. Asked about three papers that way it reports a single number,
+        167, where the per-paper counts are 66, 15 and 105.
+
+        Every requested id comes back, whether or not anything cites it, with the
+        `linksetdbs` key simply absent when nothing does — so a count of zero is a
+        measurement here, not a gap. An id that does not exist at all comes back the
+        same way, with no error field, which is why the caller passes only ids PubMed
+        has already returned.
+
+        An empty result means the call gave nothing usable rather than that the corpus
+        is uncited, and the caller must not treat it as a measurement of zero: a floor
+        applied to every paper at once is an inverted signal, not a missing one.
+
+        A chunk that fails costs its own papers and no others. This is a fallback for a
+        signal that is already degraded, so losing fifty papers' counts is worth keeping
+        the rest — and the alternative failed exactly that way in practice, one oversized
+        response taking down the whole corpus.
+        """
+        requested = [str(p) for p in pmids]
+        counts: dict[str, int] = {}
+        failed = 0
+        for chunk in _chunks(requested, ELINK_BATCH):
+            params = {
+                **self._common(),
+                "dbfrom": "pubmed",
+                "db": "pubmed",
+                "linkname": CITED_BY_LINKNAME,
+                # A list, so httpx writes `id=` once per paper.
+                "id": chunk,
+                "retmode": "json",
+            }
+            try:
+                raw = await self._http.get_text(f"{BASE}/elink.fcgi", params=params, node=node)
+            except Exception:
+                failed += len(chunk)
+                continue
+            counts.update(_parse_elink_counts(raw))
+
+        if failed and self._http.bus is not None:
+            self._http.bus.emit(
+                WarningEvent(
+                    node=node,
+                    message=(
+                        f"cited-by counts unavailable for {failed} of {len(requested)} "
+                        f"paper(s); those rank with the citation signal unmeasured"
+                    ),
+                )
+            )
+        return counts
 
 
 # --- parsing ---------------------------------------------------------------
@@ -442,6 +519,33 @@ def _mesh(mesh_list: ET.Element | None) -> tuple[MeshTerm, ...]:
             )
         )
     return tuple(terms)
+
+
+def _parse_elink_counts(raw: str) -> dict[str, int]:
+    """`pmid -> citing record count` from one elink body. `{}` when it parsed to nothing.
+
+    A linkset carrying more than one id is dropped rather than divided. That shape means
+    the request was comma-joined, and its links are a union belonging to no single paper
+    — attributing them to any one id would invent a number rather than lose one.
+    """
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    counts: dict[str, int] = {}
+    for linkset in payload.get("linksets") or []:
+        ids = [str(i) for i in linkset.get("ids") or []]
+        if len(ids) != 1:
+            continue
+        counts[ids[0]] = sum(
+            len(db.get("links") or [])
+            for db in linkset.get("linksetdbs") or []
+            if db.get("linkname") == CITED_BY_LINKNAME
+        )
+    return counts
 
 
 def _chunks(items: list[str], size: int) -> list[list[str]]:

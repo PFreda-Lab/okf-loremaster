@@ -131,6 +131,56 @@ def test_an_icite_outage_is_a_no_op_rather_than_a_second_recency_term() -> None:
     assert len(components) == 1, "the citation component moved without any citation data"
 
 
+# --- the E-utilities fallback ------------------------------------------------
+
+
+def test_a_cited_by_count_restores_the_signal_an_outage_removed() -> None:
+    """The point of the fallback, stated as an ordering rather than a field.
+
+    With iCite down and nothing in its place, the previous test's constant is the best
+    that can be done — correct, and worth nothing to a ranking. A raw count is not
+    field-normalized and runs low, and it still separates a paper a hundred people cited
+    from one nobody did.
+    """
+    much = Candidate(pmid="1", title="t", year=2015).with_citation_count(120)
+    little = Candidate(pmid="2", title="t", year=2015).with_citation_count(0)
+
+    assert relevance(much, now_year=NOW)[1]["citation"] > (
+        relevance(little, now_year=NOW)[1]["citation"]
+    )
+
+
+def test_a_count_without_an_rcr_does_not_pretend_to_be_field_normalized() -> None:
+    """`rcr` stays None, so `_citation` takes the log-scaled branch and says so.
+
+    Deriving a ratio from a raw count would be inventing the field baseline that makes
+    RCR worth preferring in the first place.
+    """
+    candidate = Candidate(pmid="1", title="t", year=2015).with_citation_count(42)
+
+    assert candidate.rcr is None
+    assert candidate.citation_count == 42
+    assert candidate.metrics_known, "measured, so ranking must not treat it as unknown"
+    # And iCite's own classification is untouched: PubMed's publication types already
+    # carry the part of that signal `_article` depends on.
+    assert candidate.is_research_article
+
+
+def test_a_paper_too_new_to_be_cited_is_still_not_scored_at_the_floor() -> None:
+    """The guard that makes a fallback of raw counts safe.
+
+    elink reports zero for a paper published last month exactly as it does for one
+    nobody ever cited, and the two mean opposite things. `_TOO_NEW_YEARS` already
+    separates them, which is why the fallback needs no rule of its own.
+    """
+    fresh = Candidate(pmid="1", title="t", year=NOW).with_citation_count(0)
+    old = Candidate(pmid="2", title="t", year=2010).with_citation_count(0)
+
+    assert relevance(fresh, now_year=NOW)[1]["citation"] > (
+        relevance(old, now_year=NOW)[1]["citation"]
+    )
+
+
 def test_order_is_total_so_two_runs_agree() -> None:
     # Identical in every scored respect, so only the tie-break separates them.
     twins = [make("200"), make("100"), make("300")]

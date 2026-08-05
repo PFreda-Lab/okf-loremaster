@@ -8,6 +8,7 @@ Re-record with `python scripts/record_fixtures.py --email you@example.org`.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -251,6 +252,128 @@ async def test_a_highly_cited_paper_outranks_a_quiet_one(
 ) -> None:
     metrics = await replay_clients.icite.metrics([*PMIDS, WITH_REFS])
     assert metrics[RETRACTED].rcr_or_default > metrics[NO_PMC].rcr_or_default
+
+
+# --- elink -------------------------------------------------------------------
+
+
+def test_a_paper_with_no_citing_records_counts_zero_rather_than_going_missing() -> None:
+    """Live elink omits `linksetdbs` entirely instead of sending an empty one.
+
+    Every requested id comes back either way, so presence in the response carries no
+    information and the count has to be read off the links themselves.
+    """
+    from okf_loremaster.clients.eutils import _parse_elink_counts
+
+    body = json.dumps(
+        {
+            "linksets": [
+                {
+                    "dbfrom": "pubmed",
+                    "ids": ["1"],
+                    "linksetdbs": [
+                        {"linkname": "pubmed_pubmed_citedin", "links": ["10", "11", "12"]}
+                    ],
+                },
+                {"dbfrom": "pubmed", "ids": ["2"]},
+            ]
+        }
+    )
+    assert _parse_elink_counts(body) == {"1": 3, "2": 0}
+
+
+def test_a_linkset_covering_several_papers_is_dropped_rather_than_divided() -> None:
+    """The shape a comma-joined request comes back as, and it must never be believed.
+
+    Its links are the union across every id in it, belonging to no single paper.
+    Attributing them to one — or splitting them evenly — would invent a number, which
+    is worse than losing one: nothing downstream could tell it from a measurement.
+    """
+    from okf_loremaster.clients.eutils import _parse_elink_counts
+
+    body = json.dumps(
+        {
+            "linksets": [
+                {
+                    "ids": ["1", "2", "3"],
+                    "linksetdbs": [
+                        {"linkname": "pubmed_pubmed_citedin", "links": ["10", "11"]}
+                    ],
+                }
+            ]
+        }
+    )
+    assert _parse_elink_counts(body) == {}
+
+
+async def test_one_oversized_chunk_costs_its_own_papers_and_no_others(
+    settings_factory: Any, tmp_path: Path
+) -> None:
+    """The failure a live run actually hit, and it took the whole corpus down with it.
+
+    elink returns every citing PMID in full where only a count is wanted, so the body
+    grows with how well-read the papers are — a large enough one is cut off mid-response
+    and arrives as a transport error. One chunk of a corpus failing that way must not
+    cost the counts of every chunk that succeeded.
+    """
+    from urllib.parse import parse_qs
+
+    import httpx
+
+    from okf_loremaster.clients import build_clients
+    from okf_loremaster.clients.eutils import ELINK_BATCH
+
+    seen: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        ids = [v for v in parse_qs(request.url.query.decode()).get("id", []) if v]
+        seen.append(len(ids))
+        if len(seen) == 1:  # the first chunk dies mid-body, as the live one did
+            raise httpx.RemoteProtocolError("peer closed connection", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "linksets": [
+                    {"ids": [pmid], "linksetdbs": [
+                        {"linkname": "pubmed_pubmed_citedin", "links": ["1", "2"]}
+                    ]}
+                    for pmid in ids
+                ]
+            },
+        )
+
+    settings = settings_factory(
+        ncbi_email="test@example.org",
+        http_cache_enabled=False,
+        cache_dir=tmp_path / "cache",
+        http_max_retries=1,
+    )
+    bus = EventBus()
+    clients = build_clients(settings, bus=bus, transport=httpx.MockTransport(handler))
+    try:
+        pmids = [str(9_000_000 + i) for i in range(ELINK_BATCH * 2)]
+        counts = await clients.eutils.cited_by_counts(pmids)
+    finally:
+        await clients.aclose()
+        bus.close()
+
+    assert len(seen) == 2, "chunked, and the second was still attempted"
+    assert len(counts) == ELINK_BATCH, "the surviving chunk's papers are all measured"
+    assert set(counts) == set(pmids[ELINK_BATCH:])
+    assert all(value == 2 for value in counts.values())
+
+
+def test_an_unparseable_elink_body_is_no_measurement_rather_than_a_corpus_of_zeroes() -> None:
+    """Zero for every paper is the floor applied corpus-wide, which inverts the signal.
+
+    The caller reads `{}` as "ask nothing of this" and leaves the citation component
+    unmeasured, where a constant across the corpus changes no ordering at all.
+    """
+    from okf_loremaster.clients.eutils import _parse_elink_counts
+
+    assert _parse_elink_counts("") == {}
+    assert _parse_elink_counts("<html>an error page</html>") == {}
+    assert _parse_elink_counts("[]") == {}
 
 
 def test_a_batch_of_ids_never_builds_a_url_icite_refuses() -> None:

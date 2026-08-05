@@ -367,9 +367,18 @@ less than the first.
 **The weights are constants, not settings.** A knob per signal invites tuning the ranking against
 one project's corpus, which is exactly what would stop it generalizing.
 
-**A signal that wasn't measured scores 0.5, not 0.** If iCite is unreachable, every paper gets the
-same neutral citation score, and a constant added to every score changes no ordering — so the
-signal drops out instead of quietly becoming a second recency term.
+**If iCite can't be reached, PubMed's own cited-by counts are used instead.** iCite is a separate
+host from E-utilities and fails separately — on some networks it fails on every run while every
+search and fetch goes through normally. So `rank` asks E-utilities for the papers citing each PMID
+and ranks on that count. It is the weaker number, which is why it is second: it is not normalized by
+field, and it is built from PMC's reference graph, so it runs lower than iCite's. The run warns when
+it is standing on this, because the two are not comparable.
+
+**A signal that wasn't measured scores 0.5, not 0.** If neither service answers, every paper gets
+the same neutral citation score, and a constant added to every score changes no ordering — so the
+signal drops out instead of quietly becoming a second recency term. That is also why a count of zero
+is never assumed: applied to a whole corpus it is the floor, not a missing measurement. A paper less
+than two years old scores neutral on citations either way — it isn't uncited, it's unread.
 
 Ranking by itself would just hand the screener the top `--pool-size` papers by score. Two more
 passes run inside `rank` before that happens, and what comes out of them is the pool.
@@ -620,14 +629,16 @@ runs PubMed:
 
 | Service | What it gives us |
 |---|---|
-| **E-utilities** | Entrez Programming Utilities — NCBI's query and retrieval endpoints, used to run each search and fetch the matching records |
+| **E-utilities** | Entrez Programming Utilities — NCBI's query and retrieval endpoints, used to run each search, fetch the matching records, and, when iCite is unreachable, count what cites them |
 | **BioC** | full text for the open-access subset of PMC, as structured JSON with the article's license attached |
 | **PubTator** | biomedical concepts (genes, diseases, chemicals) already annotated in a paper's text |
 | **iCite** | citation metrics, including the Relative Citation Ratio (RCR) described under [ranking](#how-the-pool-is-ranked) |
 
-All four are called at their documented rate limits through **one shared limiter**, because the
-limit is per IP address across all of them, and we **never scrape PubMed or PMC web pages**. Set
-`OKF_LOREMASTER_NCBI_EMAIL` so NCBI can reach you, as their access policy asks.
+The first three are called through **one shared limiter**, because NCBI enforces its limit per IP
+address across all of them and three limiters would be three times the configured rate. iCite is a
+different host with its own budget, so it gets its own — its traffic must not spend E-utilities'.
+We **never scrape PubMed or PMC web pages**. Set `OKF_LOREMASTER_NCBI_EMAIL` so NCBI can reach you,
+as their access policy asks.
 
 Every bundle carries a `stale_after` date, the digest of the charter it came from, the models that
 wrote it, and, with `--review`, who signed it off. Most PubMed records are abstracts under publisher

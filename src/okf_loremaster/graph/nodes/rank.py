@@ -11,7 +11,8 @@ silently does nothing.
 
 iCite is a network call, not a model call, so it runs on a dry run too. It is one
 request per five hundred PMIDs and it is what makes the citation component real rather
-than a prior.
+than a prior. When it cannot be reached the node asks E-utilities for PubMed's own
+cited-by counts instead — a worse signal, and still a signal.
 """
 
 from __future__ import annotations
@@ -62,10 +63,15 @@ async def rank_node(state: RunState, deps: Deps) -> dict[str, Any]:
 async def _enrich(
     deps: Deps, candidates: list[Candidate], warnings: list[str]
 ) -> list[Candidate]:
-    """Attach iCite metrics. A failure costs a signal, never the run.
+    """Attach iCite metrics, or E-utilities counts, or neither. Never fails the run.
 
     Ranking has five other components, and losing the run over a third-party service
     being down would be a poor trade for one of six.
+
+    iCite first because its RCR is normalized against a field baseline, and that is the
+    difference between "well cited" and "well cited for this literature" — a corpus
+    spanning a large field and a small one ranks on field size without it. The fallback
+    recovers a raw count only, which is why it is a fallback and not the primary.
     """
     if not candidates:
         return []
@@ -78,10 +84,7 @@ async def _enrich(
         # throws that away — the degrade is silent about a cause the user can actually fix.
         # Already redacted: an `HttpError` never carries a credential.
         detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
-        note = f"iCite unavailable ({detail}); ranking without citation metrics"
-        warnings.append(note)
-        deps.warn(NODE, note)
-        return candidates
+        return await _cited_by_fallback(deps, candidates, warnings, detail)
 
     missing = 0
     enriched: list[Candidate] = []
@@ -96,3 +99,56 @@ async def _enrich(
     if missing:
         deps.progress(NODE, f"{missing} paper(s) had no iCite record")
     return enriched
+
+
+async def _cited_by_fallback(
+    deps: Deps,
+    candidates: list[Candidate],
+    warnings: list[str],
+    detail: str,
+) -> list[Candidate]:
+    """PubMed's own cited-by links, when iCite could not be reached.
+
+    Worth a second call because the alternative is not a weaker signal, it is no signal:
+    an unmeasured citation component scores every paper in the corpus at the same neutral
+    value, and a constant added to every score changes no ordering at all. A count that
+    runs low still ranks a decade-old paper above one nobody has read.
+
+    On E-utilities, which the run has already been talking to successfully for every
+    search and fetch — so the host that just failed is not the host being asked. Both
+    warnings are kept when this fails too: the second says the signal is gone, and only
+    the first says what to do about it.
+    """
+    try:
+        counts = await deps.clients.eutils.cited_by_counts(
+            [c.pmid for c in candidates], node=NODE
+        )
+    except Exception as exc:
+        counts = {}
+        second = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        # Into `warnings` and not only onto the bus. A live run showed this exact
+        # failure and the bundle recorded nothing about it: `log.md` is written from
+        # `warnings`, so a bus-only warning is one nobody reading the bundle can see.
+        note = f"cited-by counts also unavailable ({second})"
+        warnings.append(note)
+        deps.warn(NODE, note)
+
+    if not counts:
+        # Not marked measured. Zero for every paper is the floor applied corpus-wide,
+        # which is an inverted signal rather than an absent one.
+        note = f"iCite unavailable ({detail}); ranking without citation metrics"
+        warnings.append(note)
+        deps.warn(NODE, note)
+        return candidates
+
+    note = (
+        f"iCite unavailable ({detail}); ranking on PubMed cited-by counts for "
+        f"{len(counts)} of {len(candidates)} paper(s) instead, which are not normalized "
+        f"by field and run lower than iCite's"
+    )
+    warnings.append(note)
+    deps.warn(NODE, note)
+    return [
+        c.with_citation_count(counts[c.pmid]) if c.pmid in counts else c
+        for c in candidates
+    ]
