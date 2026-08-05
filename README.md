@@ -2,8 +2,9 @@
 
 **Turns a research question into a browsable, cited, machine-readable evidence corpus.**
 
-It searches PubMed and PubMed Central, screens the results down to a corpus a person could read,
-pulls structured evidence out of the full text where the license allows, and writes a folder of
+It searches PubMed and PubMed Central (PMC, NIH's free full-text archive), screens the results down
+to a corpus a person could actually read, pulls structured evidence out of the full text where the
+license allows, and writes a folder of
 markdown in [Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
 (OKF v0.2) — plus a vector index built from those same files.
 
@@ -256,9 +257,10 @@ handful. What keeps it honest is not its tier but the code after it: every numbe
 the text it actually read, every quote sliced out of that text, anything not found removed and the
 row's confidence lowered. A more expensive model does not pass that check any better.
 
-**Everything else is ordinary code**: deduplication, ranking, diversification, license logic,
-the numeric re-check, `predictors.md`, file writing, validation, embedding and indexing. No agent
-supervises another, and no agent decides when a run ends — the graph does.
+**Everything else is ordinary code**: deduplication, ranking, maximal marginal relevance (MMR)
+diversification, license logic, the numeric re-check, `predictors.md`, file writing, validation,
+embedding and indexing. No agent supervises another, and no agent decides when a run ends — the
+graph does.
 
 ### The graph
 
@@ -595,10 +597,19 @@ through config and is pinned by revision.
 
 ## Conduct and provenance
 
-Uses NCBI's public APIs — E-utilities, BioC, PubTator, iCite — at their documented rate limits,
-through **one shared limiter** because the limit is per IP across all of them, and **never scrapes
-PubMed or PubMed Central web pages**. Set `OKF_LOREMASTER_NCBI_EMAIL` so NCBI can reach you, as
-their access policy asks.
+Uses NCBI's public APIs — the National Center for Biotechnology Information, the arm of NIH that
+runs PubMed:
+
+| Service | What it gives us |
+|---|---|
+| **E-utilities** | Entrez Programming Utilities — NCBI's query and retrieval endpoints, used to run each search and fetch the matching records |
+| **BioC** | full text for the open-access subset of PMC, as structured JSON with the article's license attached |
+| **PubTator** | biomedical concepts (genes, diseases, chemicals) already annotated in a paper's text |
+| **iCite** | citation metrics, including the Relative Citation Ratio described under [ranking](#how-the-pool-is-ranked) |
+
+All four are called at their documented rate limits through **one shared limiter**, because the
+limit is per IP address across all of them, and we **never scrape PubMed or PMC web pages**. Set
+`OKF_LOREMASTER_NCBI_EMAIL` so NCBI can reach you, as their access policy asks.
 
 Every bundle carries a `stale_after` date, the digest of the charter it came from, the models that
 wrote it, and, with `--review`, who signed it off. Most PubMed records are abstracts under publisher
