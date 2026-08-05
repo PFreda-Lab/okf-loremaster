@@ -1,3 +1,10 @@
+<!-- Absolute raw URL, not a repo-relative path: this file is also the PyPI long description,
+     and PyPI resolves nothing relative to the repository. -->
+<p align="center">
+  <img src="https://raw.githubusercontent.com/PFreda-Lab/okf-loremaster/main/assets/okf-loremaster-logo.png"
+       alt="OKF Loremaster" width="320">
+</p>
+
 # OKF Loremaster
 
 **Turns a research question into a browsable, cited, machine-readable evidence corpus.**
