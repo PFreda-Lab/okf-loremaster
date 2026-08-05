@@ -1,8 +1,10 @@
-<!-- Absolute raw URL, not a repo-relative path: this file is also the PyPI long description,
-     and PyPI resolves nothing relative to the repository. -->
+<!-- Repo-relative, not a raw.githubusercontent.com URL: while this repository is private,
+     raw/ answers 404 without a token and the image renders broken. GitHub resolves a relative
+     path for the viewer either way. This file is also the PyPI long description, where nothing
+     relative resolves — so once the repo is public and the package is published, this is the
+     one line to switch to the absolute raw URL. -->
 <p align="center">
-  <img src="https://raw.githubusercontent.com/PFreda-Lab/okf-loremaster/main/assets/okf-loremaster-logo.png"
-       alt="OKF Loremaster" width="320">
+  <img src="assets/okf-loremaster-logo.png" alt="OKF Loremaster" width="320">
 </p>
 
 # OKF Loremaster
