@@ -24,18 +24,23 @@ okf-loremaster build "predictors of 30-day readmission after heart failure hospi
 That is the whole system. One command, running unattended, from question to finished bundle. At the
 end it asks what you want to keep: the OKF corpus, the vector store, or both.
 
-Under the hood it is an agentic system, and a deliberately small one: **five agents, each with a
-single kind of judgment to make**, wrapped in ordinary code that checks their work and does
-everything that is not a judgment.
+Under the hood it is an agentic system consisting of **five agents, each with an associated job**,
+wrapped in ordinary code that checks their work and builds the corpora.
 
-[**AFC Forge**](https://github.com/PFreda-Lab/afc-forge) is an agentic system for constructing
+[Suggested use case](#suggested-use-case) · [What you get](#what-you-get) ·
+[How a run works](#how-a-run-works) · [Install](#install) · [Configure](#configure) ·
+[Running it](#running-it) · [Why OKF](#why-open-knowledge-format) ·
+[The downstream contract](#what-downstream-can-rely-on)
+
+---
+
+## Suggested use case
+
+After producing an OKF or RAG corpus with OKF Loremaster, bundles can be plugged into
+[**AFC Forge**](https://github.com/PFreda-Lab/afc-forge), an agentic system for constructing
 clinical feature sets for downstream machine learning prediction and/or statistical analysis.
-AFC Forge reads OKF bundles produced by OKF Loremaster. Port a bundle over and an agent reads the
-evidence to identify potential features.
-
-[What you get](#what-you-get) · [How a run works](#how-a-run-works) ·
-[Install](#install) · [Configure](#configure) · [Running it](#running-it) ·
-[Why OKF](#why-open-knowledge-format) · [The downstream contract](#what-downstream-can-rely-on)
+Specialized agents read OKF and/or RAG bundles produced by OKF Loremaster to identify
+potential features.
 
 ---
 
