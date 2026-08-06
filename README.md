@@ -28,6 +28,11 @@ Under the hood it is an agentic system, and a deliberately small one: **five age
 single kind of judgment to make**, wrapped in ordinary code that checks their work and does
 everything that is not a judgment.
 
+[**AFC Forge**](https://github.com/PFreda-Lab/afc-forge) is an agentic system for constructing
+clinical feature sets for downstream machine learning prediction and/or statistical analysis.
+AFC Forge reads OKF bundles produced by OKF Loremaster. Port a bundle over and an agent reads the
+evidence to identify potential features.
+
 [What you get](#what-you-get) · [How a run works](#how-a-run-works) ·
 [Install](#install) · [Configure](#configure) · [Running it](#running-it) ·
 [Why OKF](#why-open-knowledge-format) · [The downstream contract](#what-downstream-can-rely-on)
@@ -665,12 +670,6 @@ the papers. Each paper yields one **concept** chunk carrying the whole document 
 table, plus one **predictor** chunk per table row wrapped in the population, outcome definition and
 bottom line, so a row retrieved on its own still means something. The embedding model resolves
 through config and is pinned by revision.
-
-### Somewhere to take a bundle
-
-[**AFC Forge**](https://github.com/PFreda-Lab/afc-forge) is an agentic system for constructing
-clinical prediction features, and it reads corpora of exactly this shape: attach a bundle and an
-agent reads the evidence in it and identifies features from it.
 
 ---
 
