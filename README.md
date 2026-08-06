@@ -36,11 +36,10 @@ wrapped in ordinary code that checks their work and builds the corpora.
 
 ## Suggested use case
 
-After producing an OKF or RAG corpus with OKF Loremaster, bundles can be plugged into
-[**AFC Forge**](https://github.com/PFreda-Lab/afc-forge), an agentic system for constructing
-clinical feature sets for downstream machine learning prediction and/or statistical analysis.
-Specialized agents read OKF and/or RAG bundles produced by OKF Loremaster to identify
-potential features.
+After producing a bundle, it can be plugged into [**AFC Forge**](https://github.com/PFreda-Lab/afc-forge),
+an agentic system for constructing clinical feature sets for downstream machine learning prediction
+and/or statistical analysis. Each bundle gets its own specialized agent that reads it to identify
+potential features — an OKF agent for the markdown corpus, a RAG agent for the vector store.
 
 ---
 
