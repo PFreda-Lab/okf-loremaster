@@ -3,6 +3,7 @@
   "language": "en-US",
   "comment": "en-US only, deliberately - British spellings must stay flagged. Editor config only: nothing in the package, the tests or any hook reads this file. Words here are the package's own vocabulary; words needed only by gitignored local notes belong in .vscode/settings.json instead.",
   "words": [
+    "AFC",
     "AFCE",
     "bioc",
     "browsability",

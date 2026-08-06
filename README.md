@@ -666,6 +666,12 @@ table, plus one **predictor** chunk per table row wrapped in the population, out
 bottom line, so a row retrieved on its own still means something. The embedding model resolves
 through config and is pinned by revision.
 
+### Somewhere to take a bundle
+
+[**AFC Forge**](https://github.com/PFreda-Lab/afc-forge) is an agentic system for constructing
+clinical prediction features, and it reads corpora of exactly this shape: attach a bundle and an
+agent reads the evidence in it and identifies features from it.
+
 ---
 
 ## Conduct and provenance
@@ -694,7 +700,7 @@ copyright and are not redistributable — the normal case, not a failure.
 
 ## Status
 
-Runs end to end and writes a validated bundle. 1,581 tests, none of which touch the network.
+Runs end to end and writes a validated bundle. 1,632 tests, none of which touch the network.
 
 ```bash
 conda run -n okf-loremaster pytest
