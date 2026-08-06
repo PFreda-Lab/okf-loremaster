@@ -1,16 +1,24 @@
-"""The two things step 7 adds to the command surface.
+"""The command surface: what `build` refuses, and where its defaults come from.
 
-`validate <bundle>` is the same code the graph runs, reached without a run — which is
-the only way to check a bundle somebody else built, or one built six months ago. Its
-exit code is the whole point: a gate that reported failure and exited zero would be a
-gate no script could act on.
+Everything here decides before the graph starts, which is the only place several of
+these can be caught at all.
 
-The `--review` refusal is the other. `--dry-run` and `--json` each mean nobody is going
-to look, and signing anyway would write `by: "human:<id>"` naming a person who never saw
-the bundle. That is a false attestation rather than a weak one, so the combination is
-refused rather than degraded. An autonomous run is not on that list: nobody steered the
-search, but somebody still reads the bundle at the end, which is what the signature is
-about.
+The `--review` refusal is the human sign-off. `--dry-run` and `--json` each mean nobody
+is going to look, and signing anyway would write `by: "human:<id>"` naming a person who
+never saw the bundle. That is a false attestation rather than a weak one, so the
+combination is refused rather than degraded. An autonomous run is not on that list:
+nobody steered the search, but somebody still reads the bundle at the end, which is what
+the signature is about.
+
+The rest is the same shape one level down — a question that may come from the command
+line or from a checkpoint, a charter that can be handed back to a fresh run but not to a
+resumed one, and flag defaults written as literals that have to keep agreeing with the
+constants they mirror.
+
+**Validation has no command, by design.** `validate` — with `charter`, `index`, `export`
+and `inspect` — was a debugging door cut into a graph node, and all five were closed in
+`7b131c4`. The node still runs in every build; `test_okf_validate.py` covers it, including
+the hand-edited bundle a standalone command would have been for.
 """
 
 from __future__ import annotations
@@ -25,6 +33,11 @@ from typer.testing import CliRunner
 from okf_loremaster.cli import app
 
 runner = CliRunner()
+
+
+# --- the human sign-off -------------------------------------------------------
+
+
 @pytest.mark.parametrize("flag", ["--dry-run", "--json"])
 def test_review_is_refused_with_any_flag_that_means_nobody_will_look(flag: str) -> None:
     result = runner.invoke(app, ["build", "a prompt", "--review", flag])
