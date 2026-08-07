@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "okf-loremaster"
 version = "0.1.0.dev0"
-description = "Build a task-scoped biomedical literature knowledge bundle from PubMed/PMC in Open Knowledge Format."
+description = "Multi-agent extraction of structured, verified biomedical evidence from PubMed/PMC into an Open Knowledge Format bundle — for downstream feature construction, engineering, and selection."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 # SPDX expression, not a `License ::` classifier: PEP 639 supersedes those, and declaring both is
