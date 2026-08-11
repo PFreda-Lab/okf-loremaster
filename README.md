@@ -64,6 +64,13 @@ The install is editable and records this directory's absolute path. **If the fol
 okf-loremaster init          # writes .env from the template, then checks the environment
 ```
 
+**Everything below is set in `.env`**, which `init` copies from `.env.example` into the directory
+you ran it from. Open it and fill it in. Two files are read, `~/.config/okf-loremaster/.env` first
+and then `./.env`, so a project-level value overrides a machine-level one; a real environment
+variable overrides both, which is what makes `OKF_LOREMASTER_HTTP_MAX_RETRIES=8 okf-loremaster
+build ...` work for a single run. `OKF_LOREMASTER_ENV_FILE` points at one specific file instead.
+`init` prints which of them it found, and never overwrites an existing `.env` without `--force`.
+
 **Required:** a provider API key (`ANTHROPIC_API_KEY`, or whatever your provider's is — LiteLLM
 reads it under the provider's own name, not ours), a model for each of the three tiers — see
 [the table below](#the-five-agents-and-what-they-run-on) — and `OKF_LOREMASTER_NCBI_EMAIL`. A build
@@ -75,8 +82,8 @@ from 3/s to 10/s. `HF_HOME` gives the embedding model one Hugging Face cache per
 one per environment — **keep it out of OneDrive, Dropbox or any sync folder**, since the hub cache
 symlinks `snapshots/` into `blobs/`, which sync clients mangle.
 
-**Everything else has a working default.** The rest of the file, prefixed `OKF_LOREMASTER_` except
-where written out in full:
+**Everything else has a working default** and can stay commented out. The rest of `.env`, prefixed
+`OKF_LOREMASTER_` except where written out in full:
 
 | | Variable | Default | Reach for it when |
 |---|---|---|---|
