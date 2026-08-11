@@ -85,27 +85,27 @@ symlinks `snapshots/` into `blobs/`, which sync clients mangle.
 **Everything else has a working default** and can stay commented out. The rest of `.env`, prefixed
 `OKF_LOREMASTER_` except where written out in full:
 
-| | Variable | Default | Reach for it when |
+| Area | Variable | Default | Reach for it when |
 |---|---|---|---|
 | **Models** | `ANTHROPIC_BASE_URL` | unset | your calls go through a gateway or an Azure-style endpoint. Model strings are passed to LiteLLM verbatim, so any provider it supports works. |
 | **Cost** | `MAX_USD` | unset | you want a run to warn and pause at a dollar figure. It warns; it does not abort. |
-| | `PRICE_{FAST,BALANCED,REASONING}_{IN,OUT}` | unset | a run reports "cost unavailable" because your models are behind a gateway that LiteLLM has no prices for. USD per 1M tokens. |
+| **Cost** | `PRICE_{FAST,BALANCED,REASONING}_{IN,OUT}` | unset | a run reports "cost unavailable" because your models are behind a gateway that LiteLLM has no prices for. USD per 1M tokens. |
 | **Throughput** | `CONCURRENCY_FAST` | 4 | screening reports `RateLimitError`. Lower this before anything else — screening submits the whole pool at once. |
-| | `CONCURRENCY_BALANCED` | 3 | extraction reports `RateLimitError`. It also sets a run's wall clock: one call per kept paper, so at 2 a 200-paper bundle takes hours. |
-| | `CONCURRENCY_REASONING` | 3 | rarely. The charter is one call. |
-| | `MAX_RETRIES` | 6 | model calls fail on rate limits. Attempts, not retries on top of the first — a rate limit clears on a 60-second window, so this has to outlast one. |
-| | `REQUEST_TIMEOUT` | 300 | almost never lower it. An extraction reads 6,000 tokens and writes thousands back; set short, the call times out on its own success and the paper is lost. |
+| **Throughput** | `CONCURRENCY_BALANCED` | 3 | extraction reports `RateLimitError`. It also sets a run's wall clock: one call per kept paper, so at 2 a 200-paper bundle takes hours. |
+| **Throughput** | `CONCURRENCY_REASONING` | 3 | rarely. The charter is one call. |
+| **Throughput** | `MAX_RETRIES` | 6 | model calls fail on rate limits. Attempts, not retries on top of the first — a rate limit clears on a 60-second window, so this has to outlast one. |
+| **Throughput** | `REQUEST_TIMEOUT` | 300 | almost never lower it. An extraction reads 6,000 tokens and writes thousands back; set short, the call times out on its own success and the paper is lost. |
 | **NCBI** | `HTTP_MAX_RETRIES` | 4 | PubMed or PMC answers `503` in bursts. Also attempts, not retries. |
-| | `HTTP_TIMEOUT` | 30 | seconds before one request is abandoned. |
-| | `HTTP_CACHE_ENABLED` / `HTTP_CACHE_TTL_DAYS` | `true` / 30 | rarely. Responses are keyed by request with credentials stripped, and bibliographic records are effectively immutable. |
-| | `CA_BUNDLE` | unset | your network's proxy terminates TLS, so healthy hosts report certificate failures. There is deliberately no option to skip verification. |
-| | `NCBI_TOOL` | `okf-loremaster` | you want your traffic to identify itself as something else. NCBI logs it alongside the email. |
+| **NCBI** | `HTTP_TIMEOUT` | 30 | seconds before one request is abandoned. |
+| **NCBI** | `HTTP_CACHE_ENABLED` / `HTTP_CACHE_TTL_DAYS` | `true` / 30 | rarely. Responses are keyed by request with credentials stripped, and bibliographic records are effectively immutable. |
+| **NCBI** | `CA_BUNDLE` | unset | your network's proxy terminates TLS, so healthy hosts report certificate failures. There is deliberately no option to skip verification. |
+| **NCBI** | `NCBI_TOOL` | `okf-loremaster` | you want your traffic to identify itself as something else. NCBI logs it alongside the email. |
 | **Paths** | `OUTPUT_DIR` | `./bundles` | you want runs somewhere else. `-o` takes a name, not a path, and resolves against this. |
-| | `CACHE_DIR` | platform cache dir | responses and checkpoints belong on another disk. |
-| | `CHECKPOINT_KEEP_RUNS` | 5 | you want more past runs to stay resumable. A build writes 100–350 MB of them. |
-| | `CHECKPOINT_MAX_MB` · `HTTP_CACHE_MAX_MB` · `EXTRACTION_CACHE_MAX_MB` | 2048 · 1024 · 512 | see [what a run costs on disk](#stopping-and-resuming). `0` turns any one off. |
+| **Paths** | `CACHE_DIR` | platform cache dir | responses and checkpoints belong on another disk. |
+| **Paths** | `CHECKPOINT_KEEP_RUNS` | 5 | you want more past runs to stay resumable. A build writes 100–350 MB of them. |
+| **Paths** | `CHECKPOINT_MAX_MB` · `HTTP_CACHE_MAX_MB` · `EXTRACTION_CACHE_MAX_MB` | 2048 · 1024 · 512 | see [what a run costs on disk](#stopping-and-resuming). `0` turns any one off. |
 | **Vectors** | `EMBED_MODEL` | `pritamdeka/S-PubMedBert-MS-MARCO` | you have a better biomedical embedder. It must be locally runnable — downstream rejects remote embedders on attach. |
-| | `EMBED_REVISION` | unset | you want a rebuild to reproduce the same vectors. |
+| **Vectors** | `EMBED_REVISION` | unset | you want a rebuild to reproduce the same vectors. |
 | **Review** | `REVIEWER_ID` | OS login name | you sign off with `--review` from a service account or a shared box. It is recorded in every document, so it has to name someone who can be asked about it. |
 
 Every variable is annotated at more length in [.env.example](.env.example). Config failures are loud
