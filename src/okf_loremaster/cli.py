@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
+from importlib import resources
 from pathlib import Path
 from typing import Annotated
 
@@ -111,6 +112,23 @@ def main(
     """Build and inspect Open Knowledge Format literature bundles."""
 
 
+def _env_template() -> tuple[str, str | None]:
+    """The annotated template `init` copies, and the name to report it by.
+
+    A checkout has `.env.example` at its root and that copy wins, because in a checkout it
+    is the file being edited. A `pip install` has no checkout, so the wheel carries the
+    same bytes as package data; without that fallback `init` writes nothing at all for
+    anyone who installed from PyPI. Never the user's own `.env` — only the template.
+    """
+    local = Path(".env.example")
+    if local.is_file():
+        return str(local), local.read_text(encoding="utf-8")
+    packaged = resources.files("okf_loremaster") / "env.example"
+    if packaged.is_file():
+        return "the packaged template", packaged.read_text(encoding="utf-8")
+    return str(local), None
+
+
 @app.command()
 def init(
     force: Annotated[bool, typer.Option("--force", help="Overwrite an existing .env.")] = False,
@@ -126,13 +144,13 @@ def init(
         load_settings,
     )
 
-    template = Path(".env.example")
     target = Path(".env")
-    if template.exists() and (force or not target.exists()):
-        target.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
-        console.print(f"[green]wrote[/green] {target} from {template} — fill it in, then rerun")
-    elif not template.exists() and not target.exists():
-        console.print(f"[yellow]neither {template} nor {target} found[/yellow]")
+    origin, template = _env_template()
+    if template is not None and (force or not target.exists()):
+        target.write_text(template, encoding="utf-8")
+        console.print(f"[green]wrote[/green] {target} from {origin} — fill it in, then rerun")
+    elif template is None and not target.exists():
+        console.print(f"[yellow]neither {origin} nor {target} found[/yellow]")
 
     try:
         settings = load_settings()

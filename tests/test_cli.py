@@ -187,3 +187,89 @@ def test_cli_defaults_match_the_constants(command: str) -> None:
     assert params["topic_paper_min"] == DEFAULT_TOPIC_PAPER_MIN
     assert params["topic_paper_max"] == DEFAULT_TOPIC_PAPER_MAX
     assert params["max_topics"] == DEFAULT_MAX_TOPICS
+
+
+# --- the template `init` copies ------------------------------------------------
+
+
+def test_a_checkout_copy_of_the_template_wins_over_the_packaged_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In a checkout `.env.example` is the file being edited, so it is the one to copy.
+
+    The packaged copy is a snapshot taken at build time. Preferring it would mean an
+    edit to the template did not show up in the `.env` that `init` writes next to it.
+    """
+    from okf_loremaster.cli import _env_template
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env.example").write_text("FROM_THE_CHECKOUT=\n", encoding="utf-8")
+
+    origin, text = _env_template()
+
+    assert text == "FROM_THE_CHECKOUT=\n"
+    assert origin == ".env.example"
+
+
+def test_the_packaged_template_is_used_when_there_is_no_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `pip install` has no `.env.example` anywhere, which used to make `init` a no-op.
+
+    It printed "neither .env.example nor .env found" and wrote nothing, leaving anyone who
+    installed from PyPI to reconstruct an 8 KB annotated config out of the README.
+    """
+    import okf_loremaster.cli as cli_module
+
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    (packaged / "env.example").write_text("FROM_THE_WHEEL=\n", encoding="utf-8")
+    monkeypatch.setattr(cli_module.resources, "files", lambda _: packaged)
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.chdir(empty)
+
+    origin, text = cli_module._env_template()
+
+    assert text == "FROM_THE_WHEEL=\n"
+    assert origin == "the packaged template"
+
+
+def test_init_writes_an_env_with_no_checkout_in_sight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The end-to-end shape of the same thing: the file lands, from the packaged copy."""
+    import okf_loremaster.cli as cli_module
+
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    (packaged / "env.example").write_text("ANTHROPIC_API_KEY=\n", encoding="utf-8")
+    monkeypatch.setattr(cli_module.resources, "files", lambda _: packaged)
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.chdir(empty)
+
+    result = runner.invoke(app, ["init"])
+
+    assert (empty / ".env").read_text(encoding="utf-8") == "ANTHROPIC_API_KEY=\n"
+    assert "wrote" in result.output
+
+
+def test_init_does_not_overwrite_an_env_that_already_has_secrets_in_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`.env` is the one file in the tree holding a real key. Clobbering it on a second
+    `init` would be silent and unrecoverable, so overwriting takes `--force`."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env.example").write_text("ANTHROPIC_API_KEY=\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("ANTHROPIC_API_KEY=sk-real\n", encoding="utf-8")
+
+    runner.invoke(app, ["init"])
+
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == "ANTHROPIC_API_KEY=sk-real\n"
+
+    runner.invoke(app, ["init", "--force"])
+
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == "ANTHROPIC_API_KEY=\n"

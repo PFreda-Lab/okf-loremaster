@@ -4,7 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "okf-loremaster"
-version = "0.1.0.dev0"
+# Read from `__init__.py` rather than written twice. The CLI prints `__version__`, so a
+# static value here is a second place to bump and a release that lies about itself.
+dynamic = ["version"]
 description = "Multi-agent extraction of structured, verified biomedical evidence from PubMed/PMC into an Open Knowledge Format bundle — for downstream feature construction, engineering, and selection."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -50,6 +52,8 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.5",
     "types-PyYAML>=6.0",
+    "build>=1.2",
+    "twine>=5.1",
 ]
 all = ["okf-loremaster[vectors,tui]"]
 
@@ -59,8 +63,25 @@ okf-loremaster = "okf_loremaster.cli:app"
 # Short alias for interactive use. Same app; not referenced in docs.
 loremaster = "okf_loremaster.cli:app"
 
+[tool.hatch.version]
+path = "src/okf_loremaster/__init__.py"
+
+# Hatchling already omits anything the VCS ignores, which is what keeps `.env`, `bundles/`
+# and the working notes out of a build. Naming `.env` again costs nothing and means a
+# secret is not one edit to `.gitignore` away from being published. Anchored, so the
+# `.env.example` template beside it is untouched.
+[tool.hatch.build]
+exclude = ["/.env"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/okf_loremaster"]
+
+# The template is one file at the repo root, edited there and shipped from there. A
+# checkout has it beside `pyproject.toml`; a `pip install` has no checkout, so the wheel
+# carries the same bytes as package data and `init` falls back to them. Renamed on the
+# way in: inside the package a leading dot would read as a real dotfile.
+[tool.hatch.build.targets.wheel.force-include]
+".env.example" = "okf_loremaster/env.example"
 
 [tool.ruff]
 line-length = 100
