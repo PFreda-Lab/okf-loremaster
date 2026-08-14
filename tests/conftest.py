@@ -43,6 +43,19 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
         if key.startswith(ENV_PREFIX) or key in _ALSO_CLEARED:
             monkeypatch.delenv(key, raising=False)
 
+    # Clearing the variables is only half of it: `load_settings()` also reads `./.env`,
+    # and the suite runs from the repository root where a working `.env` normally sits.
+    # Two CLI tests passed for exactly that reason and failed on a machine without one —
+    # the first `pytest` after a fresh clone. Patched on the module, so the name
+    # `test_config.py` imported directly still refers to the real function and can go on
+    # asserting the real search order.
+    from okf_loremaster import config
+
+    def no_env_files() -> tuple[Path, ...]:
+        return ()
+
+    monkeypatch.setattr(config, "env_file_candidates", no_env_files)
+
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -74,6 +87,21 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", blocked_async)
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", blocked_sync)
+
+
+@pytest.fixture
+def llm_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A complete set of model tiers and a key, for tests about a later check than that one.
+
+    `run_build` calls `require_llm()` before it looks at the prompt or the resume id, so a
+    test asserting on either reads back a config error unless it supplies these. They used
+    to arrive from whichever `.env` happened to be in the working directory, which is why
+    two such tests passed here and failed on a machine that had never been configured.
+    Names no real provider: nothing in these tests reaches a model.
+    """
+    for role in ("FAST", "BALANCED", "REASONING"):
+        monkeypatch.setenv(f"{ENV_PREFIX}MODEL_{role}", f"fake/{role.lower()}")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "not-a-real-key")
 
 
 @pytest.fixture

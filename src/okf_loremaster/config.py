@@ -282,9 +282,19 @@ class Settings(BaseSettings):
 
 
 def load_settings() -> Settings:
-    """Load settings, converting pydantic's error format into a named-variable one."""
+    """Load settings, converting pydantic's error format into a named-variable one.
+
+    The file list is resolved here rather than taken from `model_config`, whose copy is
+    frozen when this module is imported. Passing it per call is what makes
+    `OKF_LOREMASTER_ENV_FILE` mean the same thing whenever it is set, and what lets a
+    test ask for a run that reads no file at all instead of silently picking up whatever
+    `.env` happens to sit in the working directory.
+    """
     try:
-        return Settings()
+        # `_env_file` is pydantic-settings' documented per-call override. The pydantic
+        # mypy plugin builds `__init__` out of the model's fields and does not know the
+        # dunder-prefixed settings arguments, so it reads as an unexpected keyword.
+        return Settings(_env_file=env_file_candidates())  # type: ignore[call-arg]
     except ValidationError as exc:
         lines: list[str] = []
         for err in exc.errors():

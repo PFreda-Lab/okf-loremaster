@@ -62,7 +62,9 @@ def test_review_is_allowed_on_an_autonomous_run() -> None:
 # --- the question, and where it comes from ------------------------------------
 
 
-def test_a_build_with_no_question_and_nothing_to_resume_says_which_to_give() -> None:
+def test_a_build_with_no_question_and_nothing_to_resume_says_which_to_give(
+    llm_configured: None,
+) -> None:
     """`prompt` became optional so that `--resume` could supply it from the checkpoint.
     That makes an empty `build` a thing typer will now accept, so the sentence it stops
     with has to name both ways of answering the question it is missing."""
@@ -74,7 +76,7 @@ def test_a_build_with_no_question_and_nothing_to_resume_says_which_to_give() -> 
 
 
 def test_resuming_does_not_require_the_question_to_be_typed_again(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, llm_configured: None
 ) -> None:
     """Retyping it invites a version that differs from the one the run was built on, and
     the graph does not read it on resume anyway. Pointed at an empty cache so this stops

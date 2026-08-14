@@ -40,7 +40,12 @@ jobs:
       - name: Lint
         run: ruff check src/ tests/
 
+      # Only on the version mypy is configured for. `python_version = "3.11"` in
+      # `pyproject.toml` is the point of the check — the floor is what has to typecheck —
+      # but under 3.12 mypy reads that interpreter's numpy stubs, which use `type`
+      # statements, and rejects 3.12 syntax it was told to treat as 3.11.
       - name: Types
+        if: matrix.python-version == '3.11'
         run: mypy src/
 
       # No network reachable from the suite by design — conftest blocks the httpx
