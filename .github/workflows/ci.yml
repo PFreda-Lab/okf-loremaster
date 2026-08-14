@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # `[all]` rather than the base install: the Chroma and Textual tests
+      # `importorskip` their dependency, so a lean install would report them as passing
+      # when nothing ran. The torch download is the price of actually covering them.
+      - name: Install
+        run: pip install -e ".[all,dev]"
+
+      # `ruff check` only. The project does not use `ruff format` and is not formatted to
+      # it — adding the check here would fail on 48 files that are deliberately hand-set.
+      - name: Lint
+        run: ruff check src/ tests/
+
+      - name: Types
+        run: mypy src/
+
+      # No network reachable from the suite by design — conftest blocks the httpx
+      # transports outright, so a test that starts calling out fails rather than
+      # depending on NCBI being up.
+      - name: Tests
+        run: pytest -q
+
+  package:
+    name: Build and inspect the distributions
+    runs-on: ubuntu-latest
+    steps:
+      # The whole history and all tags: `check_dist.py` compares the sdist against
+      # `git ls-files`, which needs a real repository rather than an export.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: pip install build twine
+
+      - name: Build
+        run: python -m build
+
+      # Fails if the sdist contains a path git does not track, if any `.env` appears,
+      # or if the packaged `.env` template is missing from the wheel.
+      - name: Nothing untracked ships
+        run: python scripts/check_dist.py dist/
+
+      - name: Metadata renders on PyPI
+        run: twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/

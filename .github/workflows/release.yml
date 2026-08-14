@@ -1,0 +1,152 @@
+# Publishing is driven by the tag, and the tag alone decides where it lands:
+#
+#   v0.1.0rc1, v0.1.0a2, v0.1.0b1   → TestPyPI      (rehearsal; the page can be looked at)
+#   v0.1.0                          → PyPI          (permanent; a version is never reusable)
+#
+# Uploads use PyPI Trusted Publishing (OpenID Connect), so there is no API token in the
+# repository to leak or rotate. Each index needs a publisher registered once, against this
+# repository, this workflow filename, and the environment named below.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.classify.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: pip install build twine
+
+      # The version is read from `src/okf_loremaster/__init__.py`, so a tag that disagrees
+      # with it would publish something named differently from what the CLI reports.
+      - name: Tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(python -c 'import re,pathlib; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("src/okf_loremaster/__init__.py").read_text()).group(1))')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag $GITHUB_REF_NAME says $tag, __version__ says $pkg — retag or bump" >&2
+            exit 1
+          fi
+          echo "both say $pkg"
+
+      - name: Classify the tag
+        id: classify
+        run: |
+          if printf '%s' "${GITHUB_REF_NAME}" | grep -qE '(a|b|rc)[0-9]+$'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "${GITHUB_REF_NAME} is a pre-release — TestPyPI"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "${GITHUB_REF_NAME} is a final release — PyPI"
+          fi
+
+      - name: Build
+        run: python -m build
+
+      - name: Nothing untracked ships
+        run: python scripts/check_dist.py dist/
+
+      - name: Metadata renders on PyPI
+        run: twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+  # Installs the built wheel in a clean environment with no checkout on the path, which is
+  # the only way to catch a file that the repository has and the wheel does not. `init` is
+  # the command that fails that way: it needs the packaged .env template.
+  smoke-test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - name: Install the wheel alone
+        run: pip install dist/*.whl
+
+      - name: It runs, and writes a template from somewhere other than a checkout
+        run: |
+          mkdir -p /tmp/elsewhere && cd /tmp/elsewhere
+          okf-loremaster --version
+          okf-loremaster --help > /dev/null
+          okf-loremaster init || true
+          test -s .env || { echo "init wrote no .env — the packaged template is missing" >&2; exit 1; }
+          grep -q '^ANTHROPIC_API_KEY=$' .env || { echo ".env template is not blank" >&2; exit 1; }
+          echo "init wrote a blank .env from the packaged template"
+
+  testpypi:
+    needs: [build, smoke-test]
+    if: needs.build.outputs.prerelease == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/okf-loremaster
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    needs: [build, smoke-test]
+    if: needs.build.outputs.prerelease == 'false' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/okf-loremaster
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Last, so a GitHub release only ever describes something that actually published.
+  github-release:
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
