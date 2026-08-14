@@ -1,10 +1,10 @@
-<!-- Repo-relative, not a raw.githubusercontent.com URL: while this repository is private,
-     raw/ answers 404 without a token and the image renders broken. GitHub resolves a relative
-     path for the viewer either way. This file is also the PyPI long description, where nothing
-     relative resolves — so once the repo is public and the package is published, this is the
-     one line to switch to the absolute raw URL. -->
+<!-- Absolute raw URL, not a repo-relative path, because this file is also the PyPI long
+     description and PyPI resolves nothing relative to the repository. PyPI freezes the
+     description at upload but renders the tag in the browser, so a relative path would be
+     broken on that page forever while an absolute one starts working the moment the repo
+     goes public. GitHub renders either. -->
 <p align="center">
-  <img src="assets/okf-loremaster-logo.png" alt="OKF Loremaster" width="320">
+  <img src="https://raw.githubusercontent.com/PFreda-Lab/okf-loremaster/main/assets/okf-loremaster-logo.png" alt="OKF Loremaster" width="320">
 </p>
 
 # OKF Loremaster
@@ -41,8 +41,7 @@ clinical feature sets for downstream machine learning prediction and/or statisti
 Python 3.11 or 3.12.
 
 ```bash
-conda create -n okf-loremaster python=3.11 -y
-conda run -n okf-loremaster pip install -e ".[all,dev]"
+pip install okf-loremaster
 ```
 
 | Extra | Adds |
@@ -51,9 +50,21 @@ conda run -n okf-loremaster pip install -e ".[all,dev]"
 | `[vectors]` | Chroma + sentence-transformers — pulls torch; omit if you only want the corpus |
 | `[tui]` | the full-screen interface |
 | `[all]` | both |
-| `[dev]` | pytest, mypy, ruff |
+| `[dev]` | pytest, mypy, ruff, build, twine |
 
-The install is editable and records this directory's absolute path. **If the folder moves, re-run
+So `pip install "okf-loremaster[all]"` for everything. Either command installs two console
+scripts, `okf-loremaster` and the shorter `loremaster`; they are the same program.
+
+### From source
+
+For working on it rather than with it:
+
+```bash
+conda create -n okf-loremaster python=3.11 -y
+conda run -n okf-loremaster pip install -e ".[all,dev]"
+```
+
+That install is editable and records the directory's absolute path. **If the folder moves, re-run
 `pip install -e .` from the new location** or imports stop resolving.
 
 ---
@@ -64,8 +75,11 @@ The install is editable and records this directory's absolute path. **If the fol
 okf-loremaster init          # writes .env from the template, then checks the environment
 ```
 
-**Everything below is set in `.env`**, which `init` copies from `.env.example` into the directory
-you ran it from. Open it and fill it in. Two files are read, `~/.config/okf-loremaster/.env` first
+**Everything below is set in `.env`**, which `init` writes into the directory you ran it from —
+from `.env.example` if you are in a checkout, otherwise from the annotated copy carried inside the
+package, so this works on a plain `pip install`. Open it and fill it in. Nothing in the template is
+filled in for you: every key, address and secret is blank. Two files are read,
+`~/.config/okf-loremaster/.env` first
 and then `./.env`, so a project-level value overrides a machine-level one; a real environment
 variable overrides both, which is what makes `OKF_LOREMASTER_HTTP_MAX_RETRIES=8 okf-loremaster
 build ...` work for a single run. `OKF_LOREMASTER_ENV_FILE` points at one specific file instead.
@@ -715,13 +729,16 @@ copyright and are not redistributable — the normal case, not a failure.
 
 ## Status
 
-Runs end to end and writes a validated bundle. 1,632 tests, none of which touch the network.
+Runs end to end and writes a validated bundle. 1,636 tests, none of which touch the network.
 
 ```bash
 conda run -n okf-loremaster pytest
 conda run -n okf-loremaster mypy src/
 conda run -n okf-loremaster ruff check src/ tests/
 ```
+
+Released versions are listed in [CHANGELOG.md](CHANGELOG.md). While this is 0.x, the bundle
+layout and the CLI may still change between minor releases.
 
 ---
 
