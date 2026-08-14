@@ -53,7 +53,9 @@ pip install okf-loremaster
 | `[dev]` | pytest, mypy, ruff, build, twine |
 
 So `pip install "okf-loremaster[all]"` for everything. Either command installs two console
-scripts, `okf-loremaster` and the shorter `loremaster`; they are the same program.
+scripts, `okf-loremaster` and the shorter `loremaster`; they are the same program. Nothing else has
+to be on the machine — no database, no server, no clone of this repository. Next is
+[Configure](#configure), which is a key and an email.
 
 ### From source
 
@@ -71,33 +73,88 @@ That install is editable and records the directory's absolute path. **If the fol
 
 ## Configure
 
+Two values are required and everything else has a working default, so a first run is one key and
+one email away.
+
+**1 — pick a directory.** `.env` and `bundles/` are written where you run the command, so start
+somewhere you want them.
+
 ```bash
-okf-loremaster init          # writes .env from the template, then checks the environment
+mkdir loremaster && cd loremaster
 ```
 
-**Everything below is set in `.env`**, which `init` writes into the directory you ran it from —
-from `.env.example` if you are in a checkout, otherwise from the annotated copy carried inside the
-package, so this works on a plain `pip install`. Open it and fill it in. Nothing in the template is
-filled in for you: every key, address and secret is blank. Two files are read,
-`~/.config/okf-loremaster/.env` first
-and then `./.env`, so a project-level value overrides a machine-level one; a real environment
-variable overrides both, which is what makes `OKF_LOREMASTER_HTTP_MAX_RETRIES=8 okf-loremaster
-build ...` work for a single run. `OKF_LOREMASTER_ENV_FILE` points at one specific file instead.
-`init` prints which of them it found, and never overwrites an existing `.env` without `--force`.
+**2 — write the template.**
 
-**Required:** a provider API key (`ANTHROPIC_API_KEY`, or whatever your provider's is — LiteLLM
-reads it under the provider's own name, not ours), a model for each of the three tiers — see
-[the table below](#the-five-agents-and-what-they-run-on) — and `OKF_LOREMASTER_NCBI_EMAIL`. A build
-refuses to start without the email, because NCBI asks for a contact address on every request and
-throttles traffic that omits it.
+```bash
+okf-loremaster init
+```
 
-**Worth setting:** `OKF_LOREMASTER_NCBI_API_KEY` is free from NCBI and raises the shared rate limit
-from 3/s to 10/s. `HF_HOME` gives the embedding model one Hugging Face cache per machine instead of
-one per environment — **keep it out of OneDrive, Dropbox or any sync folder**, since the hub cache
-symlinks `snapshots/` into `blobs/`, which sync clients mangle.
+That copies an annotated `.env` into the current directory — from `.env.example` if you are in a
+checkout, otherwise from the copy carried inside the package, so it works on a plain
+`pip install`. It never overwrites an existing `.env` without `--force`.
 
-**Everything else has a working default** and can stay commented out. The rest of `.env`, prefixed
-`OKF_LOREMASTER_` except where written out in full:
+**3 — fill in two lines.** Open `.env`. Both keys are already there, blank, each annotated in
+place:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+OKF_LOREMASTER_NCBI_EMAIL=you@example.edu
+```
+
+| Variable | Where it comes from | |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/settings/keys) | **Required.** Whatever provider you use, the key goes in this one variable — it is handed to LiteLLM explicitly rather than looked up under the provider's own name. `OKF_LOREMASTER_API_KEY` is the same setting, spelled ours |
+| `OKF_LOREMASTER_NCBI_EMAIL` | your own address; nothing to sign up for | **Required.** NCBI asks for a contact address on every request and throttles traffic that omits it, so a build refuses to start without it |
+| `OKF_LOREMASTER_NCBI_API_KEY` | free, and a minute's work, at [NCBI account settings](https://account.ncbi.nlm.nih.gov/settings/) | Optional and worth it: raises the shared NCBI rate limit from 3 to 10 requests a second |
+
+**The three model tiers arrive already set**, so a first run needs no decision from you. Change
+them to any model string [LiteLLM supports](https://docs.litellm.ai/docs/providers) — they are
+passed through verbatim — and see [what each tier is for](#the-five-agents-and-what-they-run-on).
+
+**4 — check it.** Run `init` again; it reads back what you just wrote.
+
+```
+ env files  /home/you/loremaster/.env
+      fast  claude-haiku-4-5
+  balanced  claude-sonnet-5
+ reasoning  claude-opus-5
+   api key  set
+NCBI email  you@example.edu
+  NCBI key  set (10 req/s)
+embeddings  pritamdeka/S-PubMedBert-MS-MARCO @ unpinned
+   HF_HOME  default
+ cache dir  /home/you/.cache/okf-loremaster
+output dir  bundles
+ready
+```
+
+Anything still missing is printed in red and named by its variable, and `init` exits nonzero until
+it prints `ready`. Then:
+
+```bash
+okf-loremaster build "predictors of 30-day readmission after heart failure hospitalization" --dry-run
+```
+
+`--dry-run` plans and costs the run without calling a model — the cheapest way to confirm the whole
+thing is wired up before you spend anything.
+
+### Where `.env` is read from
+
+Two files: `~/.config/okf-loremaster/.env` first, then `./.env`, so a project-level value overrides
+a machine-level one. Put your API key in the first if you would rather set it once per machine than
+once per project. A real environment variable overrides both, which is what makes
+`OKF_LOREMASTER_HTTP_MAX_RETRIES=8 okf-loremaster build ...` work for a single run.
+`OKF_LOREMASTER_ENV_FILE` points at one specific file instead of either. `init` prints which of
+them it found.
+
+### The rest of `.env`
+
+**Worth setting:** `HF_HOME` gives the embedding model one Hugging Face cache per machine instead
+of one per environment — **keep it out of OneDrive, Dropbox or any sync folder**, since the hub
+cache symlinks `snapshots/` into `blobs/`, which sync clients mangle.
+
+**Everything else has a working default** and can stay commented out. Prefixed `OKF_LOREMASTER_`
+except where written out in full:
 
 | Area | Variable | Default | Change it when |
 |---|---|---|---|
