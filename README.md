@@ -11,8 +11,8 @@
 
 **Turns a research question into a browsable, cited, machine-readable evidence corpus for downstream machine learning, feature selection, and agentic applications.**
 
-OKF Loremaster searches PubMed and PubMed Central (PMC, NIH's free full-text archive), summarizes papers and abstracts, pulls
-potential features and associated effects, and files them into a hierarchical markdown
+OKF Loremaster searches PubMed and PubMed Central (PMC, NIH's free full-text archive), summarizes papers and abstracts, identifies
+experimental features and their associated effects on outcomes, and files them into a hierarchical markdown
 corpus in [Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
 (OKF v0.2) — optionally vectorized for RAG.
 
@@ -20,7 +20,7 @@ corpus in [Open Knowledge Format](https://cloud.google.com/blog/products/data-an
 okf-loremaster build "predictors of 30-day readmission after heart failure hospitalization"
 ```
 
-Five agents make the judgment calls; deterministic code checks their work and builds the corpus.
+Five agents make key decisions while integrated deterministic code checks their work and builds the corpus.
 
 [Suggested use case](#suggested-use-case) · [Install](#install) · [Configure](#configure) ·
 [Running it](#running-it) · [What you get](#deliverables) · [How a run works](#how-a-run-works) ·
@@ -32,7 +32,7 @@ Five agents make the judgment calls; deterministic code checks their work and bu
 
 After producing a bundle with OKF Loremaster, it can be plugged into
 [**AFC Forge**](https://github.com/PFreda-Lab/afc-forge) (still under active development), an agentic system for constructing
-clinical feature sets for downstream machine learning prediction and/or statistical analysis.
+clinical feature sets from structured electronic health/medical records data for downstream machine learning prediction and/or statistical analysis.
 
 ---
 
@@ -52,10 +52,10 @@ pip install okf-loremaster
 | `[all]` | both |
 | `[dev]` | pytest, mypy, ruff, build, twine |
 
-So `pip install "okf-loremaster[all]"` for everything. Either command installs two console
-scripts, `okf-loremaster` and the shorter `loremaster`; they are the same program. Nothing else has
-to be on the machine — no database, no server, no clone of this repository. Next is
-[Configure](#configure), which is a key and an email.
+`pip install "okf-loremaster[all]"` installs everything above. Either command installs two console
+scripts, `okf-loremaster` and the shorter `loremaster`; they are the same program. Nothing else is required 
+— no database, no server, no clone of this repository. Next is
+[Configure](#configure), which is an API key (free from [**NCBI**](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/api/api-keys/)) and an email.
 
 ### From source
 
@@ -73,8 +73,7 @@ That install is editable and records the directory's absolute path. **If the fol
 
 ## Configure
 
-Two values are required and everything else has a working default, so a first run is one key and
-one email away.
+Two values are required: The API key and an email.
 
 **1 — pick a directory.** `.env` and `bundles/` are written where you run the command, so start
 somewhere you want them.
