@@ -9,10 +9,10 @@
 
 # OKF Loremaster
 
-**Turns a research question into a browsable, cited, machine-readable evidence corpus for feature construction, engineering, and selection.**
+**Turns a research question into a browsable, cited, machine-readable evidence corpus for downstream machine learning, feature selection, and agentic applications.**
 
-OKF Loremaster searches PubMed and PubMed Central (PMC, NIH's free full-text archive), pulls
-predictors and their evidence from what it finds, and files them into a hierarchical markdown
+OKF Loremaster searches PubMed and PubMed Central (PMC, NIH's free full-text archive), summarizes papers and abstracts, pulls
+potential features and associated effects, and files them into a hierarchical markdown
 corpus in [Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
 (OKF v0.2) — optionally vectorized for RAG.
 
