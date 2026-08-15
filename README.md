@@ -55,7 +55,7 @@ pip install okf-loremaster
 `pip install "okf-loremaster[all]"` installs everything above. Either command installs two console
 scripts, `okf-loremaster` and the shorter `loremaster`; they are the same program. Nothing else is required 
 — no database, no server, no clone of this repository. Next is
-[Configure](#configure), which is an API key (free from [**NCBI**](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/api/api-keys/)) and an email.
+[Configure](#configure): a model provider, its API key, and a contact email for NCBI.
 
 ### From source
 
@@ -73,7 +73,7 @@ That install is editable and records the directory's absolute path. **If the fol
 
 ## Configure
 
-Two values are required: The API key and an email.
+You need three things: models to run on, an API key for them, and a contact email for NCBI.
 
 **1 — pick a directory.** `.env` and `bundles/` are written where you run the command, so start
 somewhere you want them.
@@ -92,25 +92,59 @@ That copies an annotated `.env` into the current directory — from `.env.exampl
 checkout, otherwise from the copy carried inside the package, so it works on a plain
 `pip install`. It never overwrites an existing `.env` without `--force`.
 
-**3 — fill in two lines.** Open `.env`. Both keys are already there, blank, each annotated in
-place:
+**3 — choose a provider.** Open `.env`. The top block is the models:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
-OKF_LOREMASTER_NCBI_EMAIL=you@example.edu
+OKF_LOREMASTER_MODEL_FAST=claude-haiku-4-5
+OKF_LOREMASTER_MODEL_BALANCED=claude-sonnet-5
+OKF_LOREMASTER_MODEL_REASONING=claude-opus-5
+OKF_LOREMASTER_API_KEY=
 ```
 
-| Variable | Where it comes from | |
+FAST, BALANCED and REASONING are job sizes, not products — see
+[what each one runs](#the-five-agents-and-what-they-run-on). The template ships with Anthropic
+model ids as a default, not a requirement. Model strings are passed verbatim to
+[LiteLLM](https://docs.litellm.ai/docs/providers), so any provider it supports works. Replace
+them with your own and set the base URL if your provider needs one:
+
+| Provider | Model strings look like | Also set |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/settings/keys) | **Required.** Whatever provider you use, the key goes in this one variable — it is handed to LiteLLM explicitly rather than looked up under the provider's own name. `OKF_LOREMASTER_API_KEY` is the same setting, spelled ours |
-| `OKF_LOREMASTER_NCBI_EMAIL` | your own address; nothing to sign up for | **Required.** NCBI asks for a contact address on every request and throttles traffic that omits it, so a build refuses to start without it |
-| `OKF_LOREMASTER_NCBI_API_KEY` | free, and a minute's work, at [NCBI account settings](https://account.ncbi.nlm.nih.gov/settings/) | Optional and worth it: raises the shared NCBI rate limit from 3 to 10 requests a second |
+| Anthropic | `claude-sonnet-5` | — |
+| OpenAI | `gpt-5.2`, `o4-mini` | — |
+| Azure OpenAI | `azure/<your-deployment-name>` | `OKF_LOREMASTER_API_BASE=https://<resource>.openai.azure.com/` |
+| Azure AI Foundry, Anthropic models | `claude-sonnet-5` | `OKF_LOREMASTER_API_BASE=https://<resource>.services.ai.azure.com/anthropic/` |
+| AWS Bedrock | `bedrock/anthropic.claude-sonnet-4-5-v1:0` | AWS credentials, as LiteLLM documents |
+| Ollama, local | `ollama/llama3.3` | `OKF_LOREMASTER_API_BASE=http://localhost:11434` |
+| vLLM, LM Studio, llama.cpp | `openai/<model-name>` | `OKF_LOREMASTER_API_BASE=http://localhost:8000/v1` |
 
-**The three model tiers arrive already set**, so a first run needs no decision from you. Change
-them to any model string [LiteLLM supports](https://docs.litellm.ai/docs/providers) — they are
-passed through verbatim — and see [what each tier is for](#the-five-agents-and-what-they-run-on).
+Three things hold whatever you picked:
 
-**4 — check it.** Run `init` again; it reads back what you just wrote.
+- **The key always goes in `OKF_LOREMASTER_API_KEY`.** It is handed to LiteLLM directly, so
+  `OPENAI_API_KEY` and the rest are not read. `ANTHROPIC_API_KEY` is an accepted alias.
+- **Local models still need a value in it.** Nothing validates the string, but an empty one stops
+  the run before it starts. Put `local` in there.
+- **Set the three tiers to different models, or to the same one.** Nothing requires a provider to
+  offer three sizes.
+
+**Azure OpenAI**, two extra notes. LiteLLM defaults to API version `2025-02-01-preview`; to pin a
+different one, export `AZURE_API_VERSION` in your shell, because LiteLLM reads it from the process
+environment and this tool does not copy `.env` there. And LiteLLM cannot price a deployment name,
+so a run reports "cost unavailable" until you set `OKF_LOREMASTER_PRICE_*` — the
+[table below](#the-rest-of-env) has them.
+
+**4 — set the NCBI email.**
+
+```bash
+OKF_LOREMASTER_NCBI_EMAIL=you@example.edu     # required
+OKF_LOREMASTER_NCBI_API_KEY=                  # optional
+```
+
+NCBI asks for a contact address on every request and throttles traffic that omits it, so a build
+refuses to start without one. Nothing to sign up for — your own address. The API key is separate,
+free from [NCBI account settings](https://account.ncbi.nlm.nih.gov/settings/), and raises the rate
+limit from 3 to 10 requests a second.
+
+**5 — check it.** Run `init` again; it reads back what you just wrote.
 
 ```
  env files  /home/you/loremaster/.env
@@ -127,24 +161,22 @@ output dir  bundles
 ready
 ```
 
-Anything still missing is printed in red and named by its variable, and `init` exits nonzero until
-it prints `ready`. Then:
+Missing values are printed in red and named. `init` exits nonzero until it prints `ready`. Then:
 
 ```bash
 okf-loremaster build "predictors of 30-day readmission after heart failure hospitalization" --dry-run
 ```
 
-`--dry-run` plans and costs the run without calling a model — the cheapest way to confirm the whole
-thing is wired up before you spend anything.
+`--dry-run` plans and costs the run without calling a model. It is the cheapest way to confirm the
+provider is wired up.
 
 ### Where `.env` is read from
 
-Two files: `~/.config/okf-loremaster/.env` first, then `./.env`, so a project-level value overrides
-a machine-level one. Put your API key in the first if you would rather set it once per machine than
-once per project. A real environment variable overrides both, which is what makes
-`OKF_LOREMASTER_HTTP_MAX_RETRIES=8 okf-loremaster build ...` work for a single run.
-`OKF_LOREMASTER_ENV_FILE` points at one specific file instead of either. `init` prints which of
-them it found.
+Two files: `~/.config/okf-loremaster/.env` first, then `./.env`. A project value overrides a
+machine one, so put your API key in the first to set it once per machine. A real environment
+variable overrides both, which is what makes `OKF_LOREMASTER_HTTP_MAX_RETRIES=8 okf-loremaster
+build ...` work for a single run. `OKF_LOREMASTER_ENV_FILE` names one specific file instead of
+either. `init` prints which it found.
 
 ### The rest of `.env`
 
@@ -157,7 +189,7 @@ except where written out in full:
 
 | Area | Variable | Default | Change it when |
 |---|---|---|---|
-| **Models** | `ANTHROPIC_BASE_URL` | unset | your calls go through a gateway or an Azure-style endpoint |
+| **Models** | `API_BASE` | unset | Azure, a gateway, or anything self-hosted. `ANTHROPIC_BASE_URL` is an alias |
 | **Cost** | `MAX_USD` | unset | a run should warn and pause at a dollar figure — it warns, never aborts |
 | **Cost** | `PRICE_{FAST,BALANCED,REASONING}_{IN,OUT}` | unset | a run reports "cost unavailable". USD per 1M tokens |
 | **Throughput** | `CONCURRENCY_FAST` | 4 | screening hits `RateLimitError` — lower this one first |
@@ -539,14 +571,15 @@ Each has its own prompt, its own output schema, and one kind of decision to make
 The tiers are named for job scales. You bind each to whatever model you like; nothing
 in the code names a specific provider.
 
-| Tier | Set in `.env` | What it wants | Examples |
+| Tier | Set in `.env` | What it wants | Called |
 |---|---|---|---|
-| **FAST** | `OKF_LOREMASTER_MODEL_FAST` | the cheapest model that can follow a rubric | Claude Haiku, GPT Luna |
-| **BALANCED** | `OKF_LOREMASTER_MODEL_BALANCED` | a middle model — what keeps an extraction honest is code, not model size | Claude Sonnet, GPT Terra |
-| **REASONING** | `OKF_LOREMASTER_MODEL_REASONING` | the most capable you have; it is one call per run | Claude Opus, GPT Sol |
+| **FAST** | `OKF_LOREMASTER_MODEL_FAST` | the cheapest model that can follow a rubric | once per pooled paper |
+| **BALANCED** | `OKF_LOREMASTER_MODEL_BALANCED` | a middle model — what keeps an extraction honest is code, not model size | once per kept paper, plus a handful |
+| **REASONING** | `OKF_LOREMASTER_MODEL_REASONING` | the most capable you have | once per run |
 
-The examples name model families rather than versions, which turn over quickly. `.env.example` carries
-exact ids to start from.
+BALANCED sets the price of a run and REASONING barely moves it, which is the opposite of what the
+names suggest. A small local model is a reasonable FAST; the screener is a keep-or-drop decision
+against a rubric. See [Configure](#configure) for the provider table.
 
 **Everything else is ordinary code**: deduplication, ranking, maximal marginal relevance (MMR)
 diversification, license logic, the numeric re-check, `predictors.md`, file writing, validation,

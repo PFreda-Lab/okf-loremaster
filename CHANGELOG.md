@@ -8,6 +8,34 @@ The bundle contract downstream reads is the part to watch — it is called out h
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-08-15
+
+Documentation and the `.env` template. No code changed; existing `.env` files keep working.
+
+### Fixed
+
+- **Configure counted the wrong two variables.** It said a first run needs an API key and an
+  email, meaning NCBI's — and skipped model routing, which is the part that costs money and the
+  part most likely to be wrong. It is now three things: models, a key for them, and the NCBI
+  contact address.
+- **Every instruction assumed Anthropic.** Configure carries a provider table — Anthropic, OpenAI,
+  Azure OpenAI, Azure AI Foundry, Bedrock, Ollama, and OpenAI-compatible servers such as vLLM and
+  LM Studio — with the model string and base URL each one wants.
+- **Azure had no instructions at all.** Two facts that are not guessable from the outside: LiteLLM
+  defaults to api-version `2025-02-01-preview`, and pinning another needs `AZURE_API_VERSION`
+  exported in the shell, because nothing here copies `.env` into `os.environ`. Also that LiteLLM
+  cannot price a deployment name, so an Azure run reports "cost unavailable" until
+  `OKF_LOREMASTER_PRICE_*` is set.
+- A local model needs a non-empty `OKF_LOREMASTER_API_KEY` even though nothing checks the string.
+  Undocumented, and it stops a run before it starts.
+
+### Changed
+
+- `.env.example` leads with `OKF_LOREMASTER_API_KEY` and `OKF_LOREMASTER_API_BASE` rather than the
+  Anthropic spellings, with a provider menu above the model block. `ANTHROPIC_API_KEY` and
+  `ANTHROPIC_BASE_URL` remain accepted aliases, so no existing configuration breaks.
+- The tier table gives how often each tier is called instead of example model names.
+
 ## [0.1.1] — 2026-08-14
 
 Documentation only. No code changed; the bundle layout and the CLI are identical to 0.1.0.
@@ -62,6 +90,7 @@ First public release.
 - Apache-2.0 covers this code, not the bundles it builds. Each emitted document records the
   `license` its publisher reported, and `export_safe` says whether it may leave.
 
-[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/PFreda-Lab/okf-loremaster/releases/tag/v0.1.0
