@@ -98,7 +98,16 @@ jobs:
           okf-loremaster --help > /dev/null
           okf-loremaster init || true
           test -s .env || { echo "init wrote no .env — the packaged template is missing" >&2; exit 1; }
-          grep -q '^ANTHROPIC_API_KEY=$' .env || { echo ".env template is not blank" >&2; exit 1; }
+          grep -q '^OKF_LOREMASTER_API_KEY=$' .env \
+            || { echo "the template carries no blank OKF_LOREMASTER_API_KEY line" >&2; exit 1; }
+          # Generalized rather than grepping one variable name, which went stale the
+          # first time the template was reorganized. What matters is that no credential
+          # ships with a value in it, whatever the credential ends up being called.
+          if grep -qE '^[A-Z_]*(API_KEY|TOKEN|SECRET|PASSWORD)=.+' .env; then
+            echo "a credential in the packaged template has a value:" >&2
+            grep -nE '^[A-Z_]*(API_KEY|TOKEN|SECRET|PASSWORD)=.+' .env | sed 's/=.*/=<redacted>/' >&2
+            exit 1
+          fi
           echo "init wrote a blank .env from the packaged template"
 
   testpypi:

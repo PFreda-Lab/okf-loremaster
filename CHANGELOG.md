@@ -8,9 +8,13 @@ The bundle contract downstream reads is the part to watch — it is called out h
 
 ## [Unreleased]
 
-## [0.1.2] — 2026-08-15
+## [0.1.3] — 2026-08-15
 
-Documentation and the `.env` template. No code changed; existing `.env` files keep working.
+Configuration and documentation. Existing `.env` files keep working — both Anthropic spellings
+remain accepted aliases.
+
+0.1.2 was tagged and never published: its release run stopped at the smoke test, which asserted on
+a variable name this release moved. Nothing reached PyPI under that number.
 
 ### Fixed
 
@@ -28,6 +32,13 @@ Documentation and the `.env` template. No code changed; existing `.env` files ke
   `OKF_LOREMASTER_PRICE_*` is set.
 - A local model needs a non-empty `OKF_LOREMASTER_API_KEY` even though nothing checks the string.
   Undocumented, and it stops a run before it starts.
+- **`init` named `ANTHROPIC_API_KEY` as the variable to go and set**, while the template it had
+  just written asks for `OKF_LOREMASTER_API_KEY`. Somebody configuring Azure or a local server was
+  pointed at the one spelling that is wrong for them. It now names ours.
+- **`HF_HOME` shipped uncommented as `/Users/<you>/.cache/huggingface`.** A literal placeholder,
+  not an example: an untouched `.env` sent the embedding model download to a directory named after
+  the placeholder. Commented out, so Hugging Face's own default applies until it is set
+  deliberately.
 
 ### Changed
 
@@ -90,7 +101,7 @@ First public release.
 - Apache-2.0 covers this code, not the bundles it builds. Each emitted document records the
   `license` its publisher reported, and `export_safe` says whether it may leave.
 
-[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.1...v0.1.2
+[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.1...v0.1.3
 [0.1.1]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/PFreda-Lab/okf-loremaster/releases/tag/v0.1.0

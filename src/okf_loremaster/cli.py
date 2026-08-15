@@ -176,7 +176,7 @@ def init(
 
     table.add_row(
         "api key",
-        "[red]unset[/red] (ANTHROPIC_API_KEY)" if "ANTHROPIC_API_KEY" in missing else "set",
+        f"[red]unset[/red] ({ENV_PREFIX}API_KEY)" if f"{ENV_PREFIX}API_KEY" in missing else "set",
     )
     if settings.api_base:
         table.add_row("api base", settings.api_base)

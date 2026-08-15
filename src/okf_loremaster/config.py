@@ -220,7 +220,11 @@ class Settings(BaseSettings):
             }[role]:
                 missing.append(f"{ENV_PREFIX}MODEL_{role.value.upper()}")
         if not self.api_key:
-            missing.append("ANTHROPIC_API_KEY")
+            # Named by our own spelling, not the Anthropic alias. The template writes
+            # this one and it is the only spelling that is right for every provider —
+            # being told to set ANTHROPIC_API_KEY while configuring Azure or a local
+            # server reads as "this tool only speaks to Anthropic", which it does not.
+            missing.append(f"{ENV_PREFIX}API_KEY")
         return missing
 
     def require_llm(self) -> None:

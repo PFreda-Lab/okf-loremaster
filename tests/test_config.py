@@ -31,7 +31,9 @@ def test_missing_variables_are_listed(settings_factory: Any) -> None:
     assert "OKF_LOREMASTER_MODEL_FAST" in missing
     assert "OKF_LOREMASTER_MODEL_BALANCED" in missing
     assert "OKF_LOREMASTER_MODEL_REASONING" in missing
-    assert "ANTHROPIC_API_KEY" in missing
+    # Our spelling, not the Anthropic alias: this list is what the user is told to go
+    # and set, and the alias is right for exactly one of the providers we support.
+    assert "OKF_LOREMASTER_API_KEY" in missing
 
     with pytest.raises(ConfigError) as excinfo:
         settings.require_llm()
