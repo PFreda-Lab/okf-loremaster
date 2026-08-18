@@ -260,6 +260,40 @@ def repair_hint(exc: ValidationError) -> str:
     return "Fix these fields and reply with JSON only — " + _problems(exc)
 
 
+def _require_every_property(node: Any) -> Any:
+    """Every property of every object listed in `required`, in place of pydantic's.
+
+    A field with a default is a field pydantic leaves out of `required`, and a provider
+    counts each one as an optional parameter it has to branch on while compiling the
+    schema into a decoding grammar. There is a ceiling on that count, it is not
+    documented, and it is reached silently: the schema is rejected, the router reads the
+    rejection as a refusal, and every call for the rest of the run goes out unconstrained.
+
+    Measured on an Azure AI Foundry Anthropic deployment (2026-08-18), which answered
+    `Schemas contains too many optional parameters (38)`. Extraction had 31 and was fine;
+    `interacts_with` and the five fields of `Interaction` took it to 38 and it stopped
+    compiling — so the cap sits somewhere in between, and the next field added would have
+    found it anyway.
+
+    Requiring everything takes the count to zero and keeps the meaning. A field that was
+    already `X | None` still accepts null, because `anyOf` is untouched; one that was a
+    string or a list must now be written out as `""` or `[]`, which is the default it
+    would have taken. Nothing here changes the models themselves, so a reply that omits a
+    field still validates on the fallback path — this constrains what a provider generates,
+    not what we accept.
+    """
+    if isinstance(node, dict):
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            node["required"] = sorted(properties)
+        for value in node.values():
+            _require_every_property(value)
+    elif isinstance(node, list):
+        for value in node:
+            _require_every_property(value)
+    return node
+
+
 def response_format_for(model_cls: type[Model], *, name: str = "") -> dict[str, Any]:
     """A `response_format` payload constraining a reply to this schema.
 
@@ -276,6 +310,6 @@ def response_format_for(model_cls: type[Model], *, name: str = "") -> dict[str, 
         "type": "json_schema",
         "json_schema": {
             "name": name or model_cls.__name__,
-            "schema": model_cls.model_json_schema(),
+            "schema": _require_every_property(model_cls.model_json_schema()),
         },
     }

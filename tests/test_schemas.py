@@ -38,6 +38,7 @@ from okf_loremaster.schemas import (
     Extraction,
     NullFinding,
     PredictorRow,
+    QueryPlan,
     RunManifest,
     ScreenVerdict,
     SourceRef,
@@ -50,7 +51,12 @@ from okf_loremaster.schemas import (
     slugify,
 )
 from okf_loremaster.schemas.limits import sentences, truncate_chars
-from okf_loremaster.schemas.parse import SchemaError, extract_json, parse_model
+from okf_loremaster.schemas.parse import (
+    SchemaError,
+    extract_json,
+    parse_model,
+    response_format_for,
+)
 
 
 def a_topic(slug: str = "risk-factors", scope: str = "what belongs here") -> Topic:
@@ -947,3 +953,62 @@ def test_evidence_types_serialize_as_their_string_value() -> None:
 def test_source_refs_carry_optional_usage_counts() -> None:
     ref = SourceRef(id="pmid:1", resource="https://example.org/1")
     assert ref.usage_count is None
+
+
+# --- what a provider will agree to compile ------------------------------------
+
+
+@pytest.mark.parametrize(
+    "model_cls", [Extraction, Charter, QueryPlan, ScreenVerdict, TopicCuration]
+)
+def test_no_schema_we_send_has_an_optional_parameter(model_cls: type) -> None:
+    """A field with a default is one a provider has to branch on to build a grammar, and
+    there is an undocumented ceiling on how many it will take.
+
+    This is the only guard on it, and nothing about reaching it looks like a failure. An
+    Azure AI Foundry Anthropic deployment answered `Schemas contains too many optional
+    parameters (38)`; the router reads that as a refusal, drops the constraint, and the
+    run finishes — unconstrained, on a model that then thinks before every reply, at
+    roughly five times the tokens and ten times the wall clock, with nothing in the output
+    saying so. Extraction sat at 31 for months and went to 38 when `interacts_with`
+    landed.
+
+    Asserting zero rather than "under the cap" because the cap is the provider's to move
+    and we do not get told when it does.
+    """
+    schema = response_format_for(model_cls)["json_schema"]["schema"]
+    optional: list[str] = []
+
+    def visit(node: object, path: str) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                required = set(node.get("required", []))
+                optional.extend(f"{path}.{key}" for key in properties if key not in required)
+            for key, value in node.items():
+                visit(value, f"{path}.{key}")
+        elif isinstance(node, list):
+            for value in node:
+                visit(value, path)
+
+    visit(schema, model_cls.__name__)
+
+    assert not optional, f"optional parameters a provider must branch on: {optional}"
+
+
+def test_requiring_every_property_leaves_a_nullable_field_nullable() -> None:
+    """The transform must not turn "may be absent" into "must be a number".
+
+    Half the required fields have nothing to report on most papers. Requiring the key
+    while forbidding null would make a constrained model invent an effect size for a row
+    that has none, which is the one failure mode this pipeline spends a whole module
+    checking for afterward.
+    """
+    schema = response_format_for(Extraction)["json_schema"]["schema"]
+    row = schema["$defs"]["PredictorRow"]
+
+    assert "effect" in row["required"]
+    assert {"type": "null"} in row["properties"]["effect"]["anyOf"]
+    # And a field that was never nullable stays that way: it is written as its default.
+    assert "predictor" in row["required"]
+    assert "anyOf" not in row["properties"]["predictor"]
