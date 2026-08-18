@@ -8,6 +8,49 @@ The bundle contract downstream reads is the part to watch — it is called out h
 
 ## [Unreleased]
 
+### Changed
+
+- **A price you configure is now used in preference to LiteLLM's table, not after it.**
+  `OKF_LOREMASTER_PRICE_<ROLE>_IN`/`_OUT` were consulted only when LiteLLM had no opinion, which
+  made them live for gateway deployment names it cannot recognize and dead for every published
+  model whose price has since moved. LiteLLM prices from a static file shipped inside its own
+  wheel: it was still answering the introductory $2/$10 for `claude-sonnet-5` well after that
+  became $3/$15, so every cost this tool printed for that model was two thirds of the truth. An
+  unpriceable call still reports tokens and "cost unavailable" rather than `$0.00`.
+- **`--dry-run` projects far closer to what a run actually costs** — about 80% of it, from about
+  27%. Two independent errors: the `response_format` schema was never counted as input, though it
+  is billed once per call and came to 12% of a 199-paper run, and the reply allowances were
+  reasoned about rather than measured. Extraction's was 700 tokens against a measured mean of
+  5,034.
+- **Six calls per model in flight instead of three**, which roughly halves the wall clock of a
+  build — about 30 minutes of extraction for 200 papers, against about 50. Rate limits are counted
+  per model per minute, so the tiers were never sharing one budget as the previous default assumed.
+  `OKF_LOREMASTER_CONCURRENCY_BALANCED` still lowers it if a deployment's quota is tighter.
+- **`--target-papers` defaults to 150 rather than 200**, the middle of the 120–250 browsability
+  band rather than the top of it. Extraction alone sets both the price and the wall clock of a run,
+  and the default is what somebody gets before they have any idea what either will be.
+- **Reply ceilings raised on extraction, query planning and curation.** A reply cut off by its
+  ceiling is billed in full, discarded and re-asked, so the room costs nothing unspent and the lack
+  of it costs a whole generation. Extraction tripped its old ceiling on 22% of papers in one run.
+
+### Fixed
+
+- **A run under `--tui` could finish its bundle and then hang forever.** The end-of-run question
+  about what to keep was asked with a `rich` prompt while Textual held the terminal in raw mode:
+  the question is painted underneath a full-screen app and blocks on a read no keypress can reach,
+  so the run sits there complete, with `q` and `c` both dead because the loop that handles them is
+  the loop that is blocked. Runs that do not own the terminal are unaffected. Both resources are
+  now kept without asking, which is what an unattended run already did.
+- **The vector index gave no sign of life while its embedding model loaded.** The model loads
+  lazily and a first run downloads several hundred megabytes, which fell between two progress
+  messages on the last node of a long build — and being a blocking load, it stalled the renderer
+  as well. The load is now announced before it starts and runs off the event loop.
+- **Schemas with too many optional fields silently stopped constraining replies.** A provider
+  compiling a schema into a decoding grammar caps how many optional parameters it will branch on;
+  past that it rejects the schema, the rejection reads as a refusal, and every later call goes out
+  unconstrained. Every property is now marked required, which keeps the meaning — nullable fields
+  still accept null — and takes the count to zero.
+
 ## [0.2.0] — 2026-08-17
 
 **The bundle contract moved.** Every per-paper document gains a twelfth finding-table column and a
