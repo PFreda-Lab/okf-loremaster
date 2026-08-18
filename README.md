@@ -430,110 +430,157 @@ attached downstream on their own.
 
 ### Example markdown file of a retrieved paper
 
+Real output from a real run, with frontmatter and long tables trimmed where a `…` says so. Nothing
+below is edited — rows are dropped, never rewritten.
+
 ````markdown
 ---
-title: "Effects of different exercise modalities on CD4 count in people living with HIV"
-domain: "exercise-and-immune-markers"
-description: "Aerobic and high-intensity training raised CD4 count; other modalities did not."
-tags: ["CD4 count", "aerobic training", "meta-analysis"]
-study_design: "systematic review and meta-analysis"
+title: "Frailty and Function in Heart Failure: Predictors of 30-Day Hospital Readmission?"
+domain: "clinical-patient-predictors"
+description: "NHATS-Medicare cohort of 1,053 older adults with heart failure: SPPB (function) and Fried frailty phenotype similarly predicted 30-day readmission (R2~0.087 adjusted) but neither discriminated well…"
+tags: ["heart failure", "30-day readmission", "frailty", "physical function", "SPPB"]
+study_design: "Secondary data analysis of the 2011 National Health and Aging Trends Study (NHATS) merged with Medicare claims data; logistic regression and ROC analysis"
+n: "1053"
 strength: "moderate"
-strength_score: "0.66"
-text_basis: "abstract"
-license: "publisher copyright"
+strength_score: "0.58"
+text_basis: "full_text"
+license: "author_manuscript"
 export_safe: "false"
-generated: {by: "okf-loremaster/extract/<model-id>", at: "2026-03-21T11:31:58Z"}
-sources: [{id: "pmid:33745404", resource: "https://pubmed.ncbi.nlm.nih.gov/33745404/"}]
+generated: {by: "okf-loremaster/extract/<model-id>", at: "2026-08-18T15:01:17Z"}
+sources: [{id: "pmid:31373945", resource: "https://pubmed.ncbi.nlm.nih.gov/31373945/"}, {id: "pmc:PMC6992473", resource: "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6992473/"}, {id: "doi:10.1519/JPT.0000000000000243", resource: "https://doi.org/10.1519/JPT.0000000000000243"}]
 ---
 
 # Bottom line
 
-Aerobic training and high-intensity training raised CD4 count; the other modalities and
-intensities did not.
+Lower functional status (SPPB) and higher frailty (PFP) were each significantly associated with
+30-day readmission after heart failure hospitalization, with comparable model fit (~8-9% variance
+explained), but neither measure adequately discriminated who would be readmitted (AUC 0.59-0.61);
+higher chronic condition burden was the strongest single predictor.
 
-- **Design** — systematic review and meta-analysis
-- **Read from** — the abstract only
-- **Evidence strength** — moderate (0.66) — nothing to score on size or adjustment
+- **Design** — Secondary data analysis of the 2011 National Health and Aging Trends Study (NHATS) merged with Medicare claims data; logistic regression and ROC analysis
+- **N** — 1,053
+- **Population** — Community-dwelling Medicare beneficiaries aged 65+ with heart failure (2011 NHATS sample)
+- **Outcome** — All-cause 30-day hospital readmission to acute or critical access hospitals following an index hospitalization, identified from Medicare claims data as a dichotomous (yes/no) variable, within 12 months of NHATS administration
+- **Read from** — the full text
+- **Evidence strength** — moderate (0.58)
 
 # Abstract
 
-Physical exercise is recommended for people living with HIV, but the effect of modality and
-intensity on immunological markers remains unclear. …
+Background And Purpose: Although there have been decreases noted in 30-day readmission rates for
+persons with heart failure since enactment of the Hospital Readmissions Reduction Program, costs
+related to heart failure readmissions remain high. …
+
+Results And Discussion: Frailty and function demonstrated comparable ability to predict 30-day
+readmissions (R2 = 0.087 and R2 = 0.087, respectively). Neither measure identified persons at risk
+for readmission (AUCSPPB = 0.608; AUCPFP = 0.587). …
 
 # Predictors reported
 
 | # | Predictor | Operationalization | Timing | Outcome | Type | Effect | p | Direction | Confidence | Strength | Interacts with |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | aerobic training | modality subgroup, pooled mean difference vs. control | measured after the training period | CD4 count | intervention | 79.91 cells/mm³ (95% CI 19.30-140.52) | ≤0.01 | increases | high | moderate 0.62 | — |
+| 1 | Short Physical Performance Battery (SPPB) score | Sum of gait speed, 5-times sit-to-stand, and balance items, scored 0-12 (12=highest function) | Measured at NHATS in-person interview in 2011, prior to subsequent readmission events | 30-day all-cause readmission | association | Standardized β=−12.96 | 0.0114 | decreases | high | moderate 0.64 | Physical Frailty Phenotype (PFP); Chronic Conditions (8+ vs 0 to 7) |
+| 2 | Number of chronic conditions (8+ vs 0-7) | Count of 26 chronic conditions from Chronic Conditions Warehouse, dichotomized as 0-7 vs 8+ | Ascertained from claims data around NHATS administration (2011) | 30-day all-cause readmission | association | unverified | <.0001 | increases | low | moderate 0.64 | — |
+| … | | | | | | | | | | | |
+| 9 | SPPB discriminative ability | ROC curve analysis of SPPB total score predicting 30-day readmission | Baseline NHATS interview 2011 | 30-day all-cause readmission | association | AUC=0.61 (95% CI: 0.55, 0.67) | — | unclear | high | moderate 0.62 | — |
 
 Quoted from the paper, by row:
 
-1. …only aerobic exercise has proved to have a significant effect on CD4 (MD 79.91 cell/ml³ [CI 95% 19.30-140.52],=< 0.01).
+1. Conversely, each 1 unit increase in SPPB score contributed to a decrease in the odds of readmission (Standardized β=−12.96).
+2. Accounting for chronic conditions, the SPPB, PFP ordinal measure, and PFP categorical measure continued to demonstrate comparable predictive ability (R2=0.0870 vs. 0.0873 vs. 0.0823, respectively).
+9. The AUC associated with the SPPB was 0.61 (95% CI: 0.55, 0.67) and the AUC associated with PFP was 0.59 (95% CI: 0.53, 0.64).
+
+# Interactions
+
+| # | Predictor | Interacts with | Type | Magnitude | Evidence |
+|---|---|---|---|---|---|
+| 1 | Short Physical Performance Battery (SPPB) score | Physical Frailty Phenotype (PFP) | correlated | moderate | Spearman’s rho=0.43, p=<.0001 |
+| 1 | Short Physical Performance Battery (SPPB) score | Chronic Conditions (8+ vs 0 to 7) | confounded by | stated | — |
 
 # Null or non-significant findings
 
 | # | Predictor | Outcome | Detail |
 |---|---|---|---|
-| 1 | non-aerobic training modalities | CD4 count | no significant effect in the modality subgroup analysis |
+| 1 | Age | 30-day readmission | Age category was not a significant predictor of 30-day readmission in this sample |
+| … | | | |
+| 5 | SPPB and PFP score cut points | 30-day readmission (discrimination) | Neither SPPB nor PFP achieved acceptable discrimination (AUC<0.7) to identify individuals at high risk for readmission, even when restricted to shorter follow-up windows (180, 90, 60 days) |
 
 # Vocabulary hints
 
-- **CD4 count** — loinc `24467-3`
-- **aerobic exercise therapy** — mesh `D005081`
-- **high-intensity interval training**
+- **Short Physical Performance Battery (SPPB)**
+- **Fried Physical Frailty Phenotype (PFP)**
+- **Heart failure (chronic condition identification)**
+- **Chronic Conditions Warehouse comorbidity count**
+- **30-day all-cause hospital readmission**
+- **National Health and Aging Trends Study (NHATS)**
 
 # Caveats
 
-Pooled across trials with heterogeneous protocols and durations.
+Frailty/function were measured at a single baseline interview (not at hospitalization or discharge),
+and average time to readmission was ~190 days, so timing may not reflect risk near the index event;
+sample was underpowered for some demographic subgroups and 214 cases had missing frailty/function
+data and were excluded, with some evidence of differential attrition by race.
 ````
 
 Six things in this document carry the design:
 
-**Each feature row is followed by a quote: the exact sentence in the paper that reported the
-effect size and p-value**, copied verbatim rather than cleaned up — `=< 0.01` above is the
-paper's typo, not ours. It stays uncorrected because a deterministic pass re-derives the
-row's number from that quote to confirm the row is telling the truth, and a tidied quote wouldn't
-match the paper's actual wording. When the number really isn't in the source, that pass strips it,
-downgrades the row's confidence, and logs a warning.
+**Each feature row is followed by a quote: the exact sentence in the paper that reported the effect
+size and p-value**, copied verbatim rather than cleaned up, typos and all. It stays uncorrected
+because a deterministic pass re-derives the row's number from that quote to confirm the row is
+telling the truth, and a tidied quote wouldn't match the paper's actual wording. Row 2 above is what
+happens when the number isn't there to find: that pass strips it, so the `Effect` cell reads
+`unverified`, the row's confidence is downgraded to `low`, and a warning is logged — while the
+p-value and the quote both stay. An unconfirmed number is never printed, since printing it would
+undo the check in the one place a reader would look. An `Effect` of `—` means something different:
+that row never claimed a magnitude at all.
 
-**`# Null or non-significant findings` are always there.** If a paper reports none, a validator
-writes in the placeholder, so the section can't go missing by accident. "We looked and found
-nothing" is evidence, and almost nobody else records it.
+**`# Null or non-significant findings` are always there.** This paper reported five, but if one
+reports none a validator writes in the placeholder, so the section can't go missing by accident.
+"We looked and found nothing" is evidence, and almost nobody else records it.
 
-**Vocabulary hints pair features with clinical codes the paper associated with them** — "CD4
-count" sits next to the LOINC code `24467-3` above because the paper's own text contained that
-code. Nothing is looked up or guessed: a code an extraction claims but the source text doesn't
-contain is stripped out, while the variable name stays, since the paper really did use that term.
-Most papers describe their variables in plain language
-with no formal code at all, so "high-intensity interval training" above — plain, no code — is the
-normal case, not a lookup that failed.
+**Vocabulary hints pair features with clinical codes the paper associated with them.** Nothing is
+looked up or guessed: a code an extraction claims but the source text doesn't contain is stripped
+out, while the variable name stays, since the paper really did use that term. Not one of the six
+above carries a code, which is the normal case rather than a lookup that failed — most papers
+describe their variables in plain language. Where a paper does print one, it rides along on the same
+line, as ``**CD4 count** — loinc `24467-3` ``.
 
-**`Confidence` and `Strength` answer different questions.** Confidence measures whether the extraction read the row correctly. It starts high, but the same
-verification pass that checks quotes and numbers (described above) automatically lowers it
-whenever a row's number can't be confirmed in the source text. Strength is how much
-weight the study itself carries: design, sample size, confounder adjustment, and how much of the
-paper was read, banded into `strong` / `moderate` / `limited`. A well-read row from a forty-person
-survey is `high` confidence, `limited` strength — either column alone misleads. Strength is deterministically derived; sample size is judged against a scale in the charter,
-since a few hundred people is a large cohort in one field and a pilot in another.
+**`Confidence` and `Strength` answer different questions.** Confidence measures whether the
+extraction read the row correctly. It starts high, and the verification pass described above lowers
+it whenever a row's number can't be confirmed — which is why rows 1 and 2 sit at `high` and `low`
+while sharing a strength of `moderate 0.64`. Strength is how much weight the study itself carries:
+design, sample size, confounder adjustment, and how much of the paper was read, banded into
+`strong` / `moderate` / `limited`. A well-read row from a forty-person survey is `high` confidence,
+`limited` strength — either column alone misleads. Strength is deterministically derived; sample
+size is judged against a scale in the charter, since a few hundred people is a large cohort in one
+field and a pilot in another.
 
-**`Interacts with` names predictors that are not independent of each other.** The column is on every
-finding table and reads `—` when a paper reports nothing, which is the common case. Where it doesn't,
-an `# Interactions` section states each relationship on its own line — correlated, mutually exclusive,
-confounding, mediating, or derived from another variable — with how big it is and the evidence for it.
-That is a note for whoever selects features downstream, since two collinear predictors are two things
-a model should probably not carry separately. It says nothing about how good the study is; papers
-volunteer this far more often in full text than in an abstract.
+**`Interacts with` names predictors that are not independent of each other**, and `# Interactions`
+gives each relationship its own line. The column is on every finding table and reads `—` when a
+paper reports nothing, which is the common case; the section is then left out entirely rather than
+standing empty. Its `#` column points back at the finding table, so both lines above are claims
+about predictor 1 — one line per relationship rather than one per predictor, because a variable
+standing in two relationships is making two claims and a single merged cell would read as one.
+`Type` is one of six relationships — correlated, mutually exclusive, modifies, confounds, mediates,
+derived from — written in the direction it applies, which is why the second line reads `confounded
+by` rather than `confounds`. `Magnitude` is `strong`, `moderate` or `weak` where the paper gives a
+number that can be banded, `structural` where the relationship is true by construction, and `stated`
+where the paper asserts it in prose without one. `Evidence` carries the paper's own measure verbatim
+in all five cases. That is a note for whoever selects features downstream, since two collinear
+predictors are two things a model should probably not carry separately. It says nothing about how
+good the study is; papers volunteer this far more often in full text than in an abstract, which is
+why the example above is a full-text one.
 
-**`text_basis` and `license` are per document.** Most of PubMed is abstract-only under publisher
-copyright; a minority is open access. Recording which is which stops a reader from treating a claim
-pulled from an abstract like one pulled from full text. The `# Abstract` section carries the paper's
-own summary verbatim either way — for a full-text document it is the only place the authors' own
+**`text_basis` and `license` are per document.** This paper was read from the full text under an
+author manuscript license, but most of PubMed is abstract-only under publisher copyright and only a
+minority is open access. Recording which is which stops a reader from treating a claim pulled from
+an abstract like one pulled from full text. The `# Abstract` section carries the paper's own summary
+verbatim either way — for a full-text document like this one it is the only place the authors' own
 framing survives, and for an abstract-only one it is what everything above it was derived from, so a
 row that reads oddly can be checked against it without leaving the file. It is also the one section
 you can turn off, with [`--no-abstract`](#running-it).
 
-*(Example content from [PubMed](https://pubmed.ncbi.nlm.nih.gov/33745404/),
-[DOI 10.1080/09540121.2021.1902932](https://doi.org/10.1080/09540121.2021.1902932).)*
+*(Example content from [PubMed](https://pubmed.ncbi.nlm.nih.gov/31373945/),
+[DOI 10.1519/JPT.0000000000000243](https://doi.org/10.1519/JPT.0000000000000243).)*
 
 ### What recurs across sources
 
