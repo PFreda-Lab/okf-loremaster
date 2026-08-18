@@ -13,15 +13,26 @@ iCite is a network call, not a model call, so it runs on a dry run too. It is on
 request per five hundred PMIDs and it is what makes the citation component real rather
 than a prior. When it cannot be reached the node asks E-utilities for PubMed's own
 cited-by counts instead — a worse signal, and still a signal.
+
+**`--basis` is enforced here, before the screener, and that placement is the whole
+design.** Whether a paper is actually in the open-access subset is only knowable from a
+BioC response, and BioC is called in `fulltext` — which sits *after* `curate`, downstream
+of the only edge that can go back and search again. A shortfall discovered there is
+terminal, and it would have been paid for twice over: once in screening budget spent on
+papers that could never qualify, and once in a corpus that quietly comes up short of the
+charter's topic floors. Checking availability at the tail of this node costs at most
+`pool_size` requests, they are cached so `fulltext` re-reads them for free, and a
+shortfall is still somewhere the re-query edge can do something about.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from okf_loremaster.graph.state import Deps, RunState, span
 from okf_loremaster.ranking import quota_select, score_all, selection_diff
-from okf_loremaster.schemas import Candidate
+from okf_loremaster.schemas import Candidate, ScoredCandidate, TextBasisPolicy
 
 __all__ = ["rank_node"]
 
@@ -42,6 +53,7 @@ async def rank_node(state: RunState, deps: Deps) -> dict[str, Any]:
             now_year=deps.now_year,
             min_year=charter.min_year if charter is not None else None,
         )
+        scored = await _apply_basis(deps, scored, warnings)
         pure = scored[: deps.pool_size]
         pool = quota_select(
             scored,
@@ -58,6 +70,99 @@ async def rank_node(state: RunState, deps: Deps) -> dict[str, Any]:
         )
 
     return {"scored": scored, "pool": pool, "comparison": comparison, "warnings": warnings}
+
+
+async def _apply_basis(
+    deps: Deps, scored: list[ScoredCandidate], warnings: list[str]
+) -> list[ScoredCandidate]:
+    """Narrow the ranked corpus to what `--basis` says the run is willing to read.
+
+    A no-op on the default, which is why the default costs nothing.
+
+    Under `abstract`, one filter and no network: a paper PubMed serves no abstract for
+    cannot be read abstract-only, and extracting it anyway produces a document whose
+    every field failed verification against the string `(no abstract available)`.
+
+    Under `full-text`, two passes. A PMC id is necessary and nowhere near sufficient —
+    most PMC-linked papers are not in the open-access subset — so the free filter runs
+    first and BioC is asked only about what survives it, top-ranked first and never more
+    than `pool_size` of them. Availability is read off the body, never off the status
+    code: BioC answers "not open access" with HTTP 200 and a plain-text `[Error]`, which
+    `fetch` already turns into `None`.
+
+    A request that *fails* is not an answer, so the paper is kept. Losing a genuinely
+    open-access paper to one timeout would be a silent, permanent hole in the corpus,
+    where keeping it costs only a paper that falls back to its abstract in `fulltext` —
+    and `text_basis` in the bundle says so, per document.
+    """
+    if deps.basis is TextBasisPolicy.ANY or not scored:
+        return scored
+
+    if deps.basis is TextBasisPolicy.ABSTRACT:
+        kept = [entry for entry in scored if entry.candidate.has_abstract]
+        _warn_shortfall(deps, warnings, kept=len(kept), of=len(scored), what="an abstract")
+        return kept
+
+    linked = [entry for entry in scored if entry.candidate.may_have_full_text]
+    checked, unchecked = linked[: deps.pool_size], linked[deps.pool_size :]
+    if unchecked:
+        # Said out loud rather than left implicit. A bounded check that reads as an
+        # exhaustive one is how a corpus comes up short for a reason nobody can find.
+        note = (
+            f"--basis full-text checked open-access availability for the top "
+            f"{len(checked)} PMC-linked paper(s) of {len(linked)}; the remaining "
+            f"{len(unchecked)} were ranked too low to reach the pool and were dropped "
+            f"unchecked"
+        )
+        warnings.append(note)
+        deps.warn(NODE, note)
+
+    deps.progress(NODE, f"open-access check for {len(checked)} papers")
+    available = await _open_access(deps, checked)
+    _warn_shortfall(
+        deps, warnings, kept=len(available), of=len(scored), what="open-access full text"
+    )
+    return available
+
+
+async def _open_access(deps: Deps, scored: list[ScoredCandidate]) -> list[ScoredCandidate]:
+    """The subset BioC will actually serve full text for, in ranked order.
+
+    One request per paper, all at once — the shared NCBI limiter decides how many are in
+    flight, and it is the same limiter and the same client `fulltext` uses, so the
+    responses are already in the HTTP cache when that node asks for them again.
+    """
+    if not scored:
+        return []
+
+    async def available(entry: ScoredCandidate) -> bool:
+        try:
+            return await deps.clients.bioc.fetch(entry.candidate.pmcid or "", node=NODE) is not None
+        except Exception:
+            return True
+
+    verdicts = await asyncio.gather(*(available(entry) for entry in scored))
+    return [entry for entry, ok in zip(scored, verdicts, strict=True) if ok]
+
+
+def _warn_shortfall(
+    deps: Deps, warnings: list[str], *, kept: int, of: int, what: str
+) -> None:
+    """Say what the policy cost, always, even when it cost nothing worth noticing.
+
+    A restricted basis is the user's decision and this does not second-guess it. What it
+    refuses to do is let the decision be invisible: a corpus of 60 papers where 200 were
+    asked for looks like a thin literature unless something says it was a filter.
+    """
+    if kept == of:
+        return
+    note = (
+        f"--basis {deps.basis.value} kept {kept} of {of} ranked paper(s) — the rest have "
+        f"no {what}. Topic floors and the paper target are measured against what is left, "
+        f"so both may come up short of a default run on the same searches"
+    )
+    warnings.append(note)
+    deps.warn(NODE, note)
 
 
 async def _enrich(

@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import pairwise
 from pathlib import Path
 
 import yaml
@@ -43,6 +44,7 @@ from okf_loremaster.okf.layout import (
     INDEX_FILENAME,
     LOG_FILENAME,
     PREDICTORS_FILENAME,
+    REQUIRED_BODY_SECTIONS,
     RESERVED_FILENAMES,
     SEARCH_FILENAME,
     vector_store_path,
@@ -354,17 +356,66 @@ def _check_frontmatter_text(document: OkfDocument, findings: list[Finding]) -> N
 
 
 def _check_sections(document: OkfDocument, findings: list[Finding]) -> None:
+    """Three separate questions about a document's headings, answered separately.
+
+    This once compared the heading list to `BODY_SECTIONS` for equality, which conflated
+    all three and made adding an optional section impossible: `# Abstract` is absent from
+    the one PubMed record in ten that has none, `# Interactions` is absent from most
+    papers, and a bundle written before either existed is still a deliverable someone is
+    reading. So instead:
+
+    - **Unknown headings are an error.** A heading nobody wrote is corruption — untrusted
+      publisher text that opened with `# `, or a hand edit — and it is the one case where
+      a strict check earns its keep.
+    - **Order is an error.** An agent reading forty documents relies on the same question
+      being in the same place, and a document with five sections and one with seven still
+      agree on the order of the five they share.
+    - **Presence is required only for `REQUIRED_BODY_SECTIONS`.** The five whose absence
+      would itself be a missing finding.
+
+    Emptiness is still checked for every section present, unchanged: an absent finding and
+    an unwritten section are different claims, and a heading over nothing makes them one.
+    """
     headings = [name for name, _ in document.sections()]
-    if headings != list(BODY_SECTIONS):
+    known = set(BODY_SECTIONS)
+
+    unknown = [name for name in headings if name not in known]
+    if unknown:
         findings.append(
             Finding(
                 Severity.ERROR,
-                f"body sections are {headings or ['none']}, expected "
-                f"{list(BODY_SECTIONS)} in that order",
+                f"body sections include {unknown}, which this format does not define; "
+                f"the defined sections are {list(BODY_SECTIONS)}",
                 document.path,
             )
         )
-        return
+
+    # Strictly increasing, so one test catches a section out of place and a section
+    # written twice. A duplicate would otherwise sort as ordered and pass, leaving two
+    # `# Predictors reported` tables in one file for a reader to choose between.
+    ordered = [name for name in headings if name in known]
+    places = [BODY_SECTIONS.index(name) for name in ordered]
+    if any(here >= there for here, there in pairwise(places)):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                f"body sections are {ordered or ['none']}, which is out of order or "
+                f"repeats one; the order is {list(BODY_SECTIONS)}",
+                document.path,
+            )
+        )
+
+    missing = [name for name in REQUIRED_BODY_SECTIONS if name not in headings]
+    if missing:
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                f"body sections are missing {missing}; every document carries "
+                f"{list(REQUIRED_BODY_SECTIONS)}",
+                document.path,
+            )
+        )
+
     for name, text in document.sections():
         if not text.strip():
             findings.append(

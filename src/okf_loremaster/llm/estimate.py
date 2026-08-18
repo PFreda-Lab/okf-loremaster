@@ -29,7 +29,7 @@ from okf_loremaster.prompts import (
     extract_context,
     screen_context,
 )
-from okf_loremaster.schemas import MAX_SOURCE_CHARS, Candidate, Charter
+from okf_loremaster.schemas import MAX_SOURCE_CHARS, Candidate, Charter, TextBasisPolicy
 
 __all__ = ["NodeEstimate", "SpendEstimate", "estimate_tokens", "project_spend"]
 
@@ -76,6 +76,35 @@ OPEN_ACCESS_RATE = 0.6
 def estimate_tokens(text: str) -> int:
     """Approximate token count for a string."""
     return int(len(text) / CHARS_PER_TOKEN) + 1
+
+
+def _full_text_share(policy: TextBasisPolicy, *, with_pmcid: int, of: int) -> float:
+    """Share of the pool extraction will read as full text rather than as an abstract.
+
+    A guess only on the default. `ABSTRACT` never calls BioC at all, and `FULL_TEXT` has
+    already had every paper's availability confirmed in `rank` — so both are facts about
+    this pool rather than a rate applied to a proxy.
+    """
+    if policy is TextBasisPolicy.ABSTRACT:
+        return 0.0
+    if policy is TextBasisPolicy.FULL_TEXT:
+        return 1.0
+    return (with_pmcid / of * OPEN_ACCESS_RATE) if of else 0.0
+
+
+def _source_basis(policy: TextBasisPolicy, *, with_pmcid: int) -> str:
+    """How the extraction line explains the source length it assumed."""
+    if policy is TextBasisPolicy.ABSTRACT:
+        return "every one read from its abstract by `--basis abstract`"
+    if policy is TextBasisPolicy.FULL_TEXT:
+        return (
+            f"every one read from open-access full text by `--basis full-text`, at "
+            f"{FULL_TEXT_MULTIPLE:.0f}x abstract length"
+        )
+    return (
+        f"{with_pmcid} carry a PMC id, of which {OPEN_ACCESS_RATE:.0%} assumed open "
+        f"access at {FULL_TEXT_MULTIPLE:.0f}x abstract length"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,12 +220,18 @@ def project_spend(
     screen_budget: int,
     target_papers: int,
     charter_was_generated: bool = True,
+    basis: TextBasisPolicy = TextBasisPolicy.ANY,
 ) -> SpendEstimate:
     """Project the cost of the nodes a full run would still have to pay for.
 
     `pool` is the ranked candidate pool, already retrieved. Its abstracts are what make
     this a measurement rather than a guess: screening cost is dominated by abstract
     length, and abstract length varies by a factor of five across the literature.
+
+    `basis` removes the projection's largest unknown rather than adjusting it. Under
+    either restricted policy `rank` has already dropped every paper that cannot satisfy
+    it, so the share of the pool that will be read as full text is not `OPEN_ACCESS_RATE`
+    applied to a PMC-id count — it is none of them or all of them, and known.
     """
     nodes: list[NodeEstimate] = []
     notes: list[str] = []
@@ -326,7 +361,7 @@ def project_spend(
             else 250
         )
         with_pmcid = sum(1 for c in sample if c.may_have_full_text)
-        full_text_share = (with_pmcid / len(sample) * OPEN_ACCESS_RATE) if sample else 0.0
+        full_text_share = _full_text_share(basis, with_pmcid=with_pmcid, of=len(sample))
         # The truncation `fulltext` applies is part of the price, so it is part of the
         # projection: without the cap a corpus of long reviews projects several times
         # what the run can actually spend.
@@ -357,18 +392,27 @@ def project_spend(
             prompt_tokens=retained * (prefix + per_paper),
             completion_tokens=retained * EXTRACT_COMPLETION_ALLOWANCE,
             basis=(
-                f"{retained} papers on a {prefix}-token shared prefix; {with_pmcid} carry "
-                f"a PMC id, of which {OPEN_ACCESS_RATE:.0%} assumed open access at "
-                f"{FULL_TEXT_MULTIPLE:.0f}x abstract length, capped at "
+                f"{retained} papers on a {prefix}-token shared prefix; "
+                f"{_source_basis(basis, with_pmcid=with_pmcid)}, capped at "
                 f"{int(MAX_SOURCE_CHARS / CHARS_PER_TOKEN):,} tokens of source"
             ),
         )
 
-    notes.append(
-        "a projection, not a quote: token counts are a 4-characters-per-token "
-        "approximation, and how much full text a run actually reaches is the single "
-        "largest thing it cannot know in advance"
-    )
+    if basis is TextBasisPolicy.ANY:
+        notes.append(
+            "a projection, not a quote: token counts are a 4-characters-per-token "
+            "approximation, and how much full text a run actually reaches is the single "
+            "largest thing it cannot know in advance"
+        )
+    else:
+        # The same caveat minus the part `--basis` settled. Leaving the original in would
+        # hedge about a number this run does not have to guess, and a projection that
+        # disclaims what it knows is as misleading as one that overclaims.
+        notes.append(
+            f"a projection, not a quote: token counts are a 4-characters-per-token "
+            f"approximation. `--basis {basis.value}` fixes what each paper is read from, "
+            f"so the usual open-access guess does not enter this figure"
+        )
     notes.append(
         "a re-query round, if a topic comes up short, adds at most one curation call "
         "per thin topic — screening is bounded by the budget above whatever happens"

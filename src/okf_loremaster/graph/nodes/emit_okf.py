@@ -105,6 +105,9 @@ def manifest_for(
         queries=list(state.get("executed") or []),
         retmax=deps.per_query_retmax,
         sort=ESEARCH_SORT,
+        # From state, not from `deps`. The two agree on a fresh run and can disagree on a
+        # resumed one, and state is the one that was in force when the corpus was chosen.
+        text_basis_policy=str(state.get("basis") or ""),
         cost=_cost(deps),
         stale_after=None,
         warnings=list(state.get("warnings") or []),

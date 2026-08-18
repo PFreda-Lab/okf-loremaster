@@ -31,6 +31,7 @@ from okf_loremaster.okf.layout import (
     LOG_FILENAME,
     PREDICTOR_INDEX_TYPE,
     PREDICTORS_FILENAME,
+    REQUIRED_BODY_SECTIONS,
     SEARCH_FILENAME,
     SEARCH_STRATEGY_TYPE,
     UNVERIFIED_CELL,
@@ -186,14 +187,29 @@ async def test_the_required_pair_is_present_on_every_document(
 # --- the body ---------------------------------------------------------------
 
 
-async def test_the_five_sections_are_always_present_in_order(
+async def test_the_required_sections_are_always_present_in_order(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Five sections every document has, two more it may have, and one order for all of
+    them.
+
+    `# Abstract` and `# Interactions` are omitted when there is nothing to put in them —
+    a paper PubMed served no abstract for, and the common case of a study reporting no
+    interaction between its own predictors. The five that are required are required
+    because an absent one and an empty one are different claims about the paper.
+    """
     _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
 
     for document in read_bundle(bundle).documents():
         headings = [name for name, _ in document.sections()]
-        assert headings == list(BODY_SECTIONS), document.path.name
+        assert set(headings) <= set(BODY_SECTIONS), document.path.name
+        assert set(REQUIRED_BODY_SECTIONS) <= set(headings), document.path.name
+        # Present or absent, never reordered: the order is what makes the file scannable
+        # in the same shape every time, and a reader who learns it should not have to
+        # re-learn it per document.
+        assert headings == [name for name in BODY_SECTIONS if name in headings], (
+            document.path.name
+        )
         for _name, text in document.sections():
             assert text.strip(), document.path.name
 

@@ -49,6 +49,7 @@ from okf_loremaster.schemas import (
     RunManifest,
     ScoredCandidate,
     ScreenVerdict,
+    TextBasisPolicy,
     VerificationSummary,
 )
 
@@ -71,6 +72,13 @@ class RunState(TypedDict, total=False):
     # The run folder, as a string because this is checkpointed. Recorded so a resume
     # without `-o` writes where the run already was — see `run.run_directory`.
     directory: str
+    # `--basis`, as its plain string value. In state and not only on `Deps` because it is
+    # a claim the bundle makes about itself: "every paper here is abstract-only" means
+    # one thing when it was asked for and another when it is what the literature had, and
+    # only the manifest can tell them apart. A resume reads it back rather than taking
+    # the flag again, so a bundle cannot report a policy its corpus was not chosen under.
+    # A string rather than the enum so nothing has to join the checkpoint allowlist.
+    basis: str
 
     # charter
     charter: Charter | None
@@ -169,6 +177,12 @@ class Deps:
 
     pool_size: int = 800
     screen_budget: int = 400
+    # Which papers a run is willing to read, and how. `ANY` — the default — takes full
+    # text where the open-access subset has it and the abstract everywhere else, which is
+    # what makes a corpus of 200 papers affordable. The other two restrict the corpus
+    # rather than merely the reading: see `rank` for the availability pass that enforces
+    # `FULL_TEXT`, and `fulltext` for the BioC call `ABSTRACT` skips.
+    basis: TextBasisPolicy = TextBasisPolicy.ANY
     max_queries: int = 12
     # Search rounds allowed, including the first. Capped at `MAX_ROUNDS` by the CLI;
     # 1 turns the conditional re-query edge off entirely.
@@ -220,6 +234,7 @@ def initial_state(
     dry_run: bool = False,
     charter: Charter | None = None,
     directory: str = "",
+    basis: TextBasisPolicy = TextBasisPolicy.ANY,
 ) -> RunState:
     return RunState(
         run_id=run_id,
@@ -227,6 +242,7 @@ def initial_state(
         dry_run=dry_run,
         started_at=datetime.now(UTC),
         directory=directory,
+        basis=basis.value,
         charter=charter,
         warnings=[],
     )

@@ -40,19 +40,28 @@ from typing import Any
 import yaml
 
 from okf_loremaster import __version__
+from okf_loremaster.interactions import fold_variable, interaction_rows, variable_rows
 from okf_loremaster.okf.frontmatter import render, stamp
 from okf_loremaster.okf.layout import (
+    ABSTRACT_SECTION,
     BODY_SECTIONS,
+    BOTTOM_LINE_SECTION,
     CATALOG_FILENAME,
+    CAVEATS_SECTION,
     CHARTER_FILENAME,
     DESCRIPTOR_FILENAME,
     DOCUMENT_TYPE,
     INDEX_FILENAME,
+    INTERACTION_COLUMNS,
+    INTERACTION_SEPARATOR,
+    INTERACTIONS_SECTION,
     LOG_FILENAME,
     NONE_CELL,
+    NULL_FINDINGS_SECTION,
     PREDICTOR_COLUMNS,
     PREDICTOR_INDEX_TYPE,
     PREDICTORS_FILENAME,
+    PREDICTORS_SECTION,
     QUOTE_LEAD,
     ROOT_INDEX_TYPE,
     SEARCH_FILENAME,
@@ -60,6 +69,7 @@ from okf_loremaster.okf.layout import (
     SITE_COLUMNS,
     TOPIC_INDEX_TYPE,
     UNVERIFIED_CELL,
+    VOCABULARY_SECTION,
 )
 from okf_loremaster.okf.markdown import facts, inline, table_row, table_rule
 from okf_loremaster.recurrence import MIN_PAPERS, index_predictors
@@ -68,6 +78,7 @@ from okf_loremaster.schemas import (
     ConceptRecord,
     ExecutedQuery,
     Extraction,
+    Interaction,
     NullFinding,
     OutcomeGroup,
     PaperStrength,
@@ -78,6 +89,7 @@ from okf_loremaster.schemas import (
     SourceRef,
     StrengthGrade,
     TextBasis,
+    TextBasisPolicy,
 )
 from okf_loremaster.verification import quantities_in
 
@@ -92,6 +104,7 @@ __all__ = [
     "document_for",
     "effect_cell",
     "frontmatter_for",
+    "interaction_cell",
     "log_markdown",
     "predictor_index",
     "root_index",
@@ -327,18 +340,96 @@ def _author_line(authors: Sequence[str]) -> str:
 
 
 def body_for(record: ConceptRecord) -> str:
-    """The five sections, in order, every one of them non-empty."""
+    """The document body, in `BODY_SECTIONS` order, every section written non-empty.
+
+    Five sections are unconditional and each has a stated fallback — "None reported",
+    "None stated" — because their absence is itself a finding a reader needs. `# Abstract`
+    and `# Interactions` are the two that may be missing entirely: a heading over nothing
+    is worse than no heading, and both are missing on ordinary papers rather than
+    exceptional ones. Roughly one PubMed record in ten carries no abstract, and most
+    papers state no interaction at all — the predictor table's `Interacts with` column is
+    already where "none" gets said, blank, on every row.
+
+    Order is fixed and skipping never disturbs it, which is what the validator checks: a
+    document with five sections and one with seven agree on the order of the five they
+    share.
+    """
     extraction = record.extraction
-    sections = (
-        _bottom_line(record),
-        _predictors(record),
-        _null_findings(extraction),
-        _vocabulary(extraction),
-        extraction.caveats.strip() or "None stated.",
-    )
+    written = {
+        BOTTOM_LINE_SECTION: _bottom_line(record),
+        ABSTRACT_SECTION: _abstract(record),
+        PREDICTORS_SECTION: _predictors(record),
+        INTERACTIONS_SECTION: _interactions(extraction),
+        NULL_FINDINGS_SECTION: _null_findings(extraction),
+        VOCABULARY_SECTION: _vocabulary(extraction),
+        CAVEATS_SECTION: extraction.caveats.strip() or "None stated.",
+    }
     return "\n\n".join(
-        f"# {heading}\n\n{text}" for heading, text in zip(BODY_SECTIONS, sections, strict=True)
+        f"# {heading}\n\n{written[heading]}"
+        for heading in BODY_SECTIONS
+        if written[heading].strip()
     ) + "\n"
+
+
+def _abstract(record: ConceptRecord) -> str:
+    """`# Abstract` — the publisher's own words, copied and never summarized.
+
+    Verbatim is what makes it worth having: an agent that has read the bottom line and
+    wants the authors' own framing before the tables gets the framing rather than our
+    compression of it, and nothing here can drift from the source because nothing here
+    was rewritten. It is also the only block in a bundle we did not write, which is why
+    `is_export_safe` already reads false for every abstract-only record — PubMed serves an
+    abstract with no license attached, so redistributing a corpus of them is a decision
+    for whoever redistributes it and not one this tool can make on their behalf.
+
+    Structured abstracts arrive from E-utilities as `Label: body` paragraphs and are kept
+    that way, because the Methods/Results distinction is exactly what a reader checking an
+    extracted row against the source is looking for.
+
+    A paragraph opening with `# ` is escaped. `reader.body_sections` splits on that
+    sequence at the start of a line, so untrusted text carrying one would silently become
+    a heading, and the document would then fail its own validator on a section nobody
+    wrote. Rare enough to never see, cheap enough to make impossible.
+    """
+    paragraphs = [inline(part) for part in record.abstract.strip().split("\n\n")]
+    return "\n\n".join(
+        f"\\{part}" if part.startswith("# ") else part for part in paragraphs if part
+    )
+
+
+def _interactions(extraction: Extraction) -> str:
+    """`# Interactions` — one line per claim, keyed to the predictor table's `#`.
+
+    One line per interaction rather than one per row: a predictor standing in three
+    relationships is making three claims, and merging them into a cell makes them one.
+
+    Empty, and so omitted whole, when no row states an interaction. That is most papers.
+    """
+    rows = extraction.predictors
+    by_name = variable_rows(rows)
+    lines: list[str] = []
+    for number, row in enumerate(rows, start=1):
+        for interaction in interaction_rows(row):
+            # 0 when the named variable is not a row here, which is what
+            # `interaction_cell` reads as "no row to point back at".
+            origin = by_name.get(fold_variable(interaction.feature), -1) + 1
+            lines.append(
+                table_row(
+                    (
+                        str(number),
+                        row.predictor,
+                        interaction.feature,
+                        interaction.kind.label,
+                        interaction.magnitude.value,
+                        interaction_cell(interaction, stated_on=origin),
+                    )
+                )
+            )
+    if not lines:
+        return ""
+    return "\n".join(
+        [table_row(INTERACTION_COLUMNS), table_rule(len(INTERACTION_COLUMNS)), *lines]
+    )
 
 
 def _bottom_line(record: ConceptRecord) -> str:
@@ -419,6 +510,7 @@ def _predictors(record: ConceptRecord) -> str:
                     row.direction.value,
                     row.confidence.value,
                     strength_cell(strength),
+                    _interacts_cell(row),
                 )
             )
         )
@@ -448,6 +540,54 @@ def effect_cell(row: PredictorRow) -> str:
     # No numbers left to have been removed, so this is the extractor's own words about
     # a paper that reported no magnitude — not something a check took away.
     return row.effect_raw if not quantities_in(row.effect_raw) else UNVERIFIED_CELL
+
+
+def _interacts_cell(row: PredictorRow) -> str:
+    """The predictor table's `Interacts with` cell: names, and nothing else.
+
+    A pointer at `# Interactions`, not a summary of it. The type and the coefficient are
+    what a reader needs in order to act on an interaction, they do not fit in a cell
+    beside ten other columns, and a table that answers the question is a table nobody
+    scrolls past to the section that answers it properly.
+
+    Blank — `NONE_CELL`, via `cell` — on most rows, which is the expected case rather than
+    a gap. Interactions are rare, and a column of dashes says so honestly.
+    """
+    return INTERACTION_SEPARATOR.join(
+        interaction.feature for interaction in interaction_rows(row) if interaction.feature
+    )
+
+
+def interaction_cell(interaction: Interaction, stated_on: int = 0) -> str:
+    """What goes in the `# Interactions` table's Evidence column.
+
+    The same three outcomes as `effect_cell`, distinguished the same way and for the same
+    reason: a coefficient verification kept, a coefficient it removed, and a relationship
+    the paper described without measuring. Collapsing the last two would hide exactly what
+    the verification pass exists to expose.
+
+    A mirrored line says so and points at the row that stated it, because the paper wrote
+    the claim once and from one side. `stated_on` is that row's `#`, or 0 when the mirror
+    came from a variable that is not itself a row here — which `mirror_interactions` makes
+    impossible, and which is handled anyway rather than printed as `row 0`.
+    """
+    if interaction.value is not None:
+        measure = f"{interaction.measure}=" if interaction.measure else ""
+        base = interaction.measure_raw or f"{measure}{interaction.value:g}"
+    elif not interaction.measure_raw.strip():
+        base = NONE_CELL
+    else:
+        # No numbers left to have been removed, so this is the extractor's own words about
+        # a relationship the paper never quantified — not something a check took away.
+        base = (
+            interaction.measure_raw
+            if not quantities_in(interaction.measure_raw)
+            else UNVERIFIED_CELL
+        )
+    if not interaction.mirrored:
+        return base
+    origin = f"mirrored from row {stated_on}" if stated_on > 0 else "mirrored"
+    return origin if base == NONE_CELL else f"{base} ({origin})"
 
 
 def strength_cell(strength: PaperStrength | RowStrength | None) -> str:
@@ -638,6 +778,10 @@ def root_index(
             ("Tool", manifest.tool_version),
             ("Charter digest", manifest.charter_digest),
             ("Models", ", ".join(f"{role}: {name}" for role, name in manifest.models.items())),
+            # Beside the corpus funnel it explains. A run under a restricted basis drops
+            # papers before screening, so the funnel's own numbers look like a thin
+            # literature unless this line says a filter ran.
+            ("Read from", _basis_policy(manifest)),
             ("Stale after", manifest.stale_after.isoformat() if manifest.stale_after else ""),
             ("Signed off by", manifest.verified_by),
         ]
@@ -828,6 +972,10 @@ def log_markdown(charter: Charter, manifest: RunManifest, *, verification: str =
             ("Started", stamp(manifest.started_at) if manifest.started_at else ""),
             ("Finished", stamp(manifest.finished_at) if manifest.finished_at else ""),
             ("Duration", _duration(manifest)),
+            # Under Request rather than under Stages, because it is something that was
+            # asked for and not something that happened. What happened to each paper as a
+            # result is the full-text-versus-abstract split in the stage counts.
+            ("Read from", _basis_policy(manifest)),
         ]
     )
 
@@ -1194,6 +1342,12 @@ def descriptor(
         payload["stale_after"] = manifest.stale_after.isoformat()
     if manifest.verified_by:
         payload["verified_by"] = manifest.verified_by
+    # Only when a policy narrowed the corpus. A consumer attaching this bundle is deciding
+    # how much to trust it, and "every document here is abstract-only because we asked for
+    # that" is a different answer to that question than "because that is what was open
+    # access" — which is all the per-document `text_basis` can say.
+    if _basis_policy(manifest):
+        payload["text_basis_policy"] = manifest.text_basis_policy
     return str(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, width=100))
 
 
@@ -1219,6 +1373,21 @@ def catalog_row(record: ConceptRecord) -> dict[str, Any]:
 
 
 # --- rendering helpers ------------------------------------------------------
+
+
+def _basis_policy(manifest: RunManifest) -> str:
+    """What the run was told to read, in English, or nothing at all.
+
+    Empty for a bundle built before `--basis` existed and for one that took what it
+    could get, and empty is right in both cases: `any` is the absence of a restriction,
+    and a line saying so on every default bundle would train readers to skip the one
+    place the two deliberate policies announce themselves.
+    """
+    try:
+        policy = TextBasisPolicy(manifest.text_basis_policy)
+    except ValueError:
+        return ""
+    return "" if policy is TextBasisPolicy.ANY else policy.label
 
 
 def _funnel(manifest: RunManifest) -> list[tuple[str, int]]:

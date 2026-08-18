@@ -123,6 +123,15 @@ class RunManifest(Model):
     # them; if that ever stops being true these move onto `ExecutedQuery`.
     retmax: int = 0
     sort: str = ""
+
+    # The `--basis` value the run was built under, as typed. Recorded because the
+    # per-paper `text_basis` cannot answer the question a reader actually has: a bundle
+    # where every document says `abstract` is a thin corpus if that is all PMC served and
+    # a deliberate one if it was asked for, and only this line tells them apart. Empty for
+    # a bundle built before the flag existed, which read whatever it could get — the same
+    # thing `any` means, and left empty rather than backfilled because a manifest should
+    # not claim a decision nobody made.
+    text_basis_policy: str = ""
     cost: CostSummary = Field(default_factory=CostSummary)
 
     # Resolved at index time, not read from config: the descriptor has to name the

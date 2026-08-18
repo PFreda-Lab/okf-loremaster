@@ -231,6 +231,7 @@ okf-loremaster build "<your question>" -o my-corpus  # do it
 | `--interactive`, `-i` | off | stop at the charter, and again at the pool |
 | `--review` | off | sign the bundle off by hand before it is written |
 | `--tui` | off | full-screen interface |
+| `--basis any\|abstract\|full-text` | `any` | what each paper is read from; `full-text` keeps only open-access papers |
 | `--target-papers` | 200 | 120–250 is a browsability ceiling, not a recall target |
 | `--topic-paper-min` / `--topic-paper-max` | 8 / 40 | papers inside one topic folder |
 | `--max-topics` | 8 | how many topic folders the review is divided into |
@@ -239,6 +240,15 @@ okf-loremaster build "<your question>" -o my-corpus  # do it
 | `--max-rounds` | 2 | search rounds; `1` disables the re-query of thin topics |
 | `--resume <id>` | — | pick a run back up; see [Stopping and resuming](#stopping-and-resuming) |
 | `--json`, `-v` | — | machine-readable events, verbosity |
+
+`--basis` decides what a paper is read from. The default, `any`, takes open-access full text where it
+exists and the abstract otherwise — the mix most corpora come back as, since most of PubMed is
+abstract-only. `abstract` reads every paper the same way, so no document is deeper than any other and
+nothing is dropped for being paywalled. `full-text` keeps only papers whose full text is open access:
+a smaller, slower, more expensive corpus that answers more per document, because the things papers say
+about how their variables relate live in results and discussion sections that abstracts don't carry.
+Whichever you pick, each document records what it actually got in `text_basis`, and under `any` the
+bundle stays silent about policy rather than claiming one.
 
 The three topic flags multiply. `--max-topics` × `--topic-paper-min` is the smallest corpus the
 taxonomy can hold and `--max-topics` × `--topic-paper-max` the largest, so `--target-papers` outside
@@ -407,11 +417,16 @@ intensities did not.
 - **Read from** — the abstract only
 - **Evidence strength** — moderate (0.66) — nothing to score on size or adjustment
 
+# Abstract
+
+Physical exercise is recommended for people living with HIV, but the effect of modality and
+intensity on immunological markers remains unclear. …
+
 # Predictors reported
 
-| # | Predictor | Operationalization | Timing | Outcome | Type | Effect | p | Direction | Confidence | Strength |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | aerobic training | modality subgroup, pooled mean difference vs. control | measured after the training period | CD4 count | intervention | 79.91 cells/mm³ (95% CI 19.30-140.52) | ≤0.01 | increases | high | moderate 0.62 |
+| # | Predictor | Operationalization | Timing | Outcome | Type | Effect | p | Direction | Confidence | Strength | Interacts with |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | aerobic training | modality subgroup, pooled mean difference vs. control | measured after the training period | CD4 count | intervention | 79.91 cells/mm³ (95% CI 19.30-140.52) | ≤0.01 | increases | high | moderate 0.62 | — |
 
 Quoted from the paper, by row:
 
@@ -434,7 +449,7 @@ Quoted from the paper, by row:
 Pooled across trials with heterogeneous protocols and durations.
 ````
 
-Five things in this document carry the design:
+Six things in this document carry the design:
 
 **Each feature row is followed by a quote: the exact sentence in the paper that reported the
 effect size and p-value**, copied verbatim rather than cleaned up — `=< 0.01` above is the
@@ -463,9 +478,20 @@ paper was read, banded into `strong` / `moderate` / `limited`. A well-read row f
 survey is `high` confidence, `limited` strength — either column alone misleads. Strength is deterministically derived; sample size is judged against a scale in the charter,
 since a few hundred people is a large cohort in one field and a pilot in another.
 
+**`Interacts with` names predictors that are not independent of each other.** The column is on every
+finding table and reads `—` when a paper reports nothing, which is the common case. Where it doesn't,
+an `# Interactions` section states each relationship on its own line — correlated, mutually exclusive,
+confounding, mediating, or derived from another variable — with how big it is and the evidence for it.
+That is a note for whoever selects features downstream, since two collinear predictors are two things
+a model should probably not carry separately. It says nothing about how good the study is; papers
+volunteer this far more often in full text than in an abstract.
+
 **`text_basis` and `license` are per document.** Most of PubMed is abstract-only under publisher
 copyright; a minority is open access. Recording which is which stops a reader from treating a claim
-pulled from an abstract like one pulled from full text.
+pulled from an abstract like one pulled from full text. The `# Abstract` section carries the paper's
+own summary verbatim either way — for a full-text document it is the only place the authors' own
+framing survives, and for an abstract-only one it is what everything above it was derived from, so a
+row that reads oddly can be checked against it without leaving the file.
 
 *(Example content from [PubMed](https://pubmed.ncbi.nlm.nih.gov/33745404/),
 [DOI 10.1080/09540121.2021.1902932](https://doi.org/10.1080/09540121.2021.1902932).)*
@@ -743,7 +769,8 @@ replacement for the source. Every statement has an address you can go to.
 
 What we don't do is reproduce the article. `license` records what the source reported, verbatim and
 never inferred, and `export_safe` says whether the document may leave. From a paper under publisher
-copyright, only the quoted spans an extracted number came from cross into the bundle.
+copyright, what crosses into the bundle is its abstract and the spans quoted under each row — never
+the article, and `export_safe` is what says whether even that may be redistributed.
 
 ---
 
@@ -818,7 +845,7 @@ copyright and are not redistributable — the normal case, not a failure.
 
 ## Status
 
-Runs end to end and writes a validated bundle. 1,636 tests, none of which touch the network.
+Runs end to end and writes a validated bundle. 1,692 tests, none of which touch the network.
 
 ```bash
 conda run -n okf-loremaster pytest

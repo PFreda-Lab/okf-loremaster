@@ -17,6 +17,7 @@ from __future__ import annotations
 from okf_loremaster.schemas.charter import MAX_TOPIC_SCOPE_CHARS
 from okf_loremaster.schemas.limits import (
     MAX_DESCRIPTION_CHARS,
+    MAX_INTERACTIONS,
     MAX_NULL_FINDINGS,
     MAX_PREDICTOR_ROWS,
     MAX_QUOTE_WORDS,
@@ -402,6 +403,32 @@ unknown, so it costs a paper nothing to be honest here.
 came from, copied exactly as the text above prints them. Not the whole sentence. Enough \
 words to pick that sentence out from every other sentence in the paper, and no more — \
 the rest of it is retrieved from the source afterward and added for you.
+  - `interacts_with`: other variables *this same paper* relates to this one, and at most \
+{MAX_INTERACTIONS} of them. Usually empty, and empty is the right answer: most rows in \
+most papers stand alone, and a list here that the paper did not support is worse than no \
+list. Each entry has:
+      - `feature`: the other variable. Name it exactly as your own `predictor` rows name \
+it wherever it is one of them, so the two can be joined.
+      - `kind`: one of "correlated", "mutually_exclusive", "modifies", "modified_by", \
+"confounds", "confounded_by", "mediates", "mediated_by", "derived_from", "derives". Read \
+it as a sentence: *this row's predictor* — `kind` — *the feature*. State each pair once, \
+from whichever side the paper states it. The other half is written onto the other row \
+for you, so writing it yourself only risks the two disagreeing.
+      - `measure` and `value`: the statistic and its number, when the paper prints one — \
+a correlation, a shared-variance figure, a variance inflation factor, an agreement \
+statistic. Name the measure as the paper names it. Both null when it prints none.
+      - `measure_raw`: that statistic exactly as the paper printed it, character for \
+character. Leave it empty when there is no number, or use the paper's own words for the \
+relationship when it describes one without quantifying it.
+
+What belongs in `interacts_with` is what the paper reports about the pair: a correlation \
+or collinearity between two of its variables, a variable whose effect it says depends on \
+another, a variable it treats as explaining another's effect away, or one it computed \
+from another. A pair the paper's own variable definitions make impossible to co-occur \
+belongs there too, even where the paper never remarks on it, because that is a fact \
+about its data rather than an opinion about the world. Nothing else does — not a \
+relationship you know of from outside this paper, and not one you infer because two \
+variables sound related.
 
 Every number you record is checked against the text afterward, automatically. One that \
 is not there is deleted and its row is marked less reliable, so a number you can see is \

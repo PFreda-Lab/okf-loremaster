@@ -6,10 +6,15 @@ disagree about them. `emitters/okf.py` builds a bundle from these names and
 `okf/validate.py` checks one against the same names; a rename that touched only one side
 would produce a bundle that validates against nothing.
 
-The five body headings are ordered, and the order is part of the contract. An agent
-reading forty of these files at once relies on the same question being in the same place
-in each — and `# Null or non-significant findings` sitting fourth from the end is what
-makes "this was tested and did not hold" as findable as "this held".
+The body headings are ordered, and the order is part of the contract. An agent reading
+forty of these files at once relies on the same question being in the same place in each
+— and `# Null or non-significant findings` sitting third from the end is what makes
+"this was tested and did not hold" as findable as "this held".
+
+Every heading is also a **named constant**, and nothing may index into `BODY_SECTIONS`
+positionally. The vector emitter did exactly that, and inserting `# Abstract` second
+would have silently redefined its `PREDICTORS_SECTION` as the abstract — a whole index
+built from the wrong half of every document, with no error anywhere.
 """
 
 from __future__ import annotations
@@ -17,21 +22,30 @@ from __future__ import annotations
 from pathlib import Path
 
 __all__ = [
+    "ABSTRACT_SECTION",
     "BODY_SECTIONS",
+    "BOTTOM_LINE_SECTION",
     "CATALOG_FILENAME",
+    "CAVEATS_SECTION",
     "CHARTER_FILENAME",
     "DESCRIPTOR_FILENAME",
     "DISTANCES",
     "DOCUMENT_TYPE",
     "FULL_TEXT_BASIS",
     "INDEX_FILENAME",
+    "INTERACTIONS_SECTION",
+    "INTERACTION_COLUMNS",
+    "INTERACTION_SEPARATOR",
     "LOG_FILENAME",
     "NONE_CELL",
+    "NULL_FINDINGS_SECTION",
     "OKF_DIRNAME",
     "PREDICTORS_FILENAME",
+    "PREDICTORS_SECTION",
     "PREDICTOR_COLUMNS",
     "PREDICTOR_INDEX_TYPE",
     "QUOTE_LEAD",
+    "REQUIRED_BODY_SECTIONS",
     "RESERVED_FILENAMES",
     "ROOT_INDEX_TYPE",
     "SEARCH_FILENAME",
@@ -40,6 +54,7 @@ __all__ = [
     "TOPIC_INDEX_TYPE",
     "UNVERIFIED_CELL",
     "VECTORS_DIRNAME",
+    "VOCABULARY_SECTION",
     "okf_bundle_path",
     "vector_store_path",
 ]
@@ -81,13 +96,47 @@ PREDICTOR_INDEX_TYPE = "Predictor Index"
 # `search.md`. Carries no `domain` for the same reason `predictors.md` does not.
 SEARCH_STRATEGY_TYPE = "Search Strategy"
 
-# `# ` headings, in this order, in every concept file.
+# `# ` headings, one constant each. Never `BODY_SECTIONS[n]`.
+BOTTOM_LINE_SECTION = "Bottom line"
+ABSTRACT_SECTION = "Abstract"
+PREDICTORS_SECTION = "Predictors reported"
+INTERACTIONS_SECTION = "Interactions"
+NULL_FINDINGS_SECTION = "Null or non-significant findings"
+VOCABULARY_SECTION = "Vocabulary hints"
+CAVEATS_SECTION = "Caveats"
+
+# The headings, in this order, in every concept file this version writes.
+#
+# `# Abstract` sits second because that is where it was asked for, and the placement is
+# worth defending rather than apologizing for: an agent that has read the two-line bottom
+# line and wants the author's own framing before the tables gets it in the next section,
+# and one that wants the structured evidence scrolls past a block it can recognize by its
+# heading. It is publisher text copied verbatim — see `emitters.okf._abstract` for what
+# that means for redistribution.
+#
+# `# Interactions` sits directly under the table it expands, because every row in it is
+# keyed to a `#` in that table and a reader who has to hunt for the key will not use it.
 BODY_SECTIONS = (
-    "Bottom line",
-    "Predictors reported",
-    "Null or non-significant findings",
-    "Vocabulary hints",
-    "Caveats",
+    BOTTOM_LINE_SECTION,
+    ABSTRACT_SECTION,
+    PREDICTORS_SECTION,
+    INTERACTIONS_SECTION,
+    NULL_FINDINGS_SECTION,
+    VOCABULARY_SECTION,
+    CAVEATS_SECTION,
+)
+
+# The headings a document must carry whenever it was written. Every bundle ever emitted
+# has these five, so the validator can require them without failing a corpus built before
+# the other two existed — and it must not fail one, because a bundle is a deliverable that
+# outlives the tool version that wrote it. The two headings outside this tuple are checked
+# for position and emptiness when present and never for presence.
+REQUIRED_BODY_SECTIONS = (
+    BOTTOM_LINE_SECTION,
+    PREDICTORS_SECTION,
+    NULL_FINDINGS_SECTION,
+    VOCABULARY_SECTION,
+    CAVEATS_SECTION,
 )
 
 # The predictor table's columns, in order. Here rather than in the emitter because the
@@ -109,7 +158,23 @@ PREDICTOR_COLUMNS = (
     # well-read row from a small unadjusted survey is `high` and `limited`, and a reader
     # who sees only one of the two columns draws the wrong conclusion from either.
     "Strength",
+    # Names only, and last. A pointer at `# Interactions`, not a summary of it: the type
+    # and the coefficient are what a reader needs to act, they do not fit in a cell beside
+    # ten other columns, and a table that answers the question is a table nobody scrolls
+    # past. Appended rather than inserted so anything reading these columns by position
+    # keeps working.
+    "Interacts with",
 )
+
+# `# Interactions`, where the pointer becomes the finding. `#` is the predictor table's
+# row number and the only thing joining the two, which is why it leads here as it does
+# there. One line per interaction rather than one per row: a predictor with three of them
+# is making three claims, and a merged cell makes them one.
+INTERACTION_COLUMNS = ("#", "Predictor", "Interacts with", "Type", "Magnitude", "Evidence")
+
+# Separates the names in the predictor table's `Interacts with` cell. A semicolon rather
+# than a comma because a variable's own name routinely holds one.
+INTERACTION_SEPARATOR = "; "
 
 # `predictors.md`, where every row is a pointer rather than a finding. `paper` and `row`
 # come first and together they are the address: the document to open, and the `#` value to

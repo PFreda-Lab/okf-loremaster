@@ -1,6 +1,6 @@
 """The reconcile node: turn extractions into records the emitter can write. No model call.
 
-Four deterministic steps per paper, in this order:
+Five deterministic steps per paper, in this order:
 
 1. **Length budgets** (`Extraction.enforce_budgets`) — before verification rather than
    after, so nothing is checked that a budget was about to drop, and so the verification
@@ -9,12 +9,17 @@ Four deterministic steps per paper, in this order:
    and vocabulary code looked for in the text the extractor read. What is not there is
    removed, the affected row's confidence is lowered, and the run continues. This is the
    whole reason the node exists.
-3. **Evidence strength** (`strength.score_extraction`) — design, sample size, adjustment
+3. **Mirroring** (`interactions.mirror_interactions`) — an interaction stated on one row
+   given its other half on the row it names. After verification, never before: a mirror
+   copies a coefficient, so mirroring first would duplicate every fabricated number and
+   then check both halves against the same absent source.
+4. **Evidence strength** (`strength.score_extraction`) — design, sample size, adjustment
    and reading depth, weighted into a score per paper and per row. After verification and
    not before: a row whose interval was just deleted for not appearing in the source text
    has lost the precision its score would otherwise have read off it.
-4. **Assembly** — bibliographic fields read from the PubMed record, license and text
-   basis from the retrieval, provenance stamped here.
+5. **Assembly** — bibliographic fields read from the PubMed record, license and text
+   basis from the retrieval, the abstract copied verbatim off the candidate, provenance
+   stamped here.
 
 A paper with no extraction is dropped from its topic here rather than left as a topic
 entry with no file behind it. That can take a topic under the floor curation worked to
@@ -29,9 +34,11 @@ from typing import Any
 
 from okf_loremaster.config import ConfigError, Role
 from okf_loremaster.graph.state import Deps, RunState, span
+from okf_loremaster.interactions import mirror_interactions
 from okf_loremaster.schemas import (
     CODE,
     EFFECT,
+    INTERACTION,
     INTERVAL,
     MAX_BODY_WORDS,
     QUOTE,
@@ -41,6 +48,7 @@ from okf_loremaster.schemas import (
     Extraction,
     PaperText,
     TextBasis,
+    TextBasisPolicy,
     VerificationExample,
     VerificationSummary,
 )
@@ -142,6 +150,7 @@ def _reconcile_one(
     summary.quotes_dropped += check.quotes_dropped
     summary.codes_dropped += check.codes_dropped
     summary.sample_sizes_dropped += int(check.sample_size_missing)
+    summary.interactions_dropped += check.interactions_dropped
     for kind, note in check.notes():
         # Per kind rather than overall. A global cap spent by whichever check failed
         # first leaves every warning after it counting casualties it cannot name.
@@ -151,6 +160,7 @@ def _reconcile_one(
             )
 
     basis = source.basis if source is not None else TextBasis.ABSTRACT
+    reconciled = mirror_interactions(check.extraction)
     record = ConceptRecord(
         pmid=candidate.pmid,
         title=candidate.title,
@@ -160,11 +170,17 @@ def _reconcile_one(
         authors=list(candidate.authors),
         doi=candidate.doi,
         pmcid=(source.pmcid if source is not None else None) or candidate.pmcid,
+        # Straight off the PubMed record, never off `source.text` — which for a full-text
+        # paper is the whole article and for an abstract-only one is the same abstract
+        # wrapped in the prompt's own header. This is the one field in the bundle that is
+        # the publisher's words rather than ours, and it is copied rather than checked
+        # because there is nothing to check it against.
+        abstract=candidate.abstract,
         domain=slug,
         license=source.license if source is not None else "",
         text_basis=basis,
-        strength=score_extraction(check.extraction, charter=charter, basis=basis),
-        extraction=check.extraction,
+        strength=score_extraction(reconciled, charter=charter, basis=basis),
+        extraction=reconciled,
         generated_by=stamp,
         generated_at=datetime.now(UTC),
     )
@@ -174,7 +190,9 @@ def _reconcile_one(
     # The notes themselves, not a boolean. `enforce_budgets` names the predictor rows and
     # null findings it drops, and collapsing that to "something was trimmed" threw away
     # the only record of what had left the bundle.
-    return record, budget_notes, check.extraction.body_overrun()
+    # `reconciled`, not `check.extraction`: mirroring adds words to the body, and an
+    # overrun measured before it would understate what actually gets written.
+    return record, budget_notes, reconciled.body_overrun()
 
 
 def _provenance(deps: Deps) -> str:
@@ -238,6 +256,14 @@ def _report(
             QUOTE,
         )
 
+    if summary.interactions_dropped:
+        emit(
+            f"numeric verification removed {summary.interactions_dropped} interaction "
+            f"value(s) not found in the source text; those interactions were kept and "
+            f"now read as stated rather than measured",
+            INTERACTION,
+        )
+
     if summary.codes_dropped:
         emit(
             f"{summary.codes_dropped} vocabulary code(s) were not printed in the source "
@@ -269,4 +295,18 @@ def _report(
             f"{len(dropped)} paper(s) had no usable extraction and were dropped from "
             f"their topic, so topic counts are below what curation kept: "
             f"{', '.join(dropped[:MAX_EXAMPLES])}"
+        )
+
+    if deps.basis is not TextBasisPolicy.ANY:
+        # `strength` reads what a paper was read from as one of its axes, on the reasoning
+        # that a finding taken from a full text is better established than the same
+        # finding taken from an abstract. That is still true here — and under a uniform
+        # basis it is the same term added to every paper in the bundle, so it separates
+        # none of them from each other. The arithmetic is deliberately not adjusted: a
+        # bundle's grades should mean the same thing as another bundle's, and rescaling
+        # this axis to restore spread within the run is exactly how they would stop.
+        emit(
+            f"--basis {deps.basis.value} gave every paper the same text basis, so that "
+            f"axis of `strength` contributes equally to all of them and does not separate "
+            f"papers within this bundle; the grades remain comparable across bundles"
         )

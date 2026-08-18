@@ -23,6 +23,7 @@ __all__ = [
     "MAX_BOTTOM_LINE_SENTENCES",
     "MAX_CAVEAT_SENTENCES",
     "MAX_DESCRIPTION_CHARS",
+    "MAX_INTERACTIONS",
     "MAX_LOCATED_QUOTE_WORDS",
     "MAX_NULL_FINDINGS",
     "MAX_PREDICTOR_ROWS",
@@ -50,6 +51,13 @@ MAX_TAGS = 8
 # dictionary. Enforced the same way as every other budget here — truncate and warn.
 MAX_NULL_FINDINGS = 8
 MAX_VOCABULARY_HINTS = 8
+
+# Interactions recorded against one predictor row. Low on purpose, and not for length:
+# most papers report none at all, and a model given room for a dozen will fill it by
+# restating the adjustment set as a dozen confounders. Four is enough for the case this
+# exists to serve — a variable a downstream agent must not engineer independently of —
+# and small enough that padding is visible rather than plausible.
+MAX_INTERACTIONS = 4
 
 # How much of a sentence an extraction has to write for `quote`. The model emits the
 # opening words; `expand_quote` finds the sentence they open and stores that instead.
@@ -106,6 +114,19 @@ MAX_BODY_WORDS = (
     + MAX_NULL_FINDINGS * P90_NULL_FINDING_WORDS
     + P90_PROSE_WORDS
 )
+
+# Two sections are deliberately outside the figure above, for opposite reasons.
+#
+# `# Interactions` is *counted* by `body_words` and bought no allowance here. It is
+# capped at `MAX_INTERACTIONS` short names per row and most papers report none, so the
+# p90 measurements should absorb it — and if this guideline starts firing on
+# interaction-heavy documents, that is the measurement saying to re-derive the three
+# figures rather than a reason to have widened them in advance.
+#
+# `# Abstract` is *not counted at all*. It is publisher text copied verbatim, not
+# something an extraction wrote, and this guideline exists to catch a cell that ran on.
+# Counting a 250-word abstract would fire on every document in the bundle and say
+# nothing about any of them.
 
 # The one budget here that bounds an input rather than an output: how much of a paper an
 # extraction prompt may carry. At roughly four characters a token that is about 6,000

@@ -72,6 +72,8 @@ from okf_loremaster.schemas import (
     EvidenceType,
     ExecutedQuery,
     Extraction,
+    Interaction,
+    InteractionType,
     NullFinding,
     PaperStrength,
     PaperText,
@@ -171,6 +173,8 @@ CHECKPOINTED_TYPES = (
     EvidenceType,
     ExecutedQuery,
     Extraction,
+    Interaction,
+    InteractionType,
     NullFinding,
     PaperStrength,
     PaperText,
@@ -345,6 +349,7 @@ async def run_build(
                 dry_run=dry_run,
                 charter=charter,
                 directory=directory,
+                basis=deps.basis,
             )
         )
 
@@ -436,6 +441,7 @@ def _estimate(deps: Deps, state: RunState, *, charter_supplied: bool) -> SpendEs
         screen_budget=deps.screen_budget,
         target_papers=drafted.target_papers,
         charter_was_generated=not charter_supplied,
+        basis=deps.basis,
     )
 
 

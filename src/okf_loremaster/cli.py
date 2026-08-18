@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from okf_loremaster import DISPLAY_NAME, __version__
+from okf_loremaster.basis import TextBasisPolicy
 from okf_loremaster.finalize import Finalize
 
 console = Console(stderr=True)
@@ -164,7 +165,10 @@ def init(
     table.add_column()
     table.add_row("env files", ", ".join(found) if found else "[yellow]none found[/yellow]")
 
-    missing = set(settings.missing_for_llm())
+    # Both halves, or `init` blesses a machine a build then refuses to start on: the
+    # NCBI address is enforced in `clients.build`, not by any model call, so a check
+    # that only asks `missing_for_llm` prints `ready` with it empty.
+    missing = set(settings.missing_for_llm()) | set(settings.missing_for_ncbi())
     for role in Role:
         name = f"{ENV_PREFIX}MODEL_{role.value.upper()}"
         value = {
@@ -182,7 +186,7 @@ def init(
         table.add_row("api base", settings.api_base)
     table.add_row(
         "NCBI email",
-        settings.ncbi_email or f"[yellow]unset[/yellow] ({ENV_PREFIX}NCBI_EMAIL)",
+        settings.ncbi_email or f"[red]unset[/red] ({ENV_PREFIX}NCBI_EMAIL)",
     )
     table.add_row(
         "NCBI key",
@@ -253,6 +257,14 @@ def build(
     ] = None,
     pool_size: Annotated[int, typer.Option(help="Candidate pool before screening.")] = 800,
     screen_budget: Annotated[int, typer.Option(help="Max abstracts sent to the screener.")] = 400,
+    basis: Annotated[
+        TextBasisPolicy,
+        typer.Option(
+            "--basis",
+            help="What to read. `any` takes full text where PMC has it and the abstract "
+            "otherwise; the other two drop papers that cannot satisfy them.",
+        ),
+    ] = TextBasisPolicy.ANY,
     # Literals rather than the constants they mirror: importing them would pull pydantic
     # into `--help`. `test_cli_defaults` fails if the two ever drift apart.
     target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 200,
@@ -366,6 +378,7 @@ def build(
         out=out,
         pool_size=pool_size,
         screen_budget=screen_budget,
+        basis=basis,
         target_papers=target_papers,
         topic_paper_min=topic_paper_min,
         topic_paper_max=topic_paper_max,

@@ -51,7 +51,16 @@ _PERMANENT_NAMES = (
 # 400 instead of a dropped parameter — one node deep, mid-run. Matched narrowly on the
 # provider's own wording: a wider match would silently discard the schema on unrelated
 # bad requests, which is the failure this whole module is written to avoid.
-_SCHEMA_REFUSALS = ("structured_outputs", "structured outputs")
+#
+# "Grammar compilation timed out" is the same event said differently, and it is worth
+# naming because it does not read like a refusal: a provider compiles the schema into a
+# decoding grammar before the model sees anything, and a schema it cannot compile in
+# time is a schema it will not honor. Observed on an Azure AI Foundry Anthropic
+# deployment (2026-08-17), where it killed the charter node on three consecutive runs
+# across two models — deterministic for one schema, so retrying the constraint would
+# only fail again. The word "timed out" is what makes it look transient and is exactly
+# why the transient path is the wrong one: nothing about waiting makes a schema smaller.
+_SCHEMA_REFUSALS = ("structured_outputs", "structured outputs", "grammar compilation")
 
 
 def _refuses_schema(exc: BaseException) -> bool:

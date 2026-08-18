@@ -45,10 +45,13 @@ from typing import Any, Protocol, TypeAlias
 import yaml
 
 from okf_loremaster.okf.layout import (
-    BODY_SECTIONS,
+    ABSTRACT_SECTION,
+    BOTTOM_LINE_SECTION,
     DESCRIPTOR_FILENAME,
     DISTANCES,
+    NONE_CELL,
     PREDICTOR_COLUMNS,
+    PREDICTORS_SECTION,
     QUOTE_LEAD,
     vector_store_path,
 )
@@ -93,6 +96,12 @@ PREDICTOR_LEVEL = "predictor"
 # Metadata key to the table column it is read from. Per predictor row, so a concept chunk
 # has no single value for any of them. Stated as one mapping so the keys a consumer
 # filters on and the columns they are read from cannot drift apart.
+#
+# All three are closed vocabularies, and that is the entry requirement rather than a
+# coincidence. A Chroma `where` clause tests equality, so a column worth putting here is
+# one a consumer can name a whole value of. `Interacts with` holds a semicolon-joined list
+# of variable names no filter could ever match exactly — it reaches the index through the
+# chunk *text*, where a retriever can actually use it, and not through here.
 _ROW_METADATA = {"timing": "Timing", "confidence": "Confidence", "evidence_type": "Type"}
 ROW_LEVEL_KEYS = tuple(_ROW_METADATA)
 
@@ -105,10 +114,11 @@ REQUIRED_KEYS = ("source", "title", "id", "chunk_index")
 # a chunk that lost its tail is worth knowing about.
 TRUNCATION_CHARS = 2000
 
-# The two sections chunking treats specially. Indexed rather than spelled out so that a
-# renamed heading moves both the writer and this reader at once.
-BOTTOM_LINE_SECTION = BODY_SECTIONS[0]
-PREDICTORS_SECTION = BODY_SECTIONS[1]
+# The sections chunking treats specially are imported by name from `layout`. They were
+# `BODY_SECTIONS[0]` and `BODY_SECTIONS[1]` for one version, which was a bomb with a long
+# fuse: inserting `# Abstract` second would have redefined `PREDICTORS_SECTION` as the
+# abstract, and every row chunk in every store would have been built from the wrong half
+# of the document with no error raised anywhere.
 
 # `1. <quote>` under the quote lead-in.
 _NUMBERED = re.compile(r"^(?P<number>\d+)\.\s+(?P<text>.+)$")
@@ -259,12 +269,21 @@ def _relative(path: Path, root: Path) -> str:
 
 
 def _concept_text(document: OkfDocument) -> str:
-    """The paper as one chunk: everything except the table covered row by row."""
+    """The paper as one chunk: everything except what is covered row by row.
+
+    `# Abstract` is left out too, and that is a deliberate trade rather than an oversight.
+    A structured abstract runs 250 to 350 words; adding one would push almost every concept
+    chunk past `TRUNCATION_CHARS`, where the embedder drops the tail *silently* — so the
+    caveats and vocabulary hints at the end of the document would stop being retrievable
+    at all, in exchange for prose that restates a bottom line written from the same source.
+    The abstract stays in the bundle for an agent that opens the file; the index keeps its
+    two levels, and both of them keep fitting in the window.
+    """
     parts = [document.title, _text(document.fields.get("description"))]
     parts += [
         f"{heading}: {body}"
         for heading, body in document.sections()
-        if heading != PREDICTORS_SECTION
+        if heading not in (PREDICTORS_SECTION, ABSTRACT_SECTION)
     ]
     return "\n\n".join(part for part in parts if part)
 
@@ -278,7 +297,14 @@ def _row_text(
 ) -> str:
     """One predictor row, with enough of its paper around it to stand alone."""
     lines = [document.title, ""]
-    lines += [f"{label}: {row[column]}" for column, label in _ROW_LABELS if row.get(column)]
+    # `NONE_CELL` is skipped, not embedded. It is the table's way of writing "nothing
+    # here", and `Interacts with: —` on the nineteen rows in twenty that state no
+    # interaction is a sentence that means nothing and still moves the vector.
+    lines += [
+        f"{label}: {row[column]}"
+        for column, label in _ROW_LABELS
+        if row.get(column) and row[column] != NONE_CELL
+    ]
     lines += [f"{label}: {facts[label]}" for label in _CONTEXT_FACTS if facts.get(label)]
     bottom = _first_paragraph(document.section(BOTTOM_LINE_SECTION) or "")
     if bottom:

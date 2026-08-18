@@ -259,6 +259,33 @@ def test_init_writes_an_env_with_no_checkout_in_sight(
     assert "wrote" in result.output
 
 
+def test_init_is_not_ready_until_ncbi_has_a_contact_address(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, llm_configured: None
+) -> None:
+    """`init` is the gate that says a machine is usable, so it has to ask everything a
+    build asks. The NCBI address is enforced in `clients.build` rather than by any model
+    call, so a readiness check built only from `missing_for_llm` printed `ready` on a
+    machine whose very first fetch would raise `ConfigError`. Both halves, or the command
+    blesses a run that cannot start."""
+    from okf_loremaster.config import ENV_PREFIX
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env.example").write_text("PLACEHOLDER=\n", encoding="utf-8")
+
+    unset = runner.invoke(app, ["init"])
+
+    assert unset.exit_code == 1
+    assert f"{ENV_PREFIX}NCBI_EMAIL" in unset.output
+    assert "ready" in unset.output and "not ready" in unset.output
+
+    monkeypatch.setenv(f"{ENV_PREFIX}NCBI_EMAIL", "someone@example.edu")
+
+    ready = runner.invoke(app, ["init"])
+
+    assert ready.exit_code == 0
+    assert "not ready" not in ready.output
+
+
 def test_init_does_not_overwrite_an_env_that_already_has_secrets_in_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

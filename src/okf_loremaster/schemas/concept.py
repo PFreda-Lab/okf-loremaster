@@ -29,10 +29,13 @@ from okf_loremaster.schemas.common import (
     Confidence,
     Direction,
     EvidenceType,
+    InteractionMagnitude,
+    InteractionType,
     Model,
     Slug,
     StudyDesign,
     TextBasis,
+    band_interaction,
     filename_token,
     is_export_safe,
 )
@@ -41,6 +44,7 @@ from okf_loremaster.schemas.limits import (
     MAX_BOTTOM_LINE_SENTENCES,
     MAX_CAVEAT_SENTENCES,
     MAX_DESCRIPTION_CHARS,
+    MAX_INTERACTIONS,
     MAX_NULL_FINDINGS,
     MAX_PREDICTOR_ROWS,
     MAX_TAGS,
@@ -56,6 +60,7 @@ __all__ = [
     "CodedAs",
     "ConceptRecord",
     "Extraction",
+    "Interaction",
     "NullFinding",
     "PredictorRow",
     "SourceRef",
@@ -69,6 +74,44 @@ NONE_REPORTED = "none reported"
 PUBMED_URL = "https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
 PMC_URL = "https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/"
 DOI_URL = "https://doi.org/{doi}"
+
+
+class Interaction(Model):
+    """Another variable in the same study that acts on this row's predictor.
+
+    Recorded per row rather than per paper because it is a claim about one predictor: a
+    downstream agent deciding whether to engineer a feature needs to know what it cannot
+    be engineered independently of, and that answer differs from row to row.
+
+    `magnitude` is a property, not a field. Four axes in this bundle already read as "how
+    much do I believe this" and a fifth the model could write would be a fifth thing to
+    argue with; the model records what the paper printed and the arithmetic happens in
+    `interactions.py`. The consequence is the one that matters: when numeric verification
+    deletes `value` for not appearing in the source text, the magnitude falls back to
+    `stated` on its own, with nothing left to update and nothing left to disagree.
+    """
+
+    # The other variable, in the paper's own words. Matched against this paper's other
+    # predictor rows to mirror the relationship, and against nothing outside the paper.
+    feature: str = Field(min_length=1)
+    kind: InteractionType = InteractionType.CORRELATED
+    # What the coefficient is: "r", "rho", "vif", "kappa". Free text, lowercased by
+    # `interactions.band`, and unrecognized is a normal answer — it yields `stated`.
+    measure: str = ""
+    value: float | None = None
+    # The coefficient exactly as the paper printed it, e.g. "r = 0.41 (p < 0.001)".
+    # Checked against the source text like `PredictorRow.effect_raw`, and printed
+    # whatever the band comes out as, so a reader never has only our word for it.
+    measure_raw: str = ""
+    # Set by `interactions.mirrored` on the half this pipeline derived, so a reader can
+    # tell a relationship the paper stated about *this* variable from the same
+    # relationship stated about the other one.
+    mirrored: bool = False
+
+    @property
+    def magnitude(self) -> InteractionMagnitude:
+        """The band, computed. See `common.band_interaction` for the cutoffs."""
+        return band_interaction(self.kind, self.measure, self.value)
 
 
 class PredictorRow(Model):
@@ -112,6 +155,10 @@ class PredictorRow(Model):
     # The sentence the numbers came from, verbatim. The basis for verification and for
     # a downstream agent to quote without re-reading the paper.
     quote: str = ""
+    # Other variables in this same study that act on this predictor. Almost always empty:
+    # a paper reporting a predictor is not usually reporting what it interacts with, and
+    # an empty list is the honest record of that rather than a gap.
+    interacts_with: list[Interaction] = Field(default_factory=list)
 
     def downgraded(self) -> Self:
         """Drop the number and lower the confidence, keeping the claim.
@@ -279,6 +326,14 @@ class Extraction(Model):
                 row.quote,
             )
         ]
+        # `# Interactions` renders in the body, so it counts. It bought no allowance in
+        # `MAX_BODY_WORDS`, which is deliberate — see the note there.
+        cells += [
+            text
+            for row in self.predictors
+            for interaction in row.interacts_with
+            for text in (interaction.feature, interaction.measure_raw)
+        ]
         cells += [
             text
             for finding in self.null_findings
@@ -359,6 +414,22 @@ class Extraction(Model):
                 f"{MAX_VOCABULARY_HINTS}: {', '.join(dropped)}"
             )
 
+        # After the predictor rows, so a row already dropped above does not have its
+        # interactions counted or named in a second warning.
+        over = [
+            (row.predictor, len(row.interacts_with) - MAX_INTERACTIONS)
+            for row in trimmed.predictors
+            if len(row.interacts_with) > MAX_INTERACTIONS
+        ]
+        if over:
+            for row in trimmed.predictors:
+                row.interacts_with = row.interacts_with[:MAX_INTERACTIONS]
+            warnings.append(
+                f"dropped {sum(count for _, count in over)} interaction(s) over the "
+                f"per-row limit of {MAX_INTERACTIONS}: "
+                + ", ".join(f"{predictor} (-{count})" for predictor, count in over)
+            )
+
         if len(trimmed.tags) > MAX_TAGS:
             trimmed.tags = trimmed.tags[:MAX_TAGS]
             warnings.append(f"tags truncated to {MAX_TAGS}")
@@ -399,6 +470,13 @@ class ConceptRecord(Model):
     authors: list[str] = Field(default_factory=list)
     doi: str | None = None
     pmcid: str | None = None
+    # The abstract as E-utilities served it, structured section labels and all. On the
+    # record rather than in `Extraction` for the reason the whole class is split in two:
+    # `Extraction` is the response format handed to the model, so a field there is a
+    # field the model is asked to write — and an abstract a model wrote is a paraphrase
+    # wearing a publisher's byline. This one costs nothing, because the screener was
+    # already shown it.
+    abstract: str = ""
 
     # --- decided by the pipeline ---
     domain: Slug

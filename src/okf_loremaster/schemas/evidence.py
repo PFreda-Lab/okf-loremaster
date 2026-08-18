@@ -21,6 +21,7 @@ from okf_loremaster.schemas.common import Model, TextBasis
 __all__ = [
     "CODE",
     "EFFECT",
+    "INTERACTION",
     "INTERVAL",
     "QUOTE",
     "PaperText",
@@ -35,6 +36,7 @@ EFFECT = "effect"
 INTERVAL = "interval"
 QUOTE = "quote"
 CODE = "code"
+INTERACTION = "interaction"
 
 
 class PaperText(Model):
@@ -88,6 +90,13 @@ class VerificationSummary(Model):
     quotes_dropped: int = 0
     codes_dropped: int = 0
     sample_sizes_dropped: int = 0
+    # Interaction coefficients the source text does not contain. Counted apart from
+    # `effects_dropped` because the two fail for different reasons and are read by
+    # different people: an effect size is the row's headline and its loss is a hole in the
+    # finding, while an interaction coefficient is a secondary number the model was more
+    # likely to have paraphrased than invented. Merging them would make a run look worse at
+    # its main job than it was.
+    interactions_dropped: int = 0
     # A handful of the offending rows, named. Not all of them: this gets printed, and a
     # run where every row failed should say so in one line rather than in two hundred.
     examples: list[VerificationExample] = Field(default_factory=list)
@@ -104,6 +113,7 @@ class VerificationSummary(Model):
             or self.quotes_dropped
             or self.codes_dropped
             or self.sample_sizes_dropped
+            or self.interactions_dropped
         )
 
     def line(self) -> str:
@@ -123,4 +133,6 @@ class VerificationSummary(Model):
             parts.append(f"{self.codes_dropped} code(s) dropped")
         if self.sample_sizes_dropped:
             parts.append(f"{self.sample_sizes_dropped} sample size(s) dropped")
+        if self.interactions_dropped:
+            parts.append(f"{self.interactions_dropped} interaction value(s) dropped")
         return f"{self.rows} row(s) checked; " + ", ".join(parts)

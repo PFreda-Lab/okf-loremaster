@@ -30,9 +30,12 @@ the one failure that would make this worse than having no check at all.
 Two limits, stated rather than hidden:
 
 - A full text contains hundreds of numbers, so an invented one can coincide with a page
-  number or a sample size. That is why a row carrying a verbatim `quote` is checked
-  against **the quote alone**, whenever the quote itself is found in the source: a scope
-  of one sentence makes a coincidence unlikely rather than merely uncommon.
+  number or a sample size. That is why a row's *own* magnitude, whenever it carries a
+  verbatim `quote` the source contains, is checked against **the quote alone**: a scope of
+  one sentence makes a coincidence unlikely rather than merely uncommon. An interaction
+  coefficient is the documented exception and keeps the whole document — see
+  `_verify_interactions`, which says why narrowing it would break the check rather than
+  tighten it.
 - A claim is matched at **its own** precision, so a source reading `1.84` supports a
   claim of `1.8`. That is a rounding, not a fabrication, and flagging it would fill the
   log with noise until nobody read it. The asymmetry is deliberate: a claim may be less
@@ -50,10 +53,12 @@ from dataclasses import dataclass
 from okf_loremaster.schemas import (
     CODE,
     EFFECT,
+    INTERACTION,
     INTERVAL,
     QUOTE,
     CodedAs,
     Extraction,
+    Interaction,
     NullFinding,
     PredictorRow,
     VocabularyHint,
@@ -288,14 +293,27 @@ class RowCheck:
     quote_missing: bool = False
     effect_missing: bool = False
     interval_missing: bool = False
+    # `(feature, claimed)` per interaction whose number the source does not print. A tuple
+    # rather than a flag because one row can state several, each naming a different
+    # variable, and a warning that cannot say which one is a warning nobody can act on.
+    interactions_missing: tuple[tuple[str, str], ...] = ()
 
     @property
     def clean(self) -> bool:
-        return not (self.quote_missing or self.effect_missing or self.interval_missing)
+        return not (
+            self.quote_missing
+            or self.effect_missing
+            or self.interval_missing
+            or self.interactions_missing
+        )
 
     @property
     def kind(self) -> str:
-        """Which check took something from this row, in the order `note` reports them."""
+        """Which check took something from this row, in the order `note` reports them.
+
+        Covers the three that `note` speaks for. Interactions are reported per casualty by
+        `ExtractionCheck.notes`, because one row can lose several and this returns one.
+        """
         if self.effect_missing:
             return EFFECT
         if self.interval_missing:
@@ -335,6 +353,10 @@ class ExtractionCheck:
         return sum(1 for row in self.rows if row.interval_missing)
 
     @property
+    def interactions_dropped(self) -> int:
+        return sum(len(row.interactions_missing) for row in self.rows)
+
+    @property
     def clean(self) -> bool:
         return (
             not self.quotes_dropped
@@ -352,12 +374,25 @@ class ExtractionCheck:
         attached the whole mix to the effect warning — which then said it had removed one
         effect size and went on to name five dropped intervals.
         """
-        rows = tuple((row.kind, row.note()) for row in self.rows if not row.clean)
+        rows = tuple(
+            (row.kind, row.note())
+            for row in self.rows
+            if row.quote_missing or row.effect_missing or row.interval_missing
+        )
+        interactions = tuple(
+            (
+                INTERACTION,
+                f"{row.predictor!r}: {claimed} against {feature!r} "
+                "is not in the source text",
+            )
+            for row in self.rows
+            for feature, claimed in row.interactions_missing
+        )
         codes = tuple(
             (CODE, f"{concept!r}: {system} {code} is not in the source text")
             for concept, system, code in self.codes_missing
         )
-        return rows + codes
+        return rows + interactions + codes
 
 
 def verify_extraction(extraction: Extraction, source_text: str) -> ExtractionCheck:
@@ -479,12 +514,15 @@ def _verify_row(index: int, row: PredictorRow, source: Source) -> tuple[Predicto
 
     effect_ok = supported(row.effect) and _matches_raw(row)
     interval_ok = supported(row.ci_low) and supported(row.ci_high)
+    interactions, interactions_missing = _verify_interactions(row, source)
 
     updated = row.model_copy(update={"quote": ""}) if quote_missing else row
     if not effect_ok:
         updated = updated.downgraded()
     elif not interval_ok:
         updated = updated.without_interval()
+    if interactions_missing:
+        updated = updated.model_copy(update={"interacts_with": interactions})
 
     return updated, RowCheck(
         index=index,
@@ -493,7 +531,51 @@ def _verify_row(index: int, row: PredictorRow, source: Source) -> tuple[Predicto
         quote_missing=quote_missing,
         effect_missing=not effect_ok,
         interval_missing=effect_ok and not interval_ok,
+        interactions_missing=interactions_missing,
     )
+
+
+def _verify_interactions(
+    row: PredictorRow, source: Source
+) -> tuple[list[Interaction], tuple[tuple[str, str], ...]]:
+    """Strip interaction coefficients the source does not print. The claims themselves stay.
+
+    **Scoped to the whole document, never to the row's quote.** A row's quote is the
+    sentence stating what the predictor did to the *outcome*; a correlation between two
+    predictors lives in a correlation matrix, a collinearity paragraph or a table caption
+    somewhere else entirely. Narrowing to the quote would fail nearly every real
+    coefficient, and a check that is wrong most of the time is worse than no check.
+
+    The looser scope is affordable because less rides on it. A coincidence here leaves an
+    interaction the extraction had already claimed, banded perhaps one step off; the same
+    coincidence on an effect size would be the row's headline. What this is really for is
+    the number a model *invented* to decorate a relationship it read in prose, and an
+    invented `0.62` is no likelier to appear somewhere in the paper than an invented
+    effect size is.
+
+    `value` goes and `measure_raw` stays, which is the same trade `PredictorRow.downgraded`
+    makes: the emitter reads the surviving raw string to tell "the paper reported no
+    coefficient" from "the coefficient it reported is not in the text we read". Magnitude
+    is a property of the two, so it falls back to `stated` on its own.
+
+    Runs before `mirror_interactions`, so a mirror is built from a value that has already
+    survived this. Mirroring first would double every fabricated number and then check
+    both halves against the same absent source.
+    """
+    kept: list[Interaction] = []
+    missing: list[tuple[str, str]] = []
+    for interaction in row.interacts_with:
+        if interaction.value is None or source.holds(interaction.value):
+            kept.append(interaction)
+            continue
+        missing.append(
+            (
+                interaction.feature,
+                interaction.measure_raw or f"{interaction.value:g}",
+            )
+        )
+        kept.append(interaction.model_copy(update={"value": None}))
+    return kept, tuple(missing)
 
 
 def _matches_raw(row: PredictorRow) -> bool:

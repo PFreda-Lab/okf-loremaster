@@ -26,7 +26,13 @@ from typing import Any
 
 from okf_loremaster.clients.bioc import BioCDocument, BioCSection
 from okf_loremaster.graph.state import Deps, RunState, span
-from okf_loremaster.schemas import MAX_SOURCE_CHARS, Candidate, PaperText, TextBasis
+from okf_loremaster.schemas import (
+    MAX_SOURCE_CHARS,
+    Candidate,
+    PaperText,
+    TextBasis,
+    TextBasisPolicy,
+)
 
 __all__ = ["fulltext_node"]
 
@@ -80,6 +86,21 @@ async def fulltext_node(state: RunState, deps: Deps) -> dict[str, Any]:
 
         full = sum(1 for source in texts.values() if source.is_full_text)
         truncated = sum(1 for source in texts.values() if source.truncated)
+
+        if deps.basis is TextBasisPolicy.FULL_TEXT and full < len(texts):
+            # `rank` confirmed each of these was in the open-access subset, so anything
+            # abstract-only here failed between that check and this fetch — a request that
+            # errored, or a document whose every section was larger than the whole budget.
+            # The papers are kept, because an abstract is worse than a full text and better
+            # than a hole, but the run must not report a full-text corpus it does not have.
+            note = (
+                f"--basis full-text asked for full text everywhere, and {len(texts) - full} "
+                f"paper(s) fell back to their abstract after passing the open-access check; "
+                f"`text_basis` in each document says which"
+            )
+            warnings.append(note)
+            deps.warn(NODE, note)
+
         report["summary"] = (
             f"{len(texts)} paper(s): {full} full text, {len(texts) - full} abstract only"
             + (f", {truncated} truncated to the prompt budget" if truncated else "")
@@ -109,7 +130,10 @@ async def _fetch_all(
 
 async def _source_for(deps: Deps, candidate: Candidate, failures: list[str]) -> PaperText:
     document: BioCDocument | None = None
-    if candidate.pmcid:
+    # `--basis abstract` skips BioC outright rather than fetching a full text and
+    # discarding it. That is the whole cost of the flag: one request per PMC-linked paper
+    # not made, and a run that never touches the open-access subset at all.
+    if candidate.pmcid and deps.basis is not TextBasisPolicy.ABSTRACT:
         try:
             document = await deps.clients.bioc.fetch(candidate.pmcid, node=NODE)
         except Exception as exc:

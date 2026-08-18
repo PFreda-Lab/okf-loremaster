@@ -209,6 +209,37 @@ async def test_a_workspace_without_schema_support_falls_back_rather_than_failing
     assert "gateway/deployment" in notes[0].message, "the note must name the model refused"
 
 
+async def test_a_grammar_that_will_not_compile_is_a_refusal_in_other_words(
+    settings_factory: Any,
+) -> None:
+    """The same event, worded so that it reads like a timeout rather than a decline.
+
+    Verbatim from an Azure AI Foundry Anthropic deployment (2026-08-17), where it ended
+    three consecutive runs at the charter node — the first one — on two different
+    models. A provider compiles the schema into a decoding grammar before the model sees
+    anything; one it cannot compile in time is one it will not honor, and the schema
+    does not get smaller by waiting. Matching only "structured outputs" left the run
+    dead on the first node with a bundle nobody could build.
+    """
+
+    def reply(kwargs: dict[str, Any]) -> str:
+        if "response_format" in kwargs:
+            raise ValueError(
+                'AnthropicException - {"type":"error","error":{"type":'
+                '"invalid_request_error","message":"Grammar compilation timed out."}}'
+            )
+        return "{}"
+
+    completion = FakeCompletion(replies=reply)
+    router, _ = _router(settings_factory, completion=completion)
+
+    result = await router.complete(Role.REASONING, MESSAGES, node="charter", response_format=SCHEMA)
+
+    assert result.text == "{}"
+    assert completion.call_count == 2, "one rejected call, then one without the schema"
+    assert "response_format" not in completion.calls[1]
+
+
 async def test_the_refusal_is_learned_once_not_rediscovered_per_call(
     settings_factory: Any,
 ) -> None:

@@ -32,10 +32,12 @@ bundles/
 /charter.yaml
 /*.charter.yaml
 
-# Internal working notes: the agent operating manual and the datestamped build log.
-# Kept local — they are about how this was built, not about how it is used.
+# Internal working notes: the agent operating manual, the datestamped build log, and the
+# release runbook. Kept local — they are about how this was built and shipped, not about
+# how it is used.
 /CLAUDE.md
 /Build_Progress.md
+/RELEASING.md
 
 # Agent tooling state: local permissions, session files, transcripts. Machine- and
 # operator-specific, and none of it describes the package.

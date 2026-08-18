@@ -43,6 +43,7 @@ from okf_loremaster.schemas import (
     DEFAULT_TOPIC_PAPER_MAX,
     DEFAULT_TOPIC_PAPER_MIN,
     Charter,
+    TextBasisPolicy,
 )
 
 if TYPE_CHECKING:  # imported lazily below; litellm and httpx are slow to import
@@ -123,6 +124,9 @@ class PastRun:
     # instead of in a second folder named after the id. Empty for a run checkpointed
     # before this was recorded.
     directory: str = ""
+    # The `--basis` the run was built under. Empty for a checkpoint written before this
+    # was recorded, which reads as the default and is what those runs did.
+    basis: str = ""
 
 
 def started_at(run_id: str) -> datetime | None:
@@ -363,6 +367,7 @@ async def _read_run(saver: Any, run_id: str) -> PastRun:
         reached=_reached(values),
         finished=bool(values.get("validated")),
         directory=str(values.get("directory") or ""),
+        basis=str(values.get("basis") or ""),
     )
 
 
@@ -397,6 +402,11 @@ class RunOptions:
     out: Path | None = None
     pool_size: int = 800
     screen_budget: int = 400
+    # What a run is willing to read. The default reads full text where it exists and the
+    # abstract everywhere else; the other two restrict the corpus itself, not just the
+    # reading, and both are recorded in the manifest so a bundle can tell "abstract-only
+    # by policy" from "abstract-only because that is all PMC had".
+    basis: TextBasisPolicy = TextBasisPolicy.ANY
     target_papers: int = DEFAULT_TARGET_PAPERS
     topic_paper_min: int = DEFAULT_TOPIC_PAPER_MIN
     topic_paper_max: int = DEFAULT_TOPIC_PAPER_MAX
@@ -421,6 +431,34 @@ class RunOptions:
     tui: bool = False
     json_out: bool = False
     verbose: int = 0
+
+
+def _resumed_basis(options: RunOptions, past: PastRun | None) -> tuple[TextBasisPolicy, str]:
+    """The basis policy a run actually proceeds under, and a note when it is not the flag.
+
+    A fresh run takes what was typed. A resumed one takes what its checkpoint says,
+    because `--basis` is spent in `rank` — it decides which papers may enter the pool at
+    all — and by the time a run is resumable that selection is already made and screened.
+    Honoring a new flag here would restrict only the nodes that have yet to run, on a
+    corpus chosen under the old rule, and then write a manifest naming the new one.
+
+    Tolerant of an older checkpoint, which carries no basis at all: absent reads as the
+    default, which is what those runs did. An unreadable value reads the same way rather
+    than failing a resume over a string in a database.
+    """
+    if past is None:
+        return options.basis, ""
+    try:
+        remembered = TextBasisPolicy(past.basis) if past.basis else TextBasisPolicy.ANY
+    except ValueError:
+        remembered = TextBasisPolicy.ANY
+    if remembered is options.basis:
+        return remembered, ""
+    return remembered, (
+        f"--basis {options.basis.value} was ignored: run {past.run_id} was built with "
+        f"--basis {remembered.value}, and its corpus was already selected under it. "
+        f"Start a fresh run to read this literature a different way."
+    )
 
 
 def run_directory(
@@ -510,7 +548,7 @@ async def build_run(
     """
     from okf_loremaster.clients import build_clients
     from okf_loremaster.config import load_settings
-    from okf_loremaster.events import EventBus
+    from okf_loremaster.events import EventBus, WarningEvent
     from okf_loremaster.graph.build import run_build
     from okf_loremaster.graph.state import Deps
 
@@ -541,6 +579,13 @@ async def build_run(
             "an unfinished run back up. `okf-loremaster runs` lists them."
         )
 
+    # Read back rather than retyped, for the same reason as the prompt and for a sharper
+    # one: `--basis` decided which papers the ranked corpus is allowed to contain, and
+    # that decision is already spent by the time anything is resumable. A resume given a
+    # different one would apply it to whatever nodes still have to run, and leave a bundle
+    # whose manifest names a policy its corpus was not selected under.
+    basis, basis_note = _resumed_basis(options, past)
+
     run_id = options.resume or new_run_id()
     # Decided here, before the graph starts, and carried on `Deps`. The emit node must
     # not work it out for itself: a resumed run would then land somewhere else than the
@@ -554,6 +599,9 @@ async def build_run(
     finalize = options.finalize if options.finalize is not None else Finalize.BOTH
     bus = EventBus()
     task = attach(bus) if attach is not None else _start_renderer(bus, options, console)
+    if basis_note:
+        # After the renderer, so it is seen rather than emitted into a closed bus.
+        bus.emit(WarningEvent(node="run", message=basis_note))
 
     clients = build_clients(resolved, bus=bus, transport=transport)
     # Built here rather than inline below so that reclaiming and reading share one path.
@@ -579,6 +627,7 @@ async def build_run(
         extraction_cache=None if options.dry_run else extractions,
         pool_size=options.pool_size,
         screen_budget=options.screen_budget,
+        basis=basis,
         max_queries=options.max_queries,
         max_rounds=options.max_rounds,
         target_papers=options.target_papers,

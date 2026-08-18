@@ -14,6 +14,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints
 
+from okf_loremaster.basis import TextBasisPolicy
 from okf_loremaster.schemas.limits import truncate_chars
 
 __all__ = [
@@ -21,11 +22,15 @@ __all__ = [
     "Confidence",
     "Direction",
     "EvidenceType",
+    "InteractionMagnitude",
+    "InteractionType",
     "Model",
     "Slug",
     "StrengthGrade",
     "StudyDesign",
     "TextBasis",
+    "TextBasisPolicy",
+    "band_interaction",
     "filename_token",
     "is_export_safe",
     "prose",
@@ -196,6 +201,183 @@ class Direction(StrEnum):
     UNCLEAR = "unclear"
 
 
+class InteractionType(StrEnum):
+    """How one variable in a study acts on another. A closed, methodological list.
+
+    Closed because a downstream agent has to be able to branch on it, and free text
+    would give it a synonym set to normalize before it could. Methodological because
+    that is the level this package is allowed to name: correlation, mutual exclusivity,
+    effect modification, confounding, mediation and derivation are properties of study
+    design, not of any condition — the same reason `StudyDesign` belongs here and a
+    disease name does not.
+
+    Six relationships, each with the label for its mirror. Two are symmetric and are
+    their own inverse; the other four are directional, and a mirrored entry that kept
+    the forward label would reverse the claim. Reciprocity is computed in
+    `interactions.py` rather than asked of the model — a model asked to state both
+    halves states them inconsistently, and the second half is free to derive.
+    """
+
+    CORRELATED = "correlated"
+    MUTUALLY_EXCLUSIVE = "mutually_exclusive"
+    MODIFIES = "modifies"
+    MODIFIED_BY = "modified_by"
+    CONFOUNDS = "confounds"
+    CONFOUNDED_BY = "confounded_by"
+    MEDIATES = "mediates"
+    MEDIATED_BY = "mediated_by"
+    DERIVED_FROM = "derived_from"
+    DERIVES = "derives"
+
+    @property
+    def label(self) -> str:
+        """Short form for a markdown table column."""
+        return self.value.replace("_", " ")
+
+    @property
+    def inverse(self) -> InteractionType:
+        """The same relationship, stated from the other variable's side."""
+        return _INVERSE_INTERACTIONS[self]
+
+    @property
+    def structural(self) -> bool:
+        """Whether this relationship holds by construction rather than by measurement.
+
+        Two variables that cannot both be present, or one computed from the other, are
+        related as strongly as anything can be and there is no coefficient to band. The
+        magnitude for those is `structural`, which says more than any number would.
+        """
+        return self in _STRUCTURAL_INTERACTIONS
+
+
+_INVERSE_INTERACTIONS: dict[InteractionType, InteractionType] = {
+    InteractionType.CORRELATED: InteractionType.CORRELATED,
+    InteractionType.MUTUALLY_EXCLUSIVE: InteractionType.MUTUALLY_EXCLUSIVE,
+    InteractionType.MODIFIES: InteractionType.MODIFIED_BY,
+    InteractionType.MODIFIED_BY: InteractionType.MODIFIES,
+    InteractionType.CONFOUNDS: InteractionType.CONFOUNDED_BY,
+    InteractionType.CONFOUNDED_BY: InteractionType.CONFOUNDS,
+    InteractionType.MEDIATES: InteractionType.MEDIATED_BY,
+    InteractionType.MEDIATED_BY: InteractionType.MEDIATES,
+    InteractionType.DERIVED_FROM: InteractionType.DERIVES,
+    InteractionType.DERIVES: InteractionType.DERIVED_FROM,
+}
+
+_STRUCTURAL_INTERACTIONS = frozenset(
+    {
+        InteractionType.MUTUALLY_EXCLUSIVE,
+        InteractionType.DERIVED_FROM,
+        InteractionType.DERIVES,
+    }
+)
+
+
+class InteractionMagnitude(StrEnum):
+    """How much one variable acts on another. Computed, never asked for.
+
+    A fifth word for "how much do I believe this" would be a disaster in a table that
+    already carries four, so this one is deliberately not called strength: `strength` is
+    study quality, `Confidence` is whether the row was read right, OKF's trust tiers are
+    human sign-off, `ranking.relevance` is worth retrieving. This is the size of one
+    relationship between two variables and nothing else.
+
+    Five values, and only three of them are a band. `STRUCTURAL` is true by construction
+    and has no coefficient; `STATED` is a relationship the paper asserts in prose without
+    a number that can be banded. Both are more honest than inventing a band for them, and
+    the verbatim measure prints beside all five either way.
+    """
+
+    STRONG = "strong"
+    MODERATE = "moderate"
+    WEAK = "weak"
+    STRUCTURAL = "structural"
+    STATED = "stated"
+
+
+# Cutoffs by measure, as `(strong, moderate)` thresholds on the absolute value, and
+# whether the scale runs the other way. Only measures whose scale means the same thing in
+# every literature are listed: a correlation coefficient and a variance inflation factor
+# are statistics, so they belong in this package under the same rule that admits
+# `StudyDesign` and excludes a disease name.
+#
+# An odds ratio, a beta and a hazard ratio are deliberately absent. Their scale depends on
+# the units of the variable and on the outcome's base rate, so a fixed cutoff would be
+# wrong somewhere and there is no way to be right everywhere. They band as `stated`, which
+# is what the paper actually told us.
+#
+# A p-value is absent for a different and sharper reason. A p for an interaction term is
+# evidence that an interaction *exists*; it says nothing about how big it is, and a large
+# study reports a vanishing p for an effect too small to matter. Banding on it would put
+# `strong` next to a relationship the paper itself calls negligible.
+_INTERACTION_CUTOFFS: dict[str, tuple[float, float, bool]] = {
+    # Correlation and association coefficients, all on a 0-1 scale.
+    "r": (0.7, 0.4, False),
+    "rho": (0.7, 0.4, False),
+    "rs": (0.7, 0.4, False),
+    "tau": (0.7, 0.4, False),
+    "phi": (0.7, 0.4, False),
+    "kappa": (0.7, 0.4, False),
+    "cramersv": (0.7, 0.4, False),
+    "icc": (0.7, 0.4, False),
+    # The squares of the same cutoffs, so a paper reporting shared variance bands where
+    # the coefficient behind it would have.
+    "r2": (0.49, 0.16, False),
+    # Collinearity diagnostics. The conventional thresholds, and `tolerance` is 1/VIF, so
+    # its scale is inverted — a *small* tolerance is a strong relationship.
+    "vif": (10.0, 5.0, False),
+    "tolerance": (0.1, 0.2, True),
+}
+
+
+def band_interaction(
+    kind: InteractionType, measure: str, value: float | None
+) -> InteractionMagnitude:
+    """How large one interaction is, from what the paper printed. No judgment.
+
+    Three outcomes and they are checked in this order. A relationship that holds by
+    construction is `structural` whatever number sits beside it — a coefficient between
+    two variables that cannot co-occur is a description of the study's design, not of its
+    findings. Otherwise a recognized measure with a value bands; everything else is
+    `stated`, which is not a failure but the ordinary answer for a paper that reports an
+    interaction in prose.
+    """
+    if kind.structural:
+        return InteractionMagnitude.STRUCTURAL
+    cutoffs = _INTERACTION_CUTOFFS.get(_canonical_measure(measure))
+    if cutoffs is None or value is None:
+        return InteractionMagnitude.STATED
+    strong, moderate, inverted = cutoffs
+    magnitude = abs(value)
+    if (magnitude <= strong) if inverted else (magnitude >= strong):
+        return InteractionMagnitude.STRONG
+    if (magnitude <= moderate) if inverted else (magnitude >= moderate):
+        return InteractionMagnitude.MODERATE
+    return InteractionMagnitude.WEAK
+
+
+# Superscripts, which is how `R²` reaches us from a typeset paper.
+_SUPERSCRIPTS = str.maketrans("\N{SUPERSCRIPT TWO}", "2")
+
+
+def _canonical_measure(measure: str) -> str:
+    """Fold a measure name onto a key in the table above, or onto nothing.
+
+    Papers name a statistic three ways — the bare symbol, the symbol with its author
+    (`Pearson r`, `Spearman rho`), and the author's name alone (`Cramer's V`) — so
+    neither the last token nor the whole string is reliably the key on its own. Both are
+    tried, most specific first, and a miss folds to `""`, which bands as `stated`. That
+    is the right answer for an unrecognized measure and the reason nothing here guesses.
+    """
+    normalized = measure.lower().translate(_SUPERSCRIPTS)
+    tokens = "".join(ch if ch.isalnum() else " " for ch in normalized).split()
+    if not tokens:
+        return ""
+    for key in ("".join(tokens), tokens[-1]):
+        if key in _INTERACTION_CUTOFFS:
+            return key
+    return ""
+
+
 class TextBasis(StrEnum):
     """What the extraction actually read.
 
@@ -207,6 +389,12 @@ class TextBasis(StrEnum):
 
     FULL_TEXT = "full_text"
     ABSTRACT = "abstract"
+
+
+# Re-exported, not defined here: `cli.py` declares `--basis` and must not import
+# pydantic to do it, so the policy enum lives in a stdlib-only module. It belongs in this
+# namespace anyway — the run-level instruction and the per-paper observation are read
+# together, and separating them by import path is how the two get confused.
 
 
 # Licenses under which redistributing a derived, quoting summary is unambiguous.
