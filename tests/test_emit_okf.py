@@ -154,7 +154,7 @@ async def test_both_parsers_see_the_same_document(
 async def test_the_key_is_domain_it_equals_the_folder_and_topic_never_appears(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """"Topic" is the human word. A file carrying both keys is filed by whichever one
+    """ "Topic" is the human word. A file carrying both keys is filed by whichever one
     the reader happens to prefer, which is a bundle that reorganizes itself per tool."""
     _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
     parsed = read_bundle(bundle)
@@ -208,9 +208,7 @@ async def test_the_required_sections_are_always_present_in_order(
         # Present or absent, never reordered: the order is what makes the file scannable
         # in the same shape every time, and a reader who learns it should not have to
         # re-learn it per document.
-        assert headings == [name for name in BODY_SECTIONS if name in headings], (
-            document.path.name
-        )
+        assert headings == [name for name in BODY_SECTIONS if name in headings], document.path.name
         for _name, text in document.sections():
             assert text.strip(), document.path.name
 
@@ -308,9 +306,7 @@ async def test_no_abstract_leaves_the_section_out_of_every_document(
         headings = [name for name, _ in document.sections()]
         assert ABSTRACT_SECTION not in headings, document.path.name
         assert set(REQUIRED_BODY_SECTIONS) <= set(headings), document.path.name
-        assert headings == [name for name in BODY_SECTIONS if name in headings], (
-            document.path.name
-        )
+        assert headings == [name for name in BODY_SECTIONS if name in headings], document.path.name
 
     report = validate_bundle(bundle)
     assert report.errors == (), report.lines()
@@ -506,12 +502,8 @@ async def test_every_line_of_the_predictor_index_is_an_address_that_resolves(
         assert (bundle / target).is_file(), target
         # The `#` column of that paper's own table, which is the second half of the
         # address: without it a reader lands on a file and not on a finding.
-        document = next(
-            d for d in read_bundle(bundle).documents() if d.path == bundle / target
-        )
-        numbers = {
-            r["#"] for r in markdown_table(document.section("Predictors reported") or "")
-        }
+        document = next(d for d in read_bundle(bundle).documents() if d.path == bundle / target)
+        numbers = {r["#"] for r in markdown_table(document.section("Predictors reported") or "")}
         assert entry["row"] in numbers, f"{target} has no row {entry['row']}"
 
 

@@ -192,8 +192,7 @@ def test_no_clinical_specific_appears_in_source(path: Path) -> None:
 
     assert not offenders, (
         "src/ must not name a clinical specific — it is derived from the charter at "
-        "runtime, and a constant here would be wrong for the next project:\n"
-        + "\n".join(offenders)
+        "runtime, and a constant here would be wrong for the next project:\n" + "\n".join(offenders)
     )
 
 

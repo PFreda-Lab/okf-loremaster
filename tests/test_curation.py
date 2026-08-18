@@ -194,9 +194,7 @@ def test_p8_every_topic_is_listed_and_every_topic_is_ordered(seed: int) -> None:
 
 def test_the_ceiling_trims_the_worst_ranked_first() -> None:
     charter = charter_with(["aa"], topic_paper_min=1, topic_paper_max=2)
-    placement = enforce_bounds(
-        charter, kept={"aa": ["3", "1", "2"]}, rank=ranked(["1", "2", "3"])
-    )
+    placement = enforce_bounds(charter, kept={"aa": ["3", "1", "2"]}, rank=ranked(["1", "2", "3"]))
     assert placement.topics == {"aa": ["1", "2"]}
     assert placement.trimmed == 1
 

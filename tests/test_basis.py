@@ -64,9 +64,7 @@ def facts(bundle: Path, filename: str, heading: str) -> dict[str, str]:
     """
     lines = (bundle / filename).read_text(encoding="utf-8").splitlines()
     start = lines.index(f"## {heading}") + 1
-    end = next(
-        (n for n in range(start, len(lines)) if lines[n].startswith("## ")), len(lines)
-    )
+    end = next((n for n in range(start, len(lines)) if lines[n].startswith("## ")), len(lines))
     return fact_list("\n".join(lines[start:end]))
 
 
@@ -86,7 +84,8 @@ def test_the_default_is_read_whatever_each_paper_offers() -> None:
     """
     group = typer.main.get_command(app)
     params = {
-        param.name: param for param in group.commands["build"].params  # type: ignore[attr-defined]
+        param.name: param
+        for param in group.commands["build"].params  # type: ignore[attr-defined]
     }
 
     assert params["basis"].default is TextBasisPolicy.ANY
@@ -328,8 +327,10 @@ def test_a_restricted_run_prices_its_source_length_instead_of_guessing_it(
 
     assert phrase in extract.basis
     assert not any("largest thing it cannot know" in note for note in estimate.notes)
-    assert any(f"`--basis {basis.value}` fixes what each paper is read from" in note
-               for note in estimate.notes)
+    assert any(
+        f"`--basis {basis.value}` fixes what each paper is read from" in note
+        for note in estimate.notes
+    )
 
 
 def test_the_default_projection_still_says_what_it_is_guessing(settings_factory: Any) -> None:

@@ -192,8 +192,9 @@ def write_bundle(
             f"delete it by hand if it is from an earlier taxonomy"
         )
 
-    written.append(_write(path / INDEX_FILENAME, root_index(grouped, charter=charter,
-                                                            manifest=manifest)))
+    written.append(
+        _write(path / INDEX_FILENAME, root_index(grouped, charter=charter, manifest=manifest))
+    )
     written.append(
         _write(
             path / CATALOG_FILENAME,
@@ -204,11 +205,10 @@ def write_bundle(
             ),
         )
     )
+    written.append(_write(path / PREDICTORS_FILENAME, predictor_index(records, charter=charter)))
     written.append(
-        _write(path / PREDICTORS_FILENAME, predictor_index(records, charter=charter))
+        _write(path / DESCRIPTOR_FILENAME, descriptor(grouped, charter=charter, manifest=manifest))
     )
-    written.append(_write(path / DESCRIPTOR_FILENAME, descriptor(grouped, charter=charter,
-                                                                 manifest=manifest)))
     written.append(_write(path / LOG_FILENAME, log or log_markdown(charter, manifest)))
     written.append(_write(path / SEARCH_FILENAME, search_markdown(charter, manifest)))
     # Written here as well as by the run directory, so the descriptor's charter pointer
@@ -229,9 +229,7 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def _by_topic(
-    records: Sequence[ConceptRecord], charter: Charter
-) -> dict[str, list[ConceptRecord]]:
+def _by_topic(records: Sequence[ConceptRecord], charter: Charter) -> dict[str, list[ConceptRecord]]:
     """Charter order first, then any topic a record claims that the charter does not.
 
     An empty topic keeps its entry. A record on an unknown topic keeps its file rather
@@ -250,9 +248,7 @@ def _stale_directories(path: Path, grouped: Mapping[str, list[ConceptRecord]]) -
     return sorted(
         item
         for item in path.iterdir()
-        if item.is_dir()
-        and not item.name.startswith((".", "_"))
-        and item.name not in grouped
+        if item.is_dir() and not item.name.startswith((".", "_")) and item.name not in grouped
     )
 
 
@@ -302,9 +298,7 @@ def frontmatter_for(record: ConceptRecord) -> dict[str, Any]:
         "sources": [_source(ref) for ref in record.sources],
     }
     if record.verified:
-        fields["verified"] = [
-            {"by": entry.by, "at": stamp(entry.at)} for entry in record.verified
-        ]
+        fields["verified"] = [{"by": entry.by, "at": stamp(entry.at)} for entry in record.verified]
     return fields
 
 
@@ -380,11 +374,14 @@ def body_for(record: ConceptRecord, *, abstracts: bool = True) -> str:
         VOCABULARY_SECTION: _vocabulary(extraction),
         CAVEATS_SECTION: extraction.caveats.strip() or "None stated.",
     }
-    return "\n\n".join(
-        f"# {heading}\n\n{written[heading]}"
-        for heading in BODY_SECTIONS
-        if written[heading].strip()
-    ) + "\n"
+    return (
+        "\n\n".join(
+            f"# {heading}\n\n{written[heading]}"
+            for heading in BODY_SECTIONS
+            if written[heading].strip()
+        )
+        + "\n"
+    )
 
 
 def _abstract(record: ConceptRecord) -> str:
@@ -447,9 +444,7 @@ def _interactions(extraction: Extraction) -> str:
             )
     if not lines:
         return ""
-    return "\n".join(
-        [table_row(INTERACTION_COLUMNS), table_rule(len(INTERACTION_COLUMNS)), *lines]
-    )
+    return "\n".join([table_row(INTERACTION_COLUMNS), table_rule(len(INTERACTION_COLUMNS)), *lines])
 
 
 def _bottom_line(record: ConceptRecord) -> str:
@@ -635,9 +630,7 @@ def _null_findings(extraction: Extraction) -> str:
         return "None reported — the paper states no null or non-significant finding."
     body = [table_row(_NULL_COLUMNS), table_rule(len(_NULL_COLUMNS))]
     for number, finding in enumerate(reported, start=1):
-        body.append(
-            table_row((str(number), finding.predictor, finding.outcome, finding.detail))
-        )
+        body.append(table_row((str(number), finding.predictor, finding.outcome, finding.detail)))
     quotes = _null_quotes(reported)
     if quotes:
         body.append("")
@@ -681,9 +674,7 @@ def _vocabulary(extraction: Extraction) -> str:
 # --- indexes ----------------------------------------------------------------
 
 
-def topic_index(
-    slug: str, records: Sequence[ConceptRecord], *, charter: Charter
-) -> str:
+def topic_index(slug: str, records: Sequence[ConceptRecord], *, charter: Charter) -> str:
     topic = charter.topic(slug)
     title = topic.title if topic is not None else slug
     scope = topic.scope if topic is not None else ""
@@ -782,8 +773,11 @@ def root_index(
             ("Population", charter.population),
             ("Outcome", charter.outcome),
             ("Languages", ", ".join(charter.languages) or "any"),
-            ("Target", f"{charter.target_papers} papers, {charter.topic_paper_min}"
-                       f"-{charter.topic_paper_max} per topic"),
+            (
+                "Target",
+                f"{charter.target_papers} papers, {charter.topic_paper_min}"
+                f"-{charter.topic_paper_max} per topic",
+            ),
             ("From", str(charter.min_year) if charter.min_year else ""),
             ("Full charter", f"[{CHARTER_FILENAME}]({CHARTER_FILENAME})"),
         ]
@@ -918,9 +912,7 @@ def _predictor_section(group: PredictorGroup) -> list[str]:
     summary = [
         f"{group.papers} paper(s)",
         f"{group.rows} row(s)",
-        f"{len(group.topics)} topic(s): {', '.join(group.topics)}"
-        if group.topics
-        else "no topic",
+        f"{len(group.topics)} topic(s): {', '.join(group.topics)}" if group.topics else "no topic",
     ]
     lines.append(" · ".join(summary))
     # The audit trail for the clustering, printed only when it actually merged something.
@@ -940,9 +932,7 @@ def _outcome_section(outcome: OutcomeGroup) -> list[str]:
     # `increases (2)` rather than `2 increases`, so the enum value is printed exactly as
     # the `Direction` column of the document prints it and a reader can match the two by
     # eye — and so a count of one does not have to read as "1 increases".
-    counts = " · ".join(
-        f"{direction.value} ({count})" for direction, count in outcome.directions
-    )
+    counts = " · ".join(f"{direction.value} ({count})" for direction, count in outcome.directions)
     line = f"{outcome.papers} paper(s) — {counts}"
     if outcome.contested:
         line += f"  {CONTESTED}"
@@ -1010,9 +1000,7 @@ def log_markdown(charter: Charter, manifest: RunManifest, *, verification: str =
             if query.suspect:
                 note = ("suspect — " + note) if note else "suspect: PubMed rewrote the term"
             body.append(
-                table_row(
-                    (str(number), query.term, f"{query.count:,}", str(query.retrieved), note)
-                )
+                table_row((str(number), query.term, f"{query.count:,}", str(query.retrieved), note))
             )
     else:
         body.append("No queries were executed.")
@@ -1134,7 +1122,7 @@ def _search_how_to_read(manifest: RunManifest) -> list[str]:
         "- **Sent** — the term exactly as it left this tool. Copy it whole.",
         "- **PubMed ran** — what PubMed made of that term. It is checked for every "
         "query, because PubMed does not reject a field tag it does not recognize: it "
-        "silently rewrites `x[nosuchfield]` into `\"x\"[All Fields]`, returns far more "
+        'silently rewrites `x[nosuchfield]` into `"x"[All Fields]`, returns far more '
         "papers than intended, and reports no error at all. When the expansion only "
         "writes out tags the term already carried, this line says so in one sentence. "
         "When PubMed reached for a field or a MeSH heading the term did not ask for, "

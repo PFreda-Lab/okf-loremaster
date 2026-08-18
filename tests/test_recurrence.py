@@ -431,9 +431,9 @@ def test_the_same_records_in_a_different_order_produce_the_same_index() -> None:
     forward = index(*records)
     backward = index(*reversed(records))
     assert labels(forward) == labels(backward)
-    assert [
-        [(site.file, site.row) for site in group.sites] for group in forward.groups
-    ] == [[(site.file, site.row) for site in group.sites] for group in backward.groups]
+    assert [[(site.file, site.row) for site in group.sites] for group in forward.groups] == [
+        [(site.file, site.row) for site in group.sites] for group in backward.groups
+    ]
 
 
 def test_groups_are_ordered_by_how_many_papers_have_to_be_opened() -> None:

@@ -305,9 +305,7 @@ def score_extraction(
     return paper
 
 
-def _score_row(
-    row: PredictorRow, *, paper_score: float, weights: RowWeights
-) -> RowStrength:
+def _score_row(row: PredictorRow, *, paper_score: float, weights: RowWeights) -> RowStrength:
     score, parts, unmeasured = _combine(
         [
             ("paper", paper_score, weights.paper),

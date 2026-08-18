@@ -38,9 +38,7 @@ class AnnotatedDocument:
 
     def by_type(self, concept_type: str) -> tuple[str, ...]:
         """Distinct surface forms of one concept type, most frequent first."""
-        counts = Counter(
-            a.text for a in self.annotations if a.concept_type == concept_type
-        )
+        counts = Counter(a.text for a in self.annotations if a.concept_type == concept_type)
         return tuple(text for text, _ in counts.most_common())
 
     @property
@@ -60,9 +58,7 @@ class PubTatorClient:
         ids = [str(p) for p in pmids]
         for start in range(0, len(ids), BATCH):
             chunk = ids[start : start + BATCH]
-            raw = await self._http.get_text(
-                BASE, params={"pmids": ",".join(chunk)}, node=node
-            )
+            raw = await self._http.get_text(BASE, params={"pmids": ",".join(chunk)}, node=node)
             out.update(parse_pubtator(raw))
         return out
 
@@ -105,9 +101,7 @@ def parse_pubtator(raw: str) -> dict[str, AnnotatedDocument]:
                             identifier=str(ann_infons.get("identifier") or "").strip(),
                         )
                     )
-        out[pmid] = AnnotatedDocument(
-            pmid=pmid, pmcid=pmcid, annotations=tuple(annotations)
-        )
+        out[pmid] = AnnotatedDocument(pmid=pmid, pmcid=pmcid, annotations=tuple(annotations))
     return out
 
 

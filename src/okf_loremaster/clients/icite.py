@@ -77,9 +77,7 @@ class ICiteClient:
     ) -> dict[str, CitationMetrics]:
         out: dict[str, CitationMetrics] = {}
         for chunk in batches([str(p) for p in pmids]):
-            raw = await self._http.get_text(
-                BASE, params={"pmids": ",".join(chunk)}, node=node
-            )
+            raw = await self._http.get_text(BASE, params={"pmids": ",".join(chunk)}, node=node)
             out.update(parse_icite(raw))
         return out
 

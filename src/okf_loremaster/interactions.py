@@ -117,9 +117,7 @@ def mirror_interactions(extraction: Extraction) -> Extraction:
             "predictors": [
                 row
                 if index not in added
-                else row.model_copy(
-                    update={"interacts_with": [*row.interacts_with, *added[index]]}
-                )
+                else row.model_copy(update={"interacts_with": [*row.interacts_with, *added[index]]})
                 for index, row in enumerate(rows)
             ]
         }

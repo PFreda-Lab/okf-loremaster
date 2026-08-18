@@ -145,6 +145,7 @@ class BoundNode(Protocol):
 
     async def __call__(self, state: RunState) -> dict[str, Any]: ...
 
+
 # Every schema that can appear in checkpointed state. Left incomplete, deserializing a
 # resumed run warns now and fails later.
 #
@@ -336,9 +337,7 @@ async def run_build(
     deps.bus.emit(RunStarted(run_id=run_id, prompt=prompt, dry_run=dry_run))
 
     async with checkpointer(deps.settings) as saver:
-        compiled = build_graph(deps).compile(
-            checkpointer=saver, interrupt_after=list(PAUSE_AFTER)
-        )
+        compiled = build_graph(deps).compile(checkpointer=saver, interrupt_after=list(PAUSE_AFTER))
         config: Any = {"configurable": {"thread_id": run_id}}
         entry: RunState | None = (
             None

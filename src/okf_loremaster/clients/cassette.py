@@ -111,8 +111,7 @@ class CassetteTransport(httpx.AsyncBaseTransport):
 def _load(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         raise CassetteMiss(
-            f"Cassette not found: {path}\n"
-            "Record it with `python scripts/record_fixtures.py`."
+            f"Cassette not found: {path}\nRecord it with `python scripts/record_fixtures.py`."
         )
     index: dict[str, dict[str, Any]] = {}
     with path.open(encoding="utf-8") as handle:

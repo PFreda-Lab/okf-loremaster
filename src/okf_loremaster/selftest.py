@@ -147,7 +147,6 @@ async def run_selftest(
         return 1
 
     out.print(
-        f"[green]PASS[/green] unpriced -> [bold]{unpriced}[/bold]   "
-        f"priced -> [bold]{priced}[/bold]"
+        f"[green]PASS[/green] unpriced -> [bold]{unpriced}[/bold]   priced -> [bold]{priced}[/bold]"
     )
     return 0

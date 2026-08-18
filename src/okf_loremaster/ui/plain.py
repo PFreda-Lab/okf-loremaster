@@ -205,9 +205,7 @@ class PlainRenderer:
         if event.summary:
             table.add_row("", event.summary)
         table.add_row("tokens", f"{self._tokens:,}")
-        table.add_row(
-            "cost", format_cost(self._usd, calls=self._calls, unpriced=self._unpriced)
-        )
+        table.add_row("cost", format_cost(self._usd, calls=self._calls, unpriced=self._unpriced))
         table.add_row("model calls", str(self._calls))
         if self._unpriced:
             table.add_row(

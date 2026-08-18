@@ -528,7 +528,7 @@ def test_a_stated_wait_is_honored_rather_than_guessed_under() -> None:
 
     exc = ValueError(
         'AnthropicException - {"error":{"code":"RateLimitReached","message":"Rate limit '
-        'of 250000 per 60s exceeded for UserByModelByMinuteUncachedInputTokens. Please '
+        "of 250000 per 60s exceeded for UserByModelByMinuteUncachedInputTokens. Please "
         'wait 19 seconds before retrying."}}'
     )
 
@@ -582,9 +582,7 @@ async def test_per_role_concurrency_is_capped(settings_factory: Any) -> None:
         )
 
     router, _ = _router(settings_factory, completion=probe, concurrency_fast=3)
-    await asyncio.gather(
-        *(router.complete(Role.FAST, MESSAGES, node="screen") for _ in range(12))
-    )
+    await asyncio.gather(*(router.complete(Role.FAST, MESSAGES, node="screen") for _ in range(12)))
 
     assert peak <= 3
     assert router.ledger.calls == 12

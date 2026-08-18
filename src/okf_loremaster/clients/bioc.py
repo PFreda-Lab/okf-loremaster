@@ -68,11 +68,7 @@ class BioCDocument:
 
     def body_text(self, *, include: frozenset[str] | None = None) -> str:
         """Content sections joined with their headings, for an extraction prompt."""
-        chosen = [
-            s
-            for s in self.content_sections
-            if include is None or s.section_type in include
-        ]
+        chosen = [s for s in self.content_sections if include is None or s.section_type in include]
         return "\n\n".join(f"## {s.section_type}\n{s.text}" for s in chosen if s.text)
 
 

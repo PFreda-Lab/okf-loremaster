@@ -361,9 +361,7 @@ async def test_a_spent_budget_stops_the_run_rather_than_paying_for_a_round_that_
     still reported, and the warning names the flag that would actually fix it, so the
     reason ends up in `log.md` rather than only in the routing.
     """
-    run = await full_run(
-        settings_factory, tmp_path, monkeypatch, screen_budget=UNIQUE_FIRST_ROUND
-    )
+    run = await full_run(settings_factory, tmp_path, monkeypatch, screen_budget=UNIQUE_FIRST_ROUND)
 
     assert run.state["rounds"] == 1
     assert len(run.scripted.screened) == UNIQUE_FIRST_ROUND

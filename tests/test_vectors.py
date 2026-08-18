@@ -355,9 +355,7 @@ async def test_the_run_reports_what_it_split_instead_of_splitting_quietly(
     """A store with 1.7x the chunks of the bundle it came from is a surprise worth
     explaining where it happens."""
     bundle = await golden(settings_factory, tmp_path, monkeypatch)
-    result = await build_index(
-        bundle, embedder=StubEmbedder(window=40), store=RecordingStore()
-    )
+    result = await build_index(bundle, embedder=StubEmbedder(window=40), store=RecordingStore())
 
     assert result.split
     assert result.window == 40
@@ -484,9 +482,7 @@ async def test_the_bundle_points_at_its_index_and_the_index_at_its_bundle(
     # The bundle's own keys survived the patch.
     assert descriptor["kind"] == "okf"
 
-    index_side = yaml.safe_load(
-        (result.path / DESCRIPTOR_FILENAME).read_text(encoding="utf-8")
-    )
+    index_side = yaml.safe_load((result.path / DESCRIPTOR_FILENAME).read_text(encoding="utf-8"))
     assert (result.path / index_side["source_bundle"]).resolve() == bundle.resolve()
 
 

@@ -90,6 +90,7 @@ def _better(left: Candidate, right: Candidate) -> Candidate:
     in that order, because provenance is evidence about relevance while a PMC id is
     only evidence about what can be read later.
     """
+
     def strength(candidate: Candidate) -> tuple[int, int, int]:
         return (len(candidate.found_by), -candidate.best_rank, int(candidate.may_have_full_text))
 

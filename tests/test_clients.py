@@ -296,9 +296,7 @@ def test_a_linkset_covering_several_papers_is_dropped_rather_than_divided() -> N
             "linksets": [
                 {
                     "ids": ["1", "2", "3"],
-                    "linksetdbs": [
-                        {"linkname": "pubmed_pubmed_citedin", "links": ["10", "11"]}
-                    ],
+                    "linksetdbs": [{"linkname": "pubmed_pubmed_citedin", "links": ["10", "11"]}],
                 }
             ]
         }
@@ -334,9 +332,10 @@ async def test_one_oversized_chunk_costs_its_own_papers_and_no_others(
             200,
             json={
                 "linksets": [
-                    {"ids": [pmid], "linksetdbs": [
-                        {"linkname": "pubmed_pubmed_citedin", "links": ["1", "2"]}
-                    ]}
+                    {
+                        "ids": [pmid],
+                        "linksetdbs": [{"linkname": "pubmed_pubmed_citedin", "links": ["1", "2"]}],
+                    }
                     for pmid in ids
                 ]
             },
@@ -440,9 +439,7 @@ def test_a_ca_bundle_that_is_not_there_fails_before_the_first_request(
     Which is the failure this variable exists to explain, so getting it wrong must not
     produce the same symptom the right value cures.
     """
-    settings = settings_factory(
-        ncbi_email="test@example.org", ca_bundle=tmp_path / "not-here.pem"
-    )
+    settings = settings_factory(ncbi_email="test@example.org", ca_bundle=tmp_path / "not-here.pem")
     with pytest.raises(ConfigError) as excinfo:
         build_clients(settings, bus=EventBus())
     assert "OKF_LOREMASTER_CA_BUNDLE" in str(excinfo.value)

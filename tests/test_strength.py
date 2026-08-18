@@ -134,8 +134,7 @@ def test_size_scales_by_order_of_magnitude_not_by_headcount() -> None:
     """Logarithmic, so 500 to 5,000 is the same step as 5,000 to 50,000. Linear scaling
     would compress every study below the largest into one indistinguishable band."""
     scores = [
-        score_extraction(paper(n=n), charter=SCALE).parts["size"]
-        for n in (500, 5_000, 50_000)
+        score_extraction(paper(n=n), charter=SCALE).parts["size"] for n in (500, 5_000, 50_000)
     ]
     first, second = scores[1] - scores[0], scores[2] - scores[1]
 
@@ -293,8 +292,9 @@ def test_a_paper_with_nothing_measured_lands_mid_scale_and_says_why() -> None:
     scored = score_extraction(paper(), charter=None)
 
     assert scored.unmeasured == ["design", "size", "adjustment"]
-    assert scored.score == pytest.approx(0.5 * (1 - DEFAULT_PAPER_WEIGHTS.basis) + 0.4 *
-                                         DEFAULT_PAPER_WEIGHTS.basis)
+    assert scored.score == pytest.approx(
+        0.5 * (1 - DEFAULT_PAPER_WEIGHTS.basis) + 0.4 * DEFAULT_PAPER_WEIGHTS.basis
+    )
 
 
 def test_the_parts_add_up_to_the_score() -> None:

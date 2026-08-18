@@ -145,8 +145,9 @@ def test_a_cited_by_count_restores_the_signal_an_outage_removed() -> None:
     much = Candidate(pmid="1", title="t", year=2015).with_citation_count(120)
     little = Candidate(pmid="2", title="t", year=2015).with_citation_count(0)
 
-    assert relevance(much, now_year=NOW)[1]["citation"] > (
-        relevance(little, now_year=NOW)[1]["citation"]
+    assert (
+        relevance(much, now_year=NOW)[1]["citation"]
+        > (relevance(little, now_year=NOW)[1]["citation"])
     )
 
 
@@ -176,8 +177,9 @@ def test_a_paper_too_new_to_be_cited_is_still_not_scored_at_the_floor() -> None:
     fresh = Candidate(pmid="1", title="t", year=NOW).with_citation_count(0)
     old = Candidate(pmid="2", title="t", year=2010).with_citation_count(0)
 
-    assert relevance(fresh, now_year=NOW)[1]["citation"] > (
-        relevance(old, now_year=NOW)[1]["citation"]
+    assert (
+        relevance(fresh, now_year=NOW)[1]["citation"]
+        > (relevance(old, now_year=NOW)[1]["citation"])
     )
 
 
@@ -238,9 +240,7 @@ def test_mmr_prefers_a_different_paper_to_a_near_duplicate() -> None:
 
 def test_mmr_at_lambda_one_is_pure_relevance() -> None:
     scored = score_all([make(str(i), title=f"t{i}") for i in range(6)], now_year=NOW)
-    assert [i.pmid for i in mmr_order(scored, limit=4, lambda_=1.0)] == [
-        i.pmid for i in scored[:4]
-    ]
+    assert [i.pmid for i in mmr_order(scored, limit=4, lambda_=1.0)] == [i.pmid for i in scored[:4]]
 
 
 # --- quota ------------------------------------------------------------------

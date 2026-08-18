@@ -328,14 +328,12 @@ class HttpClient:
                 if response.status_code not in _RETRY_STATUS:
                     if response.status_code >= 400:
                         raise HttpError(
-                            f"{_redact(url)}: HTTP {response.status_code} "
-                            f"{response.text[:200]!r}"
+                            f"{_redact(url)}: HTTP {response.status_code} {response.text[:200]!r}"
                         )
                     return response
                 if attempt == attempts:
                     raise HttpError(
-                        f"{_redact(url)}: HTTP {response.status_code} after "
-                        f"{attempts} attempt(s)"
+                        f"{_redact(url)}: HTTP {response.status_code} after {attempts} attempt(s)"
                     )
                 reason = f"HTTP {response.status_code}"
                 retry_after = _retry_after(response)

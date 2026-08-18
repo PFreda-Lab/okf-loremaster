@@ -272,9 +272,7 @@ def test_a_generous_paper_still_fits_under_every_list_ceiling() -> None:
     extraction = Extraction(
         predictors=[a_row(predictor=f"factor {i}") for i in range(MAX_PREDICTOR_ROWS)],
         null_findings=[NullFinding(predictor=f"null {i}") for i in range(MAX_NULL_FINDINGS)],
-        vocabulary_hints=[
-            VocabularyHint(concept=f"term {i}") for i in range(MAX_VOCABULARY_HINTS)
-        ],
+        vocabulary_hints=[VocabularyHint(concept=f"term {i}") for i in range(MAX_VOCABULARY_HINTS)],
     )
 
     trimmed, warnings = extraction.enforce_budgets()
@@ -415,9 +413,7 @@ def test_a_within_budget_extraction_produces_no_warnings() -> None:
         ("", 0),
     ],
 )
-def test_sentence_splitting_handles_the_abbreviations_that_matter(
-    text: str, expected: int
-) -> None:
+def test_sentence_splitting_handles_the_abbreviations_that_matter(text: str, expected: int) -> None:
     assert len(sentences(text)) == expected
 
 
@@ -726,9 +722,7 @@ def test_a_near_miss_is_flagged_borderline_for_reconsideration() -> None:
     """Cheaper and better-informed than another search round when a topic is thin."""
     assert ScreenVerdict(pmid="1", include=False, relevance=2).borderline
     assert not ScreenVerdict(pmid="2", include=False, relevance=0).borderline
-    assert ScreenVerdict(
-        pmid="3", include=True, relevance=3, confidence=Confidence.LOW
-    ).borderline
+    assert ScreenVerdict(pmid="3", include=True, relevance=3, confidence=Confidence.LOW).borderline
 
 
 def test_relevance_is_bounded() -> None:

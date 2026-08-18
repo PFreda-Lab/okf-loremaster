@@ -166,7 +166,7 @@ _ABBREVIATIONS = frozenset(
     }
 )
 
-_TRAILING_PUNCT = '"\'()[]'
+_TRAILING_PUNCT = "\"'()[]"
 
 
 def sentences(text: str) -> list[str]:

@@ -41,8 +41,7 @@ async def review_node(state: RunState, deps: Deps) -> dict[str, Any]:
         if not signoff.approved or signoff.at is None:
             note = (
                 "sign-off was not given, so the bundle is emitted with no `verified` "
-                "block — the OKF `unverified` tier"
-                + (f" ({signoff.note})" if signoff.note else "")
+                "block — the OKF `unverified` tier" + (f" ({signoff.note})" if signoff.note else "")
             )
             warnings.append(note)
             deps.warn(NODE, note)
@@ -50,9 +49,7 @@ async def review_node(state: RunState, deps: Deps) -> dict[str, Any]:
             return {"warnings": warnings}
 
         attestation = Verification(by=signoff.by, at=signoff.at)
-        stamped = [
-            record.model_copy(update={"verified": [attestation]}) for record in records
-        ]
+        stamped = [record.model_copy(update={"verified": [attestation]}) for record in records]
         report["summary"] = f"{len(stamped)} document(s) signed off by {signoff.by}"
 
     deps.progress(NODE, f"signed off by {signoff.by}")

@@ -224,9 +224,7 @@ class IndexResult:
 # --- chunking ---------------------------------------------------------------
 
 
-def chunks_for(
-    document: OkfDocument, *, root: Path, window: Window | None = None
-) -> list[Chunk]:
+def chunks_for(document: OkfDocument, *, root: Path, window: Window | None = None) -> list[Chunk]:
     """Every chunk one document contributes: one concept chunk, then one per row.
 
     With a `window`, a chunk too long for it becomes several parts that each fit; without
@@ -413,9 +411,7 @@ def _parts(
     ]
 
 
-def _pack(
-    blocks: Sequence[str], *, lead: str, joiner: str, window: Window | None
-) -> list[str]:
+def _pack(blocks: Sequence[str], *, lead: str, joiner: str, window: Window | None) -> list[str]:
     """The text of each part, in order. One part whenever the whole thing fits."""
     units = [block for block in blocks if block]
     whole = joiner.join([lead, *units]) if units else lead
@@ -445,9 +441,7 @@ def _pack(
     return [joiner.join([lead, *part]) for part in filled]
 
 
-def _fill(
-    atoms: Sequence[str], *, budget: int, joiner: str, window: Window
-) -> list[list[str]]:
+def _fill(atoms: Sequence[str], *, budget: int, joiner: str, window: Window) -> list[list[str]]:
     """Group atoms into parts, each under `budget`. Never empty, never an empty group.
 
     Sized from per-atom counts plus a token for each join rather than by re-counting every
@@ -498,9 +492,7 @@ def _atoms(text: str, *, budget: int, window: Window) -> list[str]:
     return [text]
 
 
-def _join_runs(
-    pieces: Sequence[str], *, separator: str, budget: int, window: Window
-) -> list[str]:
+def _join_runs(pieces: Sequence[str], *, separator: str, budget: int, window: Window) -> list[str]:
     runs: list[str] = []
     current: list[str] = []
     for piece in pieces:
@@ -927,16 +919,15 @@ def index_descriptor(
         "chunk_levels": {
             CONCEPT_LEVEL: "one per paper: everything except the predictor table",
             PREDICTOR_LEVEL: (
-                "one per predictor row, with the population, outcome and bottom line "
-                "around it"
+                "one per predictor row, with the population, outcome and bottom line around it"
             ),
         },
         "source_bundle": f"../{result.bundle.name}",
         "notes": (
             f"{', '.join(ROW_LEVEL_KEYS)} describe a predictor row: a {CONCEPT_LEVEL} "
-            f"chunk carries \"\" for all three, so a filter on any of them must either "
-            f"allow \"\" or select chunk_level == \"{PREDICTOR_LEVEL}\". Missing values "
-            f"are \"\" everywhere, never null; n is an integer when the paper reported "
+            f'chunk carries "" for all three, so a filter on any of them must either '
+            f'allow "" or select chunk_level == "{PREDICTOR_LEVEL}". Missing values '
+            f'are "" everywhere, never null; n is an integer when the paper reported '
             f"one. A chunk too long for the embedding window is split into chunk_parts "
             f"parts numbered by chunk_part, each repeating the paper title, so (id, "
             f"chunk_index) identifies a chunk and (id, chunk_index, chunk_part) "

@@ -214,9 +214,7 @@ class Source:
         # that section. A line break is a boundary here even when punctuation says
         # nothing.
         self._sentences = tuple(
-            (part, normalize(part))
-            for line in text.splitlines()
-            for part in sentences(line)
+            (part, normalize(part)) for line in text.splitlines() for part in sentences(line)
         )
 
     @property
@@ -325,8 +323,7 @@ class RowCheck:
             return f"{self.predictor!r}: {self.claimed} is not in the source text"
         if self.interval_missing:
             return (
-                f"{self.predictor!r}: the interval around {self.claimed} "
-                "is not in the source text"
+                f"{self.predictor!r}: the interval around {self.claimed} is not in the source text"
             )
         return f"{self.predictor!r}: the quoted sentence is not in the source text"
 
@@ -382,8 +379,7 @@ class ExtractionCheck:
         interactions = tuple(
             (
                 INTERACTION,
-                f"{row.predictor!r}: {claimed} against {feature!r} "
-                "is not in the source text",
+                f"{row.predictor!r}: {claimed} against {feature!r} is not in the source text",
             )
             for row in self.rows
             for feature, claimed in row.interactions_missing
@@ -494,8 +490,7 @@ def _expand_quotes(extraction: Extraction, source: Source) -> Extraction:
     return extraction.model_copy(
         update={
             "predictors": [
-                row.model_copy(update={"quote": grown(row.quote)})
-                for row in extraction.predictors
+                row.model_copy(update={"quote": grown(row.quote)}) for row in extraction.predictors
             ],
             "null_findings": [
                 finding.model_copy(update={"quote": grown(finding.quote)})

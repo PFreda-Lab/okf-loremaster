@@ -110,8 +110,9 @@ def test_an_anchor_of_nothing_but_stopwords_is_empty_rather_than_broken_syntax()
 def test_a_plan_never_anchors_on_a_phrase_that_cannot_match() -> None:
     """The regression that matters, at the level the run actually failed."""
     plan = queries.deterministic_plan(
-        charter(population="patients initiating antiretroviral therapy",
-                outcome="viral suppression")
+        charter(
+            population="patients initiating antiretroviral therapy", outcome="viral suppression"
+        )
     )
 
     assert plan.queries
@@ -203,7 +204,7 @@ async def test_a_rejected_field_tag_is_caught_by_the_translation_alone(
     # What this package actually emits is quoted and wholly tagged, because `tiab()`
     # quotes. Against the same recorded response, nothing is left to explain the
     # [All Fields] and the rewrite is caught.
-    emitted = f'{queries.phrase("postoperative respiratory failure")}[nosuchfield]'
+    emitted = f"{queries.phrase('postoperative respiratory failure')}[nosuchfield]"
     record = queries.executed(emitted, result, retrieved=len(result.ids))
     assert record.suspect
     assert queries.ALL_FIELDS in record.translation

@@ -47,9 +47,7 @@ runner = CliRunner()
 TIMEOUT = 20.0
 
 
-def tui_run(
-    settings_factory: Any, tmp_path: Path, **overrides: Any
-) -> tuple[LoremasterApp, Any]:
+def tui_run(settings_factory: Any, tmp_path: Path, **overrides: Any) -> tuple[LoremasterApp, Any]:
     """An app wired to the fake corpus, and the settings it will use.
 
     `interactive=True` unless a test says otherwise: a run is autonomous by default and
@@ -169,9 +167,7 @@ async def test_an_autonomous_run_logs_the_pauses_instead_of_asking(
     The full screen is worth watching on an unattended run, so what the modal would have
     shown goes to the log instead — the same view, minus the question.
     """
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path, interactive=False)
 
     async with app.run_test() as pilot:
@@ -197,9 +193,7 @@ async def test_the_log_says_something_before_the_first_event_arrives(
     the longest stretch of the run, at the point a watcher has the least evidence that
     anything is working.
     """
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path)
 
     async with app.run_test() as pilot:
@@ -213,9 +207,7 @@ async def test_a_node_is_logged_when_it_starts_and_not_only_when_it_finishes(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The pane says what is running now; the log is what gets read afterward."""
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path, interactive=False)
 
     async with app.run_test() as pilot:
@@ -236,9 +228,7 @@ async def test_a_progress_line_with_no_counter_is_shown_without_asking_for_verbo
     of them in a whole run, and they are exactly what someone waiting wants to read.
     `verbose` is 0 here, which is how the user runs it.
     """
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path, interactive=False)
 
     async with app.run_test() as pilot:
@@ -279,9 +269,7 @@ async def test_a_node_with_nothing_to_count_still_shows_that_it_is_moving(
     """
     from okf_loremaster.events import NodeStarted
 
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path)
 
     async with app.run_test() as pilot:
@@ -304,9 +292,7 @@ async def test_the_clock_stops_when_the_run_does(
     settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A finished run that keeps counting reads as one that is still going."""
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path, interactive=False)
 
     async with app.run_test() as pilot:
@@ -333,9 +319,7 @@ async def test_the_log_is_kept_as_text_so_it_can_be_pasted_rather_than_photograp
     """
     from okf_loremaster.run import TRANSCRIPT_FILENAME
 
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path, interactive=False)
 
     async with app.run_test() as pilot:
@@ -360,9 +344,7 @@ async def test_the_transcript_ends_with_what_the_run_cost(
     """
     from okf_loremaster.run import TRANSCRIPT_FILENAME
 
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path, interactive=False)
 
     async with app.run_test() as pilot:
@@ -424,9 +406,7 @@ async def test_pressing_copy_takes_the_whole_log_and_says_where_it_also_lives(
     not an answer when the bundle may not exist."""
     from okf_loremaster.run import TRANSCRIPT_FILENAME
 
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path, interactive=False)
     said: list[str] = []
     copied: list[str] = []
@@ -451,9 +431,7 @@ async def test_declining_the_charter_stops_the_run_without_failing_it(
 
     Escape rather than the `n` key, so the third way out of the modal is exercised too.
     """
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, _ = tui_run(settings_factory, tmp_path)
 
     async with app.run_test() as pilot:
@@ -478,9 +456,7 @@ async def test_q_stops_the_run_and_leaves_a_checkpoint_to_resume_from(
     The checkpoint database is what makes the id it reports worth anything — without one
     `--resume <id>` would name a run nothing could be resumed from.
     """
-    monkeypatch.setattr(
-        "okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model")
-    )
+    monkeypatch.setattr("okf_loremaster.llm.router.Router", lambda *a, **k: pytest.fail("no model"))
     app, settings = tui_run(settings_factory, tmp_path)
 
     async with app.run_test() as pilot:

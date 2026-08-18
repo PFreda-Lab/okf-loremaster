@@ -143,9 +143,7 @@ class PubMedRecord:
 
     @property
     def is_retracted(self) -> bool:
-        return bool(
-            self.retraction_refs or (_RETRACTED_TYPES & set(self.publication_types))
-        )
+        return bool(self.retraction_refs or (_RETRACTED_TYPES & set(self.publication_types)))
 
 
 class EUtilsClient:
@@ -208,9 +206,7 @@ class EUtilsClient:
                 "id": ",".join(chunk),
                 "retmode": "xml",
             }
-            raw = await self._http.get_text(
-                f"{BASE}/efetch.fcgi", params=params, node=node
-            )
+            raw = await self._http.get_text(f"{BASE}/efetch.fcgi", params=params, node=node)
             records.extend(parse_pubmed_xml(raw))
 
         missing = [p for p in requested if p not in {r.pmid for r in records}]
@@ -345,8 +341,7 @@ def _article_ids(container: ET.Element, path: str) -> dict[str, str]:
     another article's text to this one.
     """
     return {
-        (el.get("IdType") or "").lower(): (el.text or "").strip()
-        for el in container.findall(path)
+        (el.get("IdType") or "").lower(): (el.text or "").strip() for el in container.findall(path)
     }
 
 
@@ -365,9 +360,7 @@ def _journal_record(article: ET.Element) -> PubMedRecord:
         title=_text(art.find("ArticleTitle")),
         abstract=_abstract(art.find("Abstract")),
         journal=_text(journal.find("Title")) if journal is not None else "",
-        journal_abbrev=(
-            _text(journal.find("ISOAbbreviation")) if journal is not None else ""
-        ),
+        journal_abbrev=(_text(journal.find("ISOAbbreviation")) if journal is not None else ""),
         year=year,
         pub_date_raw=pub_date_raw,
         authors=_authors(art.find("AuthorList")),
@@ -378,9 +371,7 @@ def _journal_record(article: ET.Element) -> PubMedRecord:
         ),
         mesh_terms=_mesh(citation.find("MeshHeadingList")),
         keywords=tuple(
-            t
-            for t in (_text(el) for el in citation.findall("KeywordList/Keyword"))
-            if t
+            t for t in (_text(el) for el in citation.findall("KeywordList/Keyword")) if t
         ),
         language=_text(art.find("Language")),
         source_type="journal",
@@ -422,9 +413,7 @@ def _book_record(article: ET.Element) -> PubMedRecord:
         pmcid=ids.get("pmc") or None,
         publication_types=tuple(_text(el) for el in doc.findall("PublicationType")),
         mesh_terms=(),
-        keywords=tuple(
-            t for t in (_text(el) for el in doc.findall("KeywordList/Keyword")) if t
-        ),
+        keywords=tuple(t for t in (_text(el) for el in doc.findall("KeywordList/Keyword")) if t),
         language=_text(doc.find("Language")),
         source_type="book",
     )
@@ -469,9 +458,7 @@ def _authors(author_list: ET.Element | None) -> tuple[Author, ...]:
             continue
         surname = _text(author.find("LastName"))
         if surname:
-            authors.append(
-                Author(surname=surname, initials=_text(author.find("Initials")))
-            )
+            authors.append(Author(surname=surname, initials=_text(author.find("Initials"))))
     return tuple(authors)
 
 

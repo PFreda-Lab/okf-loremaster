@@ -155,9 +155,7 @@ def _reconcile_one(
         # Per kind rather than overall. A global cap spent by whichever check failed
         # first leaves every warning after it counting casualties it cannot name.
         if len(summary.examples_for(kind)) < MAX_EXAMPLES:
-            summary.examples.append(
-                VerificationExample(kind=kind, note=f"{candidate.pmid} {note}")
-            )
+            summary.examples.append(VerificationExample(kind=kind, note=f"{candidate.pmid} {note}"))
 
     basis = source.basis if source is not None else TextBasis.ABSTRACT
     reconciled = mirror_interactions(check.extraction)

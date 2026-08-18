@@ -124,7 +124,6 @@ def charter_view(charter: Charter) -> list[RenderableType]:
 
     view.append(_topic_table(charter))
 
-
     view.extend(Text.from_markup(f"[yellow]![/yellow]  {p}") for p in charter.problems())
     return view
 

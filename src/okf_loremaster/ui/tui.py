@@ -342,9 +342,7 @@ class LoremasterApp(App[None]):
         except Exception as exc:
             self.error = exc
             self._write(Text.from_markup(f"[red]FATAL[/red] {type(exc).__name__}: {exc}"))
-        self._save_transcript(
-            self.outcome[1] if self.outcome is not None else self._fallback_dir()
-        )
+        self._save_transcript(self.outcome[1] if self.outcome is not None else self._fallback_dir())
         self._done = True
         self._refresh_meter()
 
@@ -458,9 +456,7 @@ class LoremasterApp(App[None]):
         if self._stopping:
             return
         self._stopping = True
-        self._write(
-            Text.from_markup("[yellow]stopping[/yellow] — flushing the checkpoint")
-        )
+        self._write(Text.from_markup("[yellow]stopping[/yellow] — flushing the checkpoint"))
         self._refresh_meter()
         self._worker.cancel()
 
@@ -494,8 +490,7 @@ class LoremasterApp(App[None]):
                 detail = f"  {event.summary}" if event.summary else ""
                 self._write(
                     Text.from_markup(
-                        f"[green]OK[/green] {event.node}{detail}  "
-                        f"[dim]{event.seconds:.1f}s[/dim]"
+                        f"[green]OK[/green] {event.node}{detail}  [dim]{event.seconds:.1f}s[/dim]"
                     )
                 )
 
@@ -516,9 +511,7 @@ class LoremasterApp(App[None]):
                 # 1,310 papers" — which is exactly what someone waiting wants to read, and
                 # there are fewer than ten of them in a whole run.
                 if counted is None or self._options.verbose:
-                    self._write(
-                        Text.from_markup(f"[dim]   {event.node}: {event.message}[/dim]")
-                    )
+                    self._write(Text.from_markup(f"[dim]   {event.node}: {event.message}[/dim]"))
 
             case LLMCall():
                 self._calls = event.total_calls
@@ -537,9 +530,7 @@ class LoremasterApp(App[None]):
 
             case WarningEvent():
                 self._warnings += 1
-                self._write(
-                    Text.from_markup(f"[yellow]![/yellow]  {event.node}: {event.message}")
-                )
+                self._write(Text.from_markup(f"[yellow]![/yellow]  {event.node}: {event.message}"))
 
             case ErrorEvent():
                 self._errors += 1
@@ -576,9 +567,7 @@ class LoremasterApp(App[None]):
         # be. The lines are still on screen either way.
         with suppress(OSError):
             directory.mkdir(parents=True, exist_ok=True)
-            (directory / TRANSCRIPT_FILENAME).write_text(
-                self._transcript_text(), encoding="utf-8"
-            )
+            (directory / TRANSCRIPT_FILENAME).write_text(self._transcript_text(), encoding="utf-8")
 
     def _refresh_nodes(self) -> None:
         table = Table.grid(padding=(0, 1))

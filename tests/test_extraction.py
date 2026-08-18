@@ -549,9 +549,7 @@ async def test_length_budgets_are_applied_before_verification_not_after(
 ) -> None:
     """Order matters twice over: nothing is checked that a budget was about to drop, and
     the verification counts describe the bundle rather than the model's reply."""
-    over = read_of(
-        OPEN, predictors=[row(predictor=f"exposure {index}") for index in range(20)]
-    )
+    over = read_of(OPEN, predictors=[row(predictor=f"exposure {index}") for index in range(20)])
 
     async with node_deps(settings_factory, tmp_path) as deps:
         update = await reconcile_node(reconcile_state({OPEN: over}), deps)

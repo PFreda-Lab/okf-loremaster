@@ -93,9 +93,7 @@ class FakeCompletion:
             text, finish, completion_tokens = "{}", "stop", ceiling
 
         return FakeResponse(
-            choices=[
-                FakeChoice(message=FakeMessage(content=text), finish_reason=finish)
-            ],
+            choices=[FakeChoice(message=FakeMessage(content=text), finish_reason=finish)],
             usage=FakeUsage(
                 prompt_tokens=_estimate_tokens(prompt_text),
                 completion_tokens=completion_tokens,

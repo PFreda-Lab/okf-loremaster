@@ -178,9 +178,7 @@ async def node_deps(
     """
     settings = run_settings(settings_factory, tmp_path)
     bus = EventBus()
-    clients = build_clients(
-        settings, bus=bus, transport=(fake or FakeNCBI()).transport()
-    )
+    clients = build_clients(settings, bus=bus, transport=(fake or FakeNCBI()).transport())
     router = (
         None if scripted is None else Router(settings, bus, completion_fn=scripted.completion())
     )

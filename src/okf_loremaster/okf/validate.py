@@ -172,8 +172,7 @@ def _check_root(bundle: OkfBundle, findings: list[Finding]) -> None:
         findings.append(
             Finding(
                 Severity.ERROR,
-                f"no {INDEX_FILENAME} at the bundle root — a consumer reads the domains "
-                f"from it",
+                f"no {INDEX_FILENAME} at the bundle root — a consumer reads the domains from it",
                 bundle.path,
             )
         )
@@ -235,9 +234,7 @@ def _root_fields(path: Path) -> dict[str, str]:
 def _check_topics(bundle: OkfBundle, findings: list[Finding]) -> None:
     for topic in bundle.topics:
         if topic.index is None:
-            findings.append(
-                Finding(Severity.ERROR, f"topic has no {INDEX_FILENAME}", topic.path)
-            )
+            findings.append(Finding(Severity.ERROR, f"topic has no {INDEX_FILENAME}", topic.path))
         elif topic.index.domain != topic.slug:
             findings.append(
                 Finding(
@@ -445,8 +442,9 @@ def _check_catalog(bundle: OkfBundle, findings: list[Finding]) -> None:
         )
     for orphan in sorted(listed - present):
         findings.append(
-            Finding(Severity.ERROR, f"catalog names {orphan}, which is not in the bundle",
-                    catalog_path)
+            Finding(
+                Severity.ERROR, f"catalog names {orphan}, which is not in the bundle", catalog_path
+            )
         )
 
 

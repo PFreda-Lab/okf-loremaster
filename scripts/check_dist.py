@@ -32,9 +32,7 @@ PACKAGED_TEMPLATE = "okf_loremaster/env.example"
 
 
 def tracked_paths() -> set[str]:
-    out = subprocess.run(
-        ["git", "ls-files"], capture_output=True, text=True, check=True
-    ).stdout
+    out = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout
     return {line for line in out.splitlines() if line}
 
 

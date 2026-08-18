@@ -103,8 +103,7 @@ def render_extraction(console: Console, state: RunState) -> None:
     exportable = sum(1 for record in records if record.export_safe)
 
     console.print(
-        f"  {len(records)} concept(s): {rows} predictor row(s), "
-        f"{nulls} reporting a null finding"
+        f"  {len(records)} concept(s): {rows} predictor row(s), {nulls} reporting a null finding"
     )
     console.print(
         f"  read from full text: {full} of {len(texts)}"
@@ -141,9 +140,7 @@ def render_bundle(console: Console, state: RunState) -> None:
     if signer:
         console.print(f"  verified by [green]{escape(signer)}[/green]")
     else:
-        console.print(
-            "  [dim]unverified — no human sign-off; rerun with --review to add one[/dim]"
-        )
+        console.print("  [dim]unverified — no human sign-off; rerun with --review to add one[/dim]")
 
     errors = list(state.get("validation_errors") or [])
     if errors:

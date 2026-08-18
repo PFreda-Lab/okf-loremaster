@@ -69,9 +69,7 @@ async def main() -> int:
         CASSETTE.unlink()
 
     # The cache is disabled on purpose: a cache hit records nothing.
-    recording = settings.model_copy(
-        update={"ncbi_email": email, "http_cache_enabled": False}
-    )
+    recording = settings.model_copy(update={"ncbi_email": email, "http_cache_enabled": False})
     transport = CassetteTransport(CASSETTE, CassetteMode.RECORD)
     clients = build_clients(recording, transport=transport)
 

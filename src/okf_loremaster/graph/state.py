@@ -210,8 +210,9 @@ class Deps:
     # replayed run scores identically to the original.
     now_year: int = field(default_factory=lambda: datetime.now(UTC).year)
 
-    def progress(self, node: str, message: str, *, current: int | None = None,
-                 total: int | None = None) -> None:
+    def progress(
+        self, node: str, message: str, *, current: int | None = None, total: int | None = None
+    ) -> None:
         self.bus.emit(Progress(node=node, message=message, current=current, total=total))
 
     def warn(self, node: str, message: str) -> None:

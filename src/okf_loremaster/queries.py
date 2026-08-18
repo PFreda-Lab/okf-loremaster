@@ -217,9 +217,7 @@ def deterministic_plan(charter: Charter, *, max_queries: int = 12) -> QueryPlan:
     queries: list[PlannedQuery] = []
 
     if base:
-        queries.append(
-            PlannedQuery(term=base, rationale="the charter's outcome and population")
-        )
+        queries.append(PlannedQuery(term=base, rationale="the charter's outcome and population"))
 
     for topic in charter.topic_taxonomy:
         facet = or_group(topic.seed_terms[:4]) or tiab(topic.title)

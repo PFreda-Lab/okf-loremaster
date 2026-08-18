@@ -97,7 +97,7 @@ def test_a_document_with_no_frontmatter_is_an_error_not_a_body(tmp_path: Path) -
     with pytest.raises(FrontmatterError):
         load("# just a heading\n")
     with pytest.raises(FrontmatterError):
-        split("---\ntitle: \"a\"\nnever closed\n")
+        split('---\ntitle: "a"\nnever closed\n')
 
 
 def test_a_timestamp_has_one_spelling(tmp_path: Path) -> None:
@@ -182,9 +182,7 @@ async def test_a_topic_key_in_frontmatter_is_an_error(
     bundle = await bundle_for(settings_factory, tmp_path, monkeypatch)
     document = one_document(bundle)
     document.write_text(
-        document.read_text(encoding="utf-8").replace(
-            "domain:", 'topic: "sneaked-in"\ndomain:', 1
-        ),
+        document.read_text(encoding="utf-8").replace("domain:", 'topic: "sneaked-in"\ndomain:', 1),
         encoding="utf-8",
     )
 
@@ -332,8 +330,12 @@ async def test_a_topic_the_literature_could_not_fill_is_emitted_empty_and_warned
     charter = charter_for(
         topic_taxonomy=[
             *charter_for().topic_taxonomy,
-            Topic(slug="epsilon", title="Epsilon", scope="a facet nobody wrote about",
-                  seed_terms=["epsilon"]),
+            Topic(
+                slug="epsilon",
+                title="Epsilon",
+                scope="a facet nobody wrote about",
+                seed_terms=["epsilon"],
+            ),
         ]
     )
     run = await full_run(settings_factory, tmp_path, monkeypatch, charter=charter)

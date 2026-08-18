@@ -201,9 +201,7 @@ def _block(candidate: Candidate, basis: str, license_: str, body: str) -> str:
     return "\n".join(lines) + "\n\n" + body
 
 
-def _select(
-    sections: tuple[BioCSection, ...], budget: int
-) -> tuple[list[BioCSection], bool]:
+def _select(sections: tuple[BioCSection, ...], budget: int) -> tuple[list[BioCSection], bool]:
     """Fit sections into the budget by priority, then restore reading order.
 
     A section that does not fit is skipped rather than ending the loop, so one enormous

@@ -115,9 +115,7 @@ def test_caller_identity_is_excluded_from_the_cache_key() -> None:
 
 
 def test_different_queries_get_different_keys() -> None:
-    assert DiskCache.key("GET", URL, {"term": "a"}) != DiskCache.key(
-        "GET", URL, {"term": "b"}
-    )
+    assert DiskCache.key("GET", URL, {"term": "a"}) != DiskCache.key("GET", URL, {"term": "b"})
 
 
 def test_parameter_order_does_not_matter() -> None:
@@ -311,8 +309,7 @@ async def test_a_certificate_failure_is_not_retried_and_names_the_cause(
     def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         raise httpx.ConnectError(
-            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed "
-            "certificate"
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate"
         ) from ssl.SSLCertVerificationError("certificate verify failed")
 
     client = _client(handler, tmp_path)

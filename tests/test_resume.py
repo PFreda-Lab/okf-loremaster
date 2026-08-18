@@ -83,9 +83,7 @@ async def test_a_finished_run_is_listed_with_the_question_it_answered(
     assert listed[0].reached == "emit_okf"
 
 
-async def test_an_id_that_was_never_run_is_not_a_run(
-    settings_factory: Any, tmp_path: Path
-) -> None:
+async def test_an_id_that_was_never_run_is_not_a_run(settings_factory: Any, tmp_path: Path) -> None:
     assert await find_run(run_settings(settings_factory, tmp_path), "20200101-000000-dead") is None
 
 
@@ -264,9 +262,7 @@ async def test_retention_keeps_the_newest_runs_and_drops_the_rest(
     assert kept_writes == kept, "a thread left in `writes` is a store disagreeing with itself"
 
 
-async def test_retention_is_by_count_and_not_by_age(
-    settings_factory: Any, tmp_path: Path
-) -> None:
+async def test_retention_is_by_count_and_not_by_age(settings_factory: Any, tmp_path: Path) -> None:
     """What makes a checkpoint worth keeping is being recent relative to the others.
     Somebody resuming picks from the last few runs, not the last few days, and a
     fortnight away from the tool should not mean coming back to an empty store."""
@@ -348,9 +344,7 @@ async def test_the_store_has_a_ceiling_in_bytes_as_well_as_in_runs(
     assert kept_writes == kept
 
 
-async def test_the_newest_run_survives_the_ceiling(
-    settings_factory: Any, tmp_path: Path
-) -> None:
+async def test_the_newest_run_survives_the_ceiling(settings_factory: Any, tmp_path: Path) -> None:
     """A ceiling that deletes the run somebody is about to resume has stopped being a
     ceiling and become a bug. One run over budget is over budget."""
     settings = run_settings(settings_factory, tmp_path)
@@ -491,9 +485,8 @@ def test_every_type_that_can_travel_in_state_is_allowlisted() -> None:
 
     missing = reachable_from_state() - set(CHECKPOINTED_TYPES)
 
-    assert not missing, (
-        "reachable from RunState but not in CHECKPOINTED_TYPES: "
-        + ", ".join(sorted(t.__name__ for t in missing))
+    assert not missing, "reachable from RunState but not in CHECKPOINTED_TYPES: " + ", ".join(
+        sorted(t.__name__ for t in missing)
     )
 
 

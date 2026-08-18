@@ -65,8 +65,7 @@ async def emit_okf_node(state: RunState, deps: Deps) -> dict[str, Any]:
             warnings.append(warning)
             deps.warn(NODE, warning)
         report["summary"] = (
-            f"{result.documents} document(s) across {result.topics} topic/topics "
-            f"-> {directory}"
+            f"{result.documents} document(s) across {result.topics} topic/topics -> {directory}"
         )
 
     return {

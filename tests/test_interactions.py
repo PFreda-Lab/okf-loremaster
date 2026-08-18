@@ -145,8 +145,7 @@ def test_a_measure_is_recognized_however_the_paper_named_it(measure: str) -> Non
     `stated` while the other bands.
     """
     assert (
-        band_interaction(InteractionType.CORRELATED, measure, 0.81)
-        is InteractionMagnitude.STRONG
+        band_interaction(InteractionType.CORRELATED, measure, 0.81) is InteractionMagnitude.STRONG
     )
 
 
@@ -320,9 +319,7 @@ def test_the_predictor_table_points_at_the_interactions_and_the_section_details_
                     predictor(
                         "maternal age",
                         interaction("parity", measure="r", value=0.41, measure_raw="r = 0.41"),
-                        interaction(
-                            "pregnancy status", kind=InteractionType.MUTUALLY_EXCLUSIVE
-                        ),
+                        interaction("pregnancy status", kind=InteractionType.MUTUALLY_EXCLUSIVE),
                     ),
                     predictor("parity"),
                 )

@@ -65,8 +65,7 @@ async def rank_node(state: RunState, deps: Deps) -> dict[str, Any]:
 
         deps.progress(NODE, comparison.summary())
         report["summary"] = (
-            f"{len(pool)} of {len(scored)} pooled; {comparison.changed} owed to "
-            "diversification"
+            f"{len(pool)} of {len(scored)} pooled; {comparison.changed} owed to diversification"
         )
 
     return {"scored": scored, "pool": pool, "comparison": comparison, "warnings": warnings}
@@ -145,9 +144,7 @@ async def _open_access(deps: Deps, scored: list[ScoredCandidate]) -> list[Scored
     return [entry for entry, ok in zip(scored, verdicts, strict=True) if ok]
 
 
-def _warn_shortfall(
-    deps: Deps, warnings: list[str], *, kept: int, of: int, what: str
-) -> None:
+def _warn_shortfall(deps: Deps, warnings: list[str], *, kept: int, of: int, what: str) -> None:
     """Say what the policy cost, always, even when it cost nothing worth noticing.
 
     A restricted basis is the user's decision and this does not second-guess it. What it
@@ -165,9 +162,7 @@ def _warn_shortfall(
     deps.warn(NODE, note)
 
 
-async def _enrich(
-    deps: Deps, candidates: list[Candidate], warnings: list[str]
-) -> list[Candidate]:
+async def _enrich(deps: Deps, candidates: list[Candidate], warnings: list[str]) -> list[Candidate]:
     """Attach iCite metrics, or E-utilities counts, or neither. Never fails the run.
 
     Ranking has five other components, and losing the run over a third-party service
@@ -225,9 +220,7 @@ async def _cited_by_fallback(
     the first says what to do about it.
     """
     try:
-        counts = await deps.clients.eutils.cited_by_counts(
-            [c.pmid for c in candidates], node=NODE
-        )
+        counts = await deps.clients.eutils.cited_by_counts([c.pmid for c in candidates], node=NODE)
     except Exception as exc:
         counts = {}
         second = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
@@ -253,7 +246,4 @@ async def _cited_by_fallback(
     )
     warnings.append(note)
     deps.warn(NODE, note)
-    return [
-        c.with_citation_count(counts[c.pmid]) if c.pmid in counts else c
-        for c in candidates
-    ]
+    return [c.with_citation_count(counts[c.pmid]) if c.pmid in counts else c for c in candidates]
