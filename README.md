@@ -44,18 +44,21 @@ Python 3.11 or 3.12.
 pip install okf-loremaster
 ```
 
-| Extra | Adds |
-|---|---|
-| *(base)* | the whole OKF pipeline |
-| `[vectors]` | Chroma + sentence-transformers — pulls torch; omit if you only want the corpus |
-| `[tui]` | the full-screen interface |
-| `[all]` | both |
-| `[dev]` | pytest, mypy, ruff, build, twine |
+That is the whole pipeline: it searches, screens, extracts, and writes the finished OKF bundle.
+Nothing else is required — no database, no server, no clone of this repository. You get two
+commands, `okf-loremaster` and the shorter `loremaster`, which are the same program.
 
-`pip install "okf-loremaster[all]"` installs everything above. Either command installs two console
-scripts, `okf-loremaster` and the shorter `loremaster`; they are the same program. Nothing else is required 
-— no database, no server, no clone of this repository. Next is
-[Configure](#configure): a model provider, its API key, and a contact email for NCBI.
+Two features are left out of the base install because they are big downloads. Add either one, or
+both, by installing an extra instead:
+
+| Command | What it adds on top of the base install |
+|---|---|
+| `pip install "okf-loremaster[vectors]"` | The Chroma vector index for RAG. Pulls in torch, so expect a slow, heavy download. Skip it if you only want the corpus. |
+| `pip install "okf-loremaster[tui]"` | The full-screen "advanced" terminal interface. |
+| `pip install "okf-loremaster[all]"` | Both of those — the vector index and the interface. |
+| `pip install "okf-loremaster[dev]"` | The tools for working on OKF Loremaster itself: pytest, mypy, ruff, build, twine. Not included in `[all]`. |
+
+Next is [Configure](#configure): a model provider, its API key, and a contact email for NCBI.
 
 ### From source
 
