@@ -54,7 +54,7 @@ both, by installing an extra instead:
 | Command | What it adds on top of the base install |
 |---|---|
 | `pip install "okf-loremaster[vectors]"` | The Chroma vector index for RAG. Pulls in torch, so expect a slow, heavy download. Skip it if you only want the corpus. |
-| `pip install "okf-loremaster[tui]"` | The full-screen "advanced" terminal interface. |
+| `pip install "okf-loremaster[tui]"` | The full-screen "advanced" terminal interface experience. |
 | `pip install "okf-loremaster[all]"` | Both of those — the vector index and the interface. |
 | `pip install "okf-loremaster[dev]"` | The tools for working on OKF Loremaster itself: pytest, mypy, ruff, build, twine. Not included in `[all]`. |
 
