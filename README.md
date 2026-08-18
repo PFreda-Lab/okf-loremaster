@@ -255,7 +255,7 @@ okf-loremaster build "<your question>" -o my-corpus  # do it
 | `--interactive`, `-i` | off | stop at the charter, and again at the pool |
 | `--review` | off | sign the bundle off by hand before it is written |
 | `--tui` | off | full-screen interface |
-| `--basis any\|abstract\|full-text` | `any` | what each paper is read from; `full-text` keeps only open-access papers |
+| `--basis any\|abstract\|full-text` | `any` | what each paper is read from. `any`: full text where it is open access, the abstract otherwise. `abstract`: the abstract for every paper. `full-text`: only papers whose full text is open access, dropping the rest |
 | `--no-abstract` | off | leave the `# Abstract` section out of every document |
 | `--target-papers` | 150 | 120–250 is a browsability ceiling, not a recall target |
 | `--topic-paper-min` / `--topic-paper-max` | 8 / 40 | papers inside one topic folder |
