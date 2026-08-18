@@ -1,15 +1,23 @@
 """LiteLLM-backed router: three role-bound models, retries, and honest cost accounting.
 
-The cost accounting is the delicate part. `litellm.completion_cost()` returns 0.0 for a
-model it does not recognize rather than raising, and a model reached through a gateway
-or under a custom deployment name is routinely absent from its price map. A run that
-reports $0.00 is therefore indistinguishable from a run that was genuinely free, which
-is the worst possible failure: it looks like good news.
+The cost accounting is the delicate part, and it is wrong in two directions rather than
+one. `litellm.completion_cost()` returns 0.0 for a model it does not recognize rather
+than raising, and a model reached through a gateway or under a custom deployment name is
+routinely absent from its price map — so a run that reports $0.00 is indistinguishable
+from a run that was genuinely free, which is the worst possible failure: it looks like
+good news. The other direction is quieter. That price map is a static JSON file shipped
+inside the installed wheel, dated the day the version was cut; nothing refreshes it, no
+provider is consulted, and a published price that moves afterward leaves it confidently
+quoting history.
 
 So pricing goes through three stages and the third is explicit ignorance:
-  1. LiteLLM's own price map.
-  2. `OKF_LOREMASTER_PRICE_<ROLE>_IN` / `_OUT`, in USD per 1M tokens.
+  1. `OKF_LOREMASTER_PRICE_<ROLE>_IN` / `_OUT`, in USD per 1M tokens.
+  2. LiteLLM's own price map.
   3. `usd = None` — the call is counted in tokens and reported as unpriced.
+
+Configured first, because a number somebody set deliberately beats one that shipped with
+a dependency, and because reading the map first made stage 1 unreachable for every model
+the map happens to name.
 """
 
 from __future__ import annotations
@@ -500,13 +508,29 @@ class Router:
     def _price(
         self, role: Role, response: Any, prompt_tokens: int, completion_tokens: int
     ) -> float | None:
-        from_litellm = self._price_from_litellm(response)
-        if from_litellm is not None:
-            return from_litellm
+        # A configured price wins, and this order is the whole point of the setting.
+        #
+        # `litellm.completion_cost()` reads a static JSON file shipped inside the
+        # installed wheel — 1.6 MB of it, dated the day the version was cut. Nothing
+        # about it is live: it does not ask the provider, and the provider does not
+        # answer in dollars anyway, only in token counts. So for every model that file
+        # names, it keeps returning whatever was true at release, indefinitely.
+        # `claude-sonnet-5` went to $3/$15 per million and litellm 1.95.0 still quotes
+        # the introductory $2/$10 (checked 2026-08-18) — every figure we printed was two
+        # thirds of the real one, and nothing in the output could have told you.
+        #
+        # Consulting that file first made `OKF_LOREMASTER_PRICE_*` dead code for exactly
+        # the models it matters most for: it was written for gateway deployment names
+        # litellm cannot recognize, and a public model whose price has moved is the same
+        # problem wearing a different hat. Understating a bill is worse than declining to
+        # state one, which is already the rule the `$0.00` guard sets; this applies that
+        # rule to a number that is wrong rather than missing.
         price_in, price_out = self._settings.price_for(role)
-        if price_in is None or price_out is None:
-            return None
-        return (prompt_tokens / 1_000_000) * price_in + (completion_tokens / 1_000_000) * price_out
+        if price_in is not None and price_out is not None:
+            return (prompt_tokens / 1_000_000) * price_in + (
+                completion_tokens / 1_000_000
+            ) * price_out
+        return self._price_from_litellm(response)
 
     def _price_from_litellm(self, response: Any) -> float | None:
         # Injected fakes are not real ModelResponse objects; do not ask litellm to

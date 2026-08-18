@@ -172,7 +172,11 @@ async def _plan(deps: Deps, charter: Charter, state: RunState, warnings: list[st
             Role.BALANCED,
             messages,
             node=NODE,
-            max_tokens=2048,
+            # One query per topic, each with its rationale, so this scales with the
+            # taxonomy. 2048 was under it: a 4-topic plan measured 2,115 tokens and was
+            # cut off, and the retry that fit wrote the same plan a second time at full
+            # price. A ceiling costs nothing unspent.
+            max_tokens=4096,
             response_format=response_format_for(QueryPlan, name="query_plan"),
         )
         planned = parse_model(result.text, QueryPlan)

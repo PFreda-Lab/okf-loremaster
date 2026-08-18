@@ -80,6 +80,32 @@ async def test_price_override_produces_a_real_figure(settings_factory: Any) -> N
     assert router.ledger.fully_priced
 
 
+async def test_a_configured_price_is_not_second_guessed_by_litellm(
+    settings_factory: Any,
+) -> None:
+    """The table is consulted only when nobody told us the price, never as a check on it.
+
+    litellm prices from a static JSON file shipped in the wheel — it asks no provider,
+    and the provider answers in tokens rather than dollars anyway — so for every model
+    that file names it keeps returning whatever was true at release. `claude-sonnet-5`
+    went to $3/$15 per million and litellm 1.95.0 still quoted the introductory $2/$10.
+    While the table was consulted first, `OKF_LOREMASTER_PRICE_*` could not correct that:
+    the setting only ever reached models litellm had never heard of.
+
+    Asserted as "not reached" rather than "gave the right number", because a stale table
+    that happens to agree today would hide the precedence being wrong again tomorrow.
+    """
+    router, _ = _router(settings_factory, price_fast_in=3.0, price_fast_out=15.0)
+    router._price_from_litellm = lambda response: pytest.fail(  # type: ignore[method-assign]
+        "the shipped price table was consulted despite a configured price"
+    )
+
+    result = await router.complete(Role.FAST, MESSAGES, node="screen")
+
+    expected = (result.prompt_tokens / 1e6) * 3.0 + (result.completion_tokens / 1e6) * 15.0
+    assert result.usd == pytest.approx(expected)
+
+
 async def test_half_priced_run_is_reported_as_such(settings_factory: Any) -> None:
     """FAST priced, REASONING not: the total must admit that part of it is missing."""
     router, _ = _router(settings_factory, price_fast_in=0.8, price_fast_out=4.0)

@@ -61,10 +61,27 @@ def test_fully_configured_price_resolves(settings_factory: Any) -> None:
     assert Role.REASONING not in settings.unpriced_roles()
 
 
-def test_concurrency_defaults_descend_with_cost(settings_factory: Any) -> None:
+def test_concurrency_defaults_follow_the_rate_limit_not_the_tier_names(
+    settings_factory: Any,
+) -> None:
+    """The tiers do not share a budget, so they do not have to descend.
+
+    This replaces an ordering that required FAST >= BALANCED >= REASONING, read off the
+    tier names as a proxy for cost. The limit that actually binds is per model per
+    minute — the provider's 429s name it, `UserByModelByMinute...` — so screening's
+    four-at-a-time on the fast model frees nothing for extraction on the balanced one.
+    Under the old rule, extraction was throttled by a number measured against a
+    different model's quota, and that is the node that sets a run's wall clock.
+
+    What is asserted instead is that every tier is capped at all. Unbounded concurrency
+    against a per-minute quota is the failure this was introduced for: a burst no
+    backoff can smooth out, which once lost 56 of 252 screening calls.
+    """
     settings = settings_factory()
-    assert settings.concurrency_for(Role.FAST) >= settings.concurrency_for(Role.BALANCED)
-    assert settings.concurrency_for(Role.BALANCED) >= settings.concurrency_for(Role.REASONING)
+
+    assert settings.concurrency_for(Role.BALANCED) > settings.concurrency_for(Role.FAST)
+    for role in Role:
+        assert 1 <= settings.concurrency_for(role) <= 8, f"{role.value} is not meaningfully capped"
 
 
 @pytest.mark.parametrize(

@@ -87,10 +87,17 @@ class Settings(BaseSettings):
     # of 252 screening calls to it. Four is slower and finishes.
     concurrency_fast: int = 4
     # BALANCED is what sets a run's wall-clock, because extraction lives here: one call
-    # per kept paper, so a 200-paper bundle makes 200 of them against every other node's
-    # handful. At 2 that serializes into hours. Held level with, not above, the ceiling
-    # `test_concurrency_defaults_descend_with_cost` sets over the tiers.
-    concurrency_balanced: int = 3
+    # per kept paper, so a 150-paper bundle makes 150 of them against every other node's
+    # handful. At 2 that serializes into hours, and at 3 a run whose calls take ~30s each
+    # spends 25 minutes in one node.
+    #
+    # Raised past FAST rather than held under it, because the tiers were never competing
+    # for one budget. The limit that binds is per model per minute — the 429s name it,
+    # `UserByModelByMinute...` — so screening's four-at-a-time on the fast model buys
+    # extraction nothing on the balanced one. The old ordering read cost off the tier
+    # names and throttled the node that needed the room most.
+    concurrency_balanced: int = 6
+    # One charter call per run. Concurrency here is a formality.
     concurrency_reasoning: int = 3
     # Attempts, not retries: the warnings count up to `max_retries - 1`. Rate limits
     # clear on a 60-second window, so a run needs enough attempts to outlast one.
@@ -100,8 +107,10 @@ class Settings(BaseSettings):
     request_timeout: float = 300.0
 
     # --- Cost accounting ---------------------------------------------------
-    # USD per 1M tokens. Used only when LiteLLM cannot price a model itself, which
-    # is the normal case behind a gateway or a custom deployment name.
+    # USD per 1M tokens, and the first thing consulted rather than the last. LiteLLM
+    # prices from a static table shipped in its wheel, so it cannot price a gateway
+    # deployment name at all and keeps quoting release-day figures for the public models
+    # it does know. Set these and neither problem reaches the ledger.
     price_fast_in: float | None = None
     price_fast_out: float | None = None
     price_balanced_in: float | None = None

@@ -267,7 +267,7 @@ def build(
     ] = TextBasisPolicy.ANY,
     # Literals rather than the constants they mirror: importing them would pull pydantic
     # into `--help`. `test_cli_defaults` fails if the two ever drift apart.
-    target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 200,
+    target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 150,
     topic_paper_min: Annotated[int, typer.Option(help="Minimum papers inside one topic.")] = 8,
     topic_paper_max: Annotated[int, typer.Option(help="Maximum papers inside one topic.")] = 40,
     max_topics: Annotated[
@@ -318,8 +318,7 @@ def build(
     if finalize is not None and dry_run:
         # A dry run writes nothing, so there is nothing to keep or discard.
         console.print(
-            "[red]--finalize cannot be combined with --dry-run[/red] — a dry run "
-            "writes no bundle."
+            "[red]--finalize cannot be combined with --dry-run[/red] — a dry run writes no bundle."
         )
         raise typer.Exit(code=1)
     if review and (dry_run or json_out):
@@ -339,9 +338,7 @@ def build(
     if max_rounds > MAX_ROUNDS:
         # A cap, not a preference. A third round re-screens a pool to ask the question
         # the second one already failed to answer.
-        console.print(
-            f"[red]--max-rounds {max_rounds} exceeds the hard cap of {MAX_ROUNDS}[/red]"
-        )
+        console.print(f"[red]--max-rounds {max_rounds} exceeds the hard cap of {MAX_ROUNDS}[/red]")
         raise typer.Exit(code=1)
 
     # Declined rather than refused, because neither is the user asking for something
@@ -442,7 +439,7 @@ def runs(
     if not past:
         console.print(
             f"[dim]no runs in[/dim] {settings.cache_dir}\n"
-            f"[dim]start one with[/dim]  [cyan]okf-loremaster build \"your question\"[/cyan]"
+            f'[dim]start one with[/dim]  [cyan]okf-loremaster build "your question"[/cyan]'
         )
         return
 
@@ -488,9 +485,9 @@ def runs(
     ):
         ceiling = f"{cap:,} MB" if cap > 0 else "uncapped"
         console.print(
-            f"  [dim]{label:<12}[/dim] {size / MB:>7,.0f} MB "
-            f"[dim]of {ceiling}, {note}[/dim]"
+            f"  [dim]{label:<12}[/dim] {size / MB:>7,.0f} MB [dim]of {ceiling}, {note}[/dim]"
         )
+
 
 if __name__ == "__main__":
     app()

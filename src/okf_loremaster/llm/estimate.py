@@ -6,15 +6,22 @@ character heuristic rather than a tokenizer. What is *not* guessed is the corpus
 pool has already been retrieved by the time this runs, so the abstract lengths, the
 paper counts and the share carrying a PMC id are all measured from the real thing.
 
-Pricing follows the same three stages as the router, for the same reason: a projection
-that renders unknown as `$0.00` is worse than one that says it does not know.
-  1. LiteLLM's price map, consulted by model name.
-  2. `OKF_LOREMASTER_PRICE_<ROLE>_IN` / `_OUT`.
+Pricing follows the same three stages as the router, for the same reasons: a projection
+that renders unknown as `$0.00` is worse than one that says it does not know, and
+LiteLLM's map is a static file shipped in the wheel that no longer matches a price which
+has moved since.
+  1. `OKF_LOREMASTER_PRICE_<ROLE>_IN` / `_OUT`.
+  2. LiteLLM's price map, consulted by model name.
   3. Unpriced — tokens only, rendered through `format_cost`.
+
+The order has to match the router's exactly. A projection priced from one table and a
+receipt priced from another disagree by whatever the two tables disagree by, and the gap
+reads as a bad estimate rather than as two sources of truth.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -29,7 +36,18 @@ from okf_loremaster.prompts import (
     extract_context,
     screen_context,
 )
-from okf_loremaster.schemas import MAX_SOURCE_CHARS, Candidate, Charter, TextBasisPolicy
+from okf_loremaster.schemas import (
+    MAX_SOURCE_CHARS,
+    Candidate,
+    Charter,
+    Extraction,
+    QueryPlan,
+    ScreenVerdict,
+    TextBasisPolicy,
+    TopicCuration,
+)
+from okf_loremaster.schemas.common import Model
+from okf_loremaster.schemas.parse import response_format_for
 
 __all__ = ["NodeEstimate", "SpendEstimate", "estimate_tokens", "project_spend"]
 
@@ -42,19 +60,25 @@ CHARS_PER_TOKEN = 4.0
 # worst case; curation's is a short rationale per paper.
 SCREEN_COMPLETION_ALLOWANCE = 80
 # Measured, not guessed: a run of 8 topics was cut off at 80 tokens per paper on every
-# one of them and finished on all 8 at 160. The truth is in between.
-CURATE_PER_PAPER_COMPLETION = 120
+# one of them and finished on all 8 at 160. 120 split the difference and was still low —
+# two of six curation calls in a later run were cut off above it. This is the typical
+# reply, so it stays under `graph.nodes.curate.CURATE_TOKENS_PER_PAPER`, which has to
+# cover the worst one; they are deliberately two numbers.
+CURATE_PER_PAPER_COMPLETION = 160
 # Per offered paper, beyond its title: the PMID, the relevance marker and the
 # screener's one-clause reason travel with it.
 CURATE_PER_PAPER_OVERHEAD = 25
 # The one part of extraction that cannot be measured before it is written. Capped by
 # `graph.nodes.extract.MAX_EXTRACTION_TOKENS`; this is a typical full concept —
-# `MAX_PREDICTOR_ROWS` rows with quote locators, null findings, and the prose fields —
-# not a worst case. 700 was off by most of a factor of three; 2000 was measured against
-# replies that pretty-printed their JSON and copied a whole sentence into every row.
-# Compact JSON, capped null findings and vocabulary hints, and locators in place of
-# copied sentences take about two thirds back off that figure.
-EXTRACT_COMPLETION_ALLOWANCE = 700
+# `MAX_PREDICTOR_ROWS` rows with quote locators, null findings, and the prose fields.
+#
+# Read off the provider's own usage numbers over a 20-paper run rather than reasoned
+# about: median 4,518, mean 5,034, p90 10,044, max 11,832. Every earlier figure here was
+# argued from what the reply *ought* to contain and every one came in low — 700 by a
+# factor of seven. The mean is the right one of those to use, because what this multiplies
+# is a call count: a total is N x mean, and the distribution has a long enough right tail
+# that the median understates it by 10%.
+EXTRACT_COMPLETION_ALLOWANCE = 5000
 
 # A full text runs about this many times the length of its own abstract. Extraction
 # reads whichever it got, so the multiple is what separates a cheap run from an
@@ -76,6 +100,21 @@ OPEN_ACCESS_RATE = 0.6
 def estimate_tokens(text: str) -> int:
     """Approximate token count for a string."""
     return int(len(text) / CHARS_PER_TOKEN) + 1
+
+
+def _schema_tokens(model: type[Model], *, name: str) -> int:
+    """What the `response_format` schema itself costs, on every call that carries one.
+
+    A schema-constrained call is billed for its schema as input, once per call, and
+    nothing about it is visible in the prompt a node assembles — so left out, it is
+    missing from every line at once rather than wrong in one of them. Extraction's is
+    2,500 tokens against a call per paper: a 199-paper run carried 650,000 tokens of
+    schema, 12% of everything it spent, none of it projected.
+
+    Read from the same helper the nodes call, so a field added to a schema is priced
+    without anyone remembering to come back here.
+    """
+    return estimate_tokens(json.dumps(response_format_for(model, name=name)))
 
 
 def _full_text_share(policy: TextBasisPolicy, *, with_pmcid: int, of: int) -> float:
@@ -175,14 +214,16 @@ class SpendEstimate:
 def _price(
     settings: Settings, role: Role, prompt_tokens: int, completion_tokens: int
 ) -> float | None:
-    """USD for a projected token count, or None if the model cannot be priced."""
-    from_map = _price_from_litellm(settings, role, prompt_tokens, completion_tokens)
-    if from_map is not None:
-        return from_map
+    """USD for a projected token count, or None if the model cannot be priced.
+
+    A configured price wins over litellm's shipped table, for the reasons `Router._price`
+    sets out. A projection that disagrees with the meter the same run then prints is
+    worse than either number alone.
+    """
     price_in, price_out = settings.price_for(role)
-    if price_in is None or price_out is None:
-        return None
-    return (prompt_tokens / 1_000_000) * price_in + (completion_tokens / 1_000_000) * price_out
+    if price_in is not None and price_out is not None:
+        return (prompt_tokens / 1_000_000) * price_in + (completion_tokens / 1_000_000) * price_out
+    return _price_from_litellm(settings, role, prompt_tokens, completion_tokens)
 
 
 def _price_from_litellm(
@@ -269,9 +310,10 @@ def project_spend(
             prompt_tokens=(
                 estimate_tokens(charter_system(charter.max_topics))
                 + estimate_tokens(charter.prompt)
+                + _schema_tokens(Charter, name="charter")
             ),
-            completion_tokens=900,
-            basis="one call; the prompt is measured, the reply allowed 900 tokens",
+            completion_tokens=2500,
+            basis="one call; the prompt is measured, the reply allowed 2,500 tokens",
         )
         topic_text = " ".join(
             f"{s.slug} {s.scope} {' '.join(s.seed_terms)}" for s in charter.topic_taxonomy
@@ -280,8 +322,12 @@ def project_spend(
             "search",
             Role.BALANCED,
             calls=1,
-            prompt_tokens=estimate_tokens(QUERY_PLAN_SYSTEM) + estimate_tokens(topic_text),
-            completion_tokens=600,
+            prompt_tokens=(
+                estimate_tokens(QUERY_PLAN_SYSTEM)
+                + estimate_tokens(topic_text)
+                + _schema_tokens(QueryPlan, name="query_plan")
+            ),
+            completion_tokens=2100,
             basis="one query-planning call over the charter's taxonomy",
         )
     else:
@@ -292,15 +338,21 @@ def project_spend(
     screened = min(screen_budget, len(pool))
     # The same prefix on every screening call, byte for byte. Measured once here for
     # the same reason the node assembles it once: it is most of a short call's prompt.
-    context = estimate_tokens(SCREEN_SYSTEM) + estimate_tokens(
-        screen_context(
-            task=charter.task or charter.prompt,
-            population=charter.population,
-            outcome=charter.outcome,
-            inclusion=list(charter.inclusion),
-            exclusion=list(charter.exclusion),
-            topics=[(s.slug, s.scope or s.title) for s in charter.topic_taxonomy],
+    # The schema rides along on each one too, so it belongs in the same figure — an
+    # abstract is a few hundred tokens and so is the schema.
+    context = (
+        estimate_tokens(SCREEN_SYSTEM)
+        + estimate_tokens(
+            screen_context(
+                task=charter.task or charter.prompt,
+                population=charter.population,
+                outcome=charter.outcome,
+                inclusion=list(charter.inclusion),
+                exclusion=list(charter.exclusion),
+                topics=[(s.slug, s.scope or s.title) for s in charter.topic_taxonomy],
+            )
         )
+        + _schema_tokens(ScreenVerdict, name="screen_verdict")
     )
     if screened:
         measured = sum(estimate_tokens(c.screening_text) for c in pool[:screened])
@@ -345,7 +397,12 @@ def project_spend(
         "curate",
         Role.BALANCED,
         calls=topics,
-        prompt_tokens=topics * (estimate_tokens(CURATE_SYSTEM) + per_topic * per_paper),
+        prompt_tokens=topics
+        * (
+            estimate_tokens(CURATE_SYSTEM)
+            + _schema_tokens(TopicCuration, name="topic_curation")
+            + per_topic * per_paper
+        ),
         completion_tokens=topics * per_topic * CURATE_PER_PAPER_COMPLETION,
         basis=f"{topics} topics, about {per_topic} paper(s) each at {per_paper} tokens",
     )
@@ -365,25 +422,29 @@ def project_spend(
         # The truncation `fulltext` applies is part of the price, so it is part of the
         # projection: without the cap a corpus of long reviews projects several times
         # what the run can actually spend.
-        capped = min(
-            abstract_tokens * FULL_TEXT_MULTIPLE, MAX_SOURCE_CHARS / CHARS_PER_TOKEN
-        )
+        capped = min(abstract_tokens * FULL_TEXT_MULTIPLE, MAX_SOURCE_CHARS / CHARS_PER_TOKEN)
         per_paper = int(abstract_tokens * (1 - full_text_share) + capped * full_text_share)
         # The same per-topic prefix the node builds, measured on the widest topic so the
-        # projection cannot come in under the run.
-        prefix = estimate_tokens(EXTRACT_SYSTEM) + max(
-            (
-                estimate_tokens(
-                    extract_context(
-                        task=charter.task or charter.prompt,
-                        outcome=charter.outcome,
-                        topic=s.slug,
-                        scope=s.scope or s.title,
+        # projection cannot come in under the run. The extraction schema is the largest
+        # of them and rides on all 200 calls, which makes it the single biggest thing
+        # this projection used to miss.
+        prefix = (
+            estimate_tokens(EXTRACT_SYSTEM)
+            + _schema_tokens(Extraction, name="extraction")
+            + max(
+                (
+                    estimate_tokens(
+                        extract_context(
+                            task=charter.task or charter.prompt,
+                            outcome=charter.outcome,
+                            topic=s.slug,
+                            scope=s.scope or s.title,
+                        )
                     )
-                )
-                for s in charter.topic_taxonomy
-            ),
-            default=0,
+                    for s in charter.topic_taxonomy
+                ),
+                default=0,
+            )
         )
         add(
             "extract",

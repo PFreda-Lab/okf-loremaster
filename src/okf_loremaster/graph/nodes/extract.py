@@ -52,16 +52,26 @@ NODE = "extract"
 # Enough for a full concept: `MAX_PREDICTOR_ROWS` rows with quote locators, null
 # findings, and the prose fields, each already under its own length budget.
 #
-# Twice measured wrong, at 3072 and at 6144, both times by capping the budget instead of
-# the reply. What a truncated extraction actually costs is the whole paper: the JSON
-# never closes, so it never parses, so the repair retry has nothing to repair and the
-# paper is dropped — after being billed for in full, twice. A ceiling is not a purchase
-# either, since a reply that finishes in 2,000 tokens is billed for 2,000 whatever the
-# ceiling says. So the ceiling was never the lever; the size of the reply was. The prompt
-# now caps the two lists that had no limit at all, asks for compact JSON, and asks for
-# quote locators rather than copied sentences — together about a third of what replies
-# used to run to. This is generous room for one that respects all three.
-MAX_EXTRACTION_TOKENS = 8192
+# Three times measured wrong, at 3072, 6144 and 8192, every time by treating the ceiling
+# as a way to keep replies short. What a truncated extraction actually costs is the whole
+# generation: the router throws the cut-off reply away and re-asks with twice the room,
+# so a paper that trips it is billed once for nothing and waits out a second round trip
+# to get the answer it would have had the first time. A ceiling is not a purchase — a
+# reply that finishes in 2,000 tokens is billed for 2,000 whatever the ceiling says — so
+# room costs nothing and the lack of it costs a whole call.
+#
+# 8192 tripped on 19 of 88 papers in a live run (2026-08-18), about a quarter of that
+# run's spend paid for generations that were discarded. Not an outlier to investigate: a
+# long full-text paper with a full set of rows simply runs longer than that. 16384 is not
+# a new number either, it is the one the retry already escalates to, and the same run
+# shows it finishing every time — no reply was cut off twice.
+#
+# Not the model's real maximum, which would be free by the same argument. The ceiling
+# still has one job left: an extraction that has gone wrong and is looping bills eight
+# times more before anything catches it, and the truncation warning stops being an early
+# signal that the prompt needs fixing. `_TRUNCATION_ATTEMPTS` still allows one doubling
+# past this, so a genuine outlier is rescued at 32768 rather than dropped.
+MAX_EXTRACTION_TOKENS = 16384
 
 # How much of a failed reply to show the model when asking it to try again. The reply
 # is echoed back so the repair is an edit rather than a second attempt from nothing;

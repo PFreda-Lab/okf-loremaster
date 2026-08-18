@@ -407,6 +407,33 @@ async def test_a_price_override_turns_the_projection_into_a_figure(
     assert "$" in run.output
 
 
+def test_a_configured_price_beats_the_table_litellm_ships(settings_factory: Any) -> None:
+    """The override has to win, or it is unreachable for every model litellm names.
+
+    That table is a static JSON file inside the installed wheel, so a published price
+    that moves afterward leaves it quoting history: litellm 1.95.0 still answered $2/$10
+    per million for `claude-sonnet-5` months after it went to $3/$15, and every figure we
+    printed was two thirds of the real one. Consulting it first made the setting written
+    for exactly this case dead code.
+
+    The model name is real and the configured price is absurd on purpose — the first
+    assertion proves litellm has an opinion here, so the second is a genuine head-to-head
+    rather than a fallthrough, and no plausible edit to that table can make the two agree.
+    """
+    from okf_loremaster.config import Role
+    from okf_loremaster.llm.estimate import _price, _price_from_litellm
+
+    settings = settings_factory(
+        model_balanced="claude-sonnet-5",
+        api_key="k",
+        price_balanced_in=999.0,
+        price_balanced_out=999.0,
+    )
+
+    assert _price_from_litellm(settings, Role.BALANCED, 1_000_000, 1_000_000) is not None
+    assert _price(settings, Role.BALANCED, 1_000_000, 1_000_000) == pytest.approx(1998.0)
+
+
 # --- the pauses themselves --------------------------------------------------
 
 

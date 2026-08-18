@@ -54,11 +54,17 @@ OFFER_MULTIPLE = 3
 # very short. It usually is not, and the reply is then cut off mid-object — which
 # loses the whole topic, not the last decision, because truncated JSON does not parse.
 # 80 was measured wrong too: a run of 8 topics truncated on all 8 and every one of them
-# then succeeded on the doubling, so the true figure is between 80 and 160. 160 is the
-# one observed to work. The first attempt is billed whether or not it parses, so a
-# ceiling set below what replies actually need buys nothing and costs a whole call.
-CURATE_TOKENS_PER_PAPER = 160
-CURATE_TOKENS_FLOOR = 1024
+# then succeeded on the doubling, so the true figure is between 80 and 160. The first
+# attempt is billed whether or not it parses, so a ceiling set below what replies
+# actually need buys nothing and costs a whole call.
+#
+# 160 was still low, and the floor with it: two of six curation calls in a measured run
+# were cut off, one of them at the floor rather than at the per-paper rate. Both are set
+# above the largest reply that run produced (3,442 tokens) rather than at it, because
+# the cost of overshooting here is nothing at all — `max_tokens` is a ceiling, and a
+# reply is billed for what it writes, not for the room it was given.
+CURATE_TOKENS_PER_PAPER = 256
+CURATE_TOKENS_FLOOR = 2048
 
 # Reserve tiers, best first: papers the screener included that the topic had no room to
 # offer, then papers it excluded but rated relevant, then papers the curator saw and
@@ -173,9 +179,7 @@ def _topic_tokens(topic: Topic) -> frozenset[str]:
     return text_tokens(" ".join([topic.title, topic.scope, *topic.seed_terms]))
 
 
-def _nearest(
-    candidate: Candidate, charter: Charter, vectors: Mapping[str, frozenset[str]]
-) -> str:
+def _nearest(candidate: Candidate, charter: Charter, vectors: Mapping[str, frozenset[str]]) -> str:
     """The topic whose own words this paper's words most overlap. `""` if none do.
 
     A weak signal, used only where there is no other. Strict `>` walking the charter's
@@ -410,9 +414,7 @@ def _reserve(
     the screener called unrelated never appears here at any tier: refilling a topic with
     those would make the floor a number rather than a claim about the literature.
     """
-    turned_down = {
-        slug: {d.pmid for d in found if not d.keep} for slug, found in decisions.items()
-    }
+    turned_down = {slug: {d.pmid for d in found if not d.keep} for slug, found in decisions.items()}
     judged = {d.pmid for found in decisions.values() for d in found}
 
     queued: dict[str, list[tuple[int, int, str]]] = {slug: [] for slug in charter.slugs}
@@ -447,9 +449,7 @@ def _result(
     the bundle", and downstream would eventually read the wrong one.
     """
     rationales = {
-        decision.pmid: decision.rationale
-        for found in decisions.values()
-        for decision in found
+        decision.pmid: decision.rationale for found in decisions.values() for decision in found
     }
     final: list[CurationDecision] = []
     placed: set[str] = set()

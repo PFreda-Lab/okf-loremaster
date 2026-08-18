@@ -39,7 +39,13 @@ __all__ = [
 # be read end to end by an agent, and past a few hundred documents that stops being
 # possible. The per-topic floor matters just as much — a topic of three papers is a
 # heading pretending to be a topic.
-DEFAULT_TARGET_PAPERS = 200
+#
+# The middle of that band rather than the top of it. Extraction is one call per kept
+# paper and sets a run's price and its wall clock alone; the default is what somebody
+# gets before they have any idea what either will be, so it should not be the most
+# expensive answer the band allows. Raise it with `--target-papers` once a topic is known
+# to be worth 250 papers, which is a judgment nobody can make on the first run.
+DEFAULT_TARGET_PAPERS = 150
 
 # Papers *inside* one topic folder, not the number of topics. The two multiply into the
 # taxonomy's floor and ceiling — see `capacity` — which is why they were renamed away
