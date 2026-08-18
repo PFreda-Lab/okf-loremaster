@@ -8,6 +8,29 @@ The bundle contract downstream reads is the part to watch — it is called out h
 
 ## [Unreleased]
 
+### Added
+
+- **Per-tier reasoning effort, set in `.env`.** `OKF_LOREMASTER_EFFORT_FAST`, `_BALANCED` and
+  `_REASONING` take one vocabulary across providers — `minimal low medium high xhigh max none` —
+  which LiteLLM turns into a thinking budget for Anthropic and the native parameter for OpenAI.
+  Left commented out, nothing is sent and the provider's own default applies; `none` is a different
+  request, and a real one, since it asks a model that would otherwise reason not to. The budget is
+  *added* to each node's reply allowance rather than taken out of it: screening asks for 256 tokens
+  and every thinking budget is larger than that, Anthropic requires `max_tokens` above
+  `budget_tokens`, and LiteLLM applies its own cap only on the legacy `thinking` path and never on
+  this one. `--dry-run` counts the full budget on every call, so cost it there first — effort on
+  BALANCED is the expensive one, because extraction lives there at a call per paper.
+- **`--no-abstract` leaves the `# Abstract` section out of every document.** Not to be confused
+  with `--basis`: that decides what a paper is *read from*, this only decides what the finished
+  document *carries*. The search, the screening, the curation and the extraction are identical
+  either way, and all that changes is that the publisher's own words are not copied into the file
+  at the end — about a fifth of a document's bytes, which is worth having when a downstream agent
+  pays per token to read the corpus. It does not make a bundle redistributable, because every
+  predictor row still quotes the paper verbatim. Since a missing `# Abstract` already means "PubMed
+  served none" on roughly one paper in ten, a bundle built this way says so in `log.md`, in its root
+  `index.md`, and as `abstracts: false` in `resource_descriptor.yaml` — otherwise a corpus without
+  them reads as an unlucky one rather than a deliberate one.
+
 ### Changed
 
 - **A price you configure is now used in preference to LiteLLM's table, not after it.**
@@ -35,6 +58,46 @@ The bundle contract downstream reads is the part to watch — it is called out h
 
 ### Fixed
 
+- **Reasoning effort and temperature could not be sent together, and were.** Every call this tool
+  makes asks at temperature 0, and no provider allows that alongside reasoning: Anthropic refuses
+  any temperature but 1 once thinking is on, and OpenAI's reasoning models refuse the parameter
+  outright. LiteLLM's `drop_params` is no help — it drops what a model does not *support*, and
+  temperature is fully supported; only the combination is rejected. Setting
+  `OKF_LOREMASTER_EFFORT_FAST` therefore turned screening into a wall of 400s, 30 calls out of 30,
+  and the run went on to emit a bundle that validated cleanly on the papers nothing had screened.
+  A tier with effort set now sends no temperature at all — dropped rather than pinned to 1.0, since
+  1.0 satisfies Anthropic and fails OpenAI. A tier left unset is untouched and still asks at 0,
+  which is what an open-weight deployment gets: those take a temperature and not a
+  `reasoning_effort`. The trade belongs to whoever sets the variable and `.env.example` now says
+  so: that tier stops sampling deterministically, by the provider's rule rather than ours.
+- **A two-letter language code took an entire run to zero hits.** The charter's `languages` went
+  into PubMed's `[la]` field verbatim, and that field takes three-letter ISO 639-2/B codes — `eng`,
+  not `en`. It is the last place a mistake like this shows up, because `[la]` is a real field tag:
+  PubMed does not rewrite it the way it rewrites an unknown one, it reports an empty `errorlist`,
+  and it answers `Count 0`. Since the filter is appended to every query in a plan, twelve
+  well-formed queries off a well-drafted charter returned nothing at all, 84 seconds and one
+  reasoning call in. `en`, `english`, `deu` and the rest now normalize to the code PubMed answers
+  to, duplicate spellings collapse to one clause, a language PubMed does not index is refused by
+  name while the charter is still being parsed, and the field description tells the drafting model
+  the format — the charter prompt never asks for this field, but a model handed the schema fills it
+  in anyway, and what it wrote unprompted was `en`. The error a run with no hits raises now points
+  at the filters every query shares before it blames any single clause.
+- **A fifth of the vector index was never indexed.** A sentence encoder drops whatever runs past
+  its window and returns a vector anyway, with no error and nothing in the response to say it
+  happened, so a chunk longer than the window was embedded from its opening only. The default
+  model's window is 350 tokens rather than the 512 usually assumed of a BERT-family checkpoint,
+  which is what made this so much worse than it looked: on a 199-paper bundle 601 of 1,204 chunks
+  were truncated and **103,089 of 491,705 tokens — 21% — never reached the store**; on another it
+  was 30%. The old warning reported about 16% because it counted characters against a budget
+  derived from the window it assumed. Chunks are now measured with the embedder's own tokenizer and
+  split at the coarsest boundary that fits — section, then paragraph, then line, then word — with
+  every part repeating the paper's title so it still reads on its own when it comes back alone. A
+  character budget cannot do this job: real chunk text ran from 2.1 to 6.8 characters per token, so
+  no single figure is both safe and efficient. Re-measured on three bundles: zero truncated, zero
+  words lost. A chunk that already fit keeps the id and the text it always had — 1,097 of them are
+  byte-identical — and a split one becomes `<handle>#<row>.1`, `.2` and so on, carrying
+  `chunk_part` and `chunk_parts` beside the metadata it already had. Rebuild an index to pick this
+  up; the OKF bundle itself is unchanged.
 - **A run under `--tui` could finish its bundle and then hang forever.** The end-of-run question
   about what to keep was asked with a `rich` prompt while Textual held the terminal in raw mode:
   the question is painted underneath a full-screen app and blocks on a read no keypress can reach,

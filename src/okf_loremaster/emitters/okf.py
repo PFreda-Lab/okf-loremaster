@@ -172,7 +172,16 @@ def write_bundle(
         directory = path / slug
         directory.mkdir(parents=True, exist_ok=True)
         for record in topic_records:
-            written.append(_write(directory / record.filename, document_for(record)))
+            # Whether abstracts are written is read off the manifest rather than passed in
+            # beside it. The manifest is what the bundle will claim about itself, so taking
+            # both from one value is what makes it impossible for `abstracts: false` to sit
+            # in the descriptor of a corpus whose documents all carry an `# Abstract`.
+            written.append(
+                _write(
+                    directory / record.filename,
+                    document_for(record, abstracts=manifest.abstracts),
+                )
+            )
         written.append(
             _write(directory / INDEX_FILENAME, topic_index(slug, topic_records, charter=charter))
         )
@@ -250,8 +259,8 @@ def _stale_directories(path: Path, grouped: Mapping[str, list[ConceptRecord]]) -
 # --- one document -----------------------------------------------------------
 
 
-def document_for(record: ConceptRecord) -> str:
-    return render(frontmatter_for(record)) + "\n" + body_for(record)
+def document_for(record: ConceptRecord, *, abstracts: bool = True) -> str:
+    return render(frontmatter_for(record)) + "\n" + body_for(record, abstracts=abstracts)
 
 
 def frontmatter_for(record: ConceptRecord) -> dict[str, Any]:
@@ -339,7 +348,7 @@ def _author_line(authors: Sequence[str]) -> str:
     return f"{line}, et al." if len(authors) > MAX_AUTHORS else line
 
 
-def body_for(record: ConceptRecord) -> str:
+def body_for(record: ConceptRecord, *, abstracts: bool = True) -> str:
     """The document body, in `BODY_SECTIONS` order, every section written non-empty.
 
     Five sections are unconditional and each has a stated fallback — "None reported",
@@ -350,6 +359,13 @@ def body_for(record: ConceptRecord) -> str:
     papers state no interaction at all — the predictor table's `Interacts with` column is
     already where "none" gets said, blank, on every row.
 
+    `abstracts=False` is `--no-abstract`: the section is dropped from every document
+    whether or not the paper had one. It is a drop at write time and not an unread
+    abstract — screening, curation and extraction all still ran on the same text, so the
+    corpus is the corpus either way and only the documents are shorter. What the run did
+    is on the manifest, because these files cannot say it: a missing heading looks the
+    same as a paper PubMed served no abstract for.
+
     Order is fixed and skipping never disturbs it, which is what the validator checks: a
     document with five sections and one with seven agree on the order of the five they
     share.
@@ -357,7 +373,7 @@ def body_for(record: ConceptRecord) -> str:
     extraction = record.extraction
     written = {
         BOTTOM_LINE_SECTION: _bottom_line(record),
-        ABSTRACT_SECTION: _abstract(record),
+        ABSTRACT_SECTION: _abstract(record) if abstracts else "",
         PREDICTORS_SECTION: _predictors(record),
         INTERACTIONS_SECTION: _interactions(extraction),
         NULL_FINDINGS_SECTION: _null_findings(extraction),
@@ -381,6 +397,10 @@ def _abstract(record: ConceptRecord) -> str:
     `is_export_safe` already reads false for every abstract-only record — PubMed serves an
     abstract with no license attached, so redistributing a corpus of them is a decision
     for whoever redistributes it and not one this tool can make on their behalf.
+    `--no-abstract` leaves it out, which takes about a fifth of the concept documents with
+    it — 20% of their bytes measured across a 199-paper bundle, and up to 31% on a small
+    one whose tables are short. It does not make a bundle redistributable: every predictor
+    row's quote is sliced out of the paper too, and those stay.
 
     Structured abstracts arrive from E-utilities as `Label: body` paragraphs and are kept
     that way, because the Methods/Results distinction is exactly what a reader checking an
@@ -782,6 +802,7 @@ def root_index(
             # papers before screening, so the funnel's own numbers look like a thin
             # literature unless this line says a filter ran.
             ("Read from", _basis_policy(manifest)),
+            ("Abstracts", _abstract_policy(manifest)),
             ("Stale after", manifest.stale_after.isoformat() if manifest.stale_after else ""),
             ("Signed off by", manifest.verified_by),
         ]
@@ -976,6 +997,7 @@ def log_markdown(charter: Charter, manifest: RunManifest, *, verification: str =
             # asked for and not something that happened. What happened to each paper as a
             # result is the full-text-versus-abstract split in the stage counts.
             ("Read from", _basis_policy(manifest)),
+            ("Abstracts", _abstract_policy(manifest)),
         ]
     )
 
@@ -1348,6 +1370,12 @@ def descriptor(
     # access" — which is all the per-document `text_basis` can say.
     if _basis_policy(manifest):
         payload["text_basis_policy"] = manifest.text_basis_policy
+    # Only when they were dropped, and for the same reason. A consumer that indexes the
+    # prose of these documents is entitled to know that the authors' own framing is not
+    # in them, and cannot find that out by looking: `# Abstract` is an optional heading,
+    # so its absence everywhere reads as an unlucky corpus rather than a decision.
+    if not manifest.abstracts:
+        payload["abstracts"] = False
     return str(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, width=100))
 
 
@@ -1388,6 +1416,21 @@ def _basis_policy(manifest: RunManifest) -> str:
     except ValueError:
         return ""
     return "" if policy is TextBasisPolicy.ANY else policy.label
+
+
+def _abstract_policy(manifest: RunManifest) -> str:
+    """What `--no-abstract` did, or nothing at all.
+
+    Empty on a default run, for the reason `_basis_policy` is empty on one: a line saying
+    "yes, the normal thing happened" on every bundle ever built teaches readers to skip
+    the place the one deliberate choice announces itself.
+    """
+    if manifest.abstracts:
+        return ""
+    return (
+        "omitted from every document by --no-abstract. Every paper was still screened "
+        "and read from the text this run had; only the section is gone."
+    )
 
 
 def _funnel(manifest: RunManifest) -> list[tuple[str, int]]:

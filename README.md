@@ -253,6 +253,7 @@ okf-loremaster build "<your question>" -o my-corpus  # do it
 | `--review` | off | sign the bundle off by hand before it is written |
 | `--tui` | off | full-screen interface |
 | `--basis any\|abstract\|full-text` | `any` | what each paper is read from; `full-text` keeps only open-access papers |
+| `--no-abstract` | off | leave the `# Abstract` section out of every document |
 | `--target-papers` | 150 | 120–250 is a browsability ceiling, not a recall target |
 | `--topic-paper-min` / `--topic-paper-max` | 8 / 40 | papers inside one topic folder |
 | `--max-topics` | 8 | how many topic folders the review is divided into |
@@ -270,6 +271,19 @@ a smaller, slower, more expensive corpus that answers more per document, because
 about how their variables relate live in results and discussion sections that abstracts don't carry.
 Whichever you pick, each document records what it actually got in `text_basis`, and under `any` the
 bundle stays silent about policy rather than claiming one.
+
+`--no-abstract` is easy to confuse with `--basis`, but the two answer different questions. `--basis`
+is what a paper is *read from*. `--no-abstract` is only what the finished document *keeps*. Every
+paper is still searched, screened, curated and extracted from the same text; the only difference is
+that the abstract is not copied into the file at the end. That is about a fifth of a document, which
+adds up when a downstream agent pays per token to read the corpus.
+
+It does not make a bundle redistributable. Each predictor row still quotes the paper directly, and
+those quotes are the evidence trail.
+
+About one paper in ten has no abstract in PubMed to begin with, so a bundle with none of them would
+otherwise look unlucky rather than deliberate. A bundle built this way says which it is, in `log.md`,
+in the root `index.md`, and as `abstracts: false` in `resource_descriptor.yaml`.
 
 The three topic flags multiply. `--max-topics` × `--topic-paper-min` is the smallest corpus the
 taxonomy can hold and `--max-topics` × `--topic-paper-max` the largest, so `--target-papers` outside
@@ -512,7 +526,8 @@ copyright; a minority is open access. Recording which is which stops a reader fr
 pulled from an abstract like one pulled from full text. The `# Abstract` section carries the paper's
 own summary verbatim either way — for a full-text document it is the only place the authors' own
 framing survives, and for an abstract-only one it is what everything above it was derived from, so a
-row that reads oddly can be checked against it without leaving the file.
+row that reads oddly can be checked against it without leaving the file. It is also the one section
+you can turn off, with [`--no-abstract`](#running-it).
 
 *(Example content from [PubMed](https://pubmed.ncbi.nlm.nih.gov/33745404/),
 [DOI 10.1080/09540121.2021.1902932](https://doi.org/10.1080/09540121.2021.1902932).)*

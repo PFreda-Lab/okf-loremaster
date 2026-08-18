@@ -100,6 +100,18 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # mistaken for a third-party dependency.
 known-local-folder = ["fake_llm", "fake_ncbi", "graph_runs"]
 
+# `ruff format` is a gate alongside `ruff check`, and everything it decides is a default —
+# double quotes, `line-length` above, the magic trailing comma honored. None of it is a
+# preference worth having; the point is that no review comment is ever spent on any of it.
+#
+# The one line here is load-bearing. This codebase reasons in its docstrings, and they are
+# full of things that look like code and are not: `x[nosuchfield]`, `\\{part}`, half a YAML
+# block. Letting the formatter parse and rewrite those would edit prose, which is the one
+# thing it must not touch. Off is the default; it is written down because it is the only
+# setting anyone would be tempted to flip.
+[tool.ruff.format]
+docstring-code-format = false
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

@@ -583,6 +583,52 @@ def test_languages_are_lowercased_and_stripped() -> None:
     assert a_charter(languages=[" ENG ", "fre", ""]).languages == ["eng", "fre"]
 
 
+def test_a_two_letter_language_code_becomes_the_one_pubmed_accepts() -> None:
+    """`en[la]` is the whole reason this validator does more than lowercase.
+
+    PubMed takes `[la]` with any value, reports no error, and matches nothing, so a
+    charter carrying `en` searched twelve well-formed queries to a total of zero hits.
+    """
+    assert a_charter(languages=["en", "de", "fr", "zh"]).languages == [
+        "eng",
+        "ger",
+        "fre",
+        "chi",
+    ]
+
+
+def test_language_names_and_the_other_three_letter_standard_are_accepted() -> None:
+    """ISO 639-2/T disagrees with the /B codes PubMed uses for seventeen languages."""
+    assert a_charter(languages=["English"]).languages == ["eng"]
+    assert a_charter(languages=["deu", "fra", "ces", "zho"]).languages == [
+        "ger",
+        "fre",
+        "cze",
+        "chi",
+    ]
+
+
+def test_two_spellings_of_one_language_do_not_become_two_clauses() -> None:
+    assert a_charter(languages=["en", "eng", "english"]).languages == ["eng"]
+
+
+def test_a_language_pubmed_does_not_know_is_rejected_rather_than_searched() -> None:
+    """Fatal, unlike an over-long scope line.
+
+    The filter is appended to every query in the plan, so this is not a defect in one
+    result — it is the whole run, discovered a reasoning call and a search round later.
+    """
+    with pytest.raises(ValidationError, match="PubMed has no language klingon"):
+        a_charter(languages=["klingon"])
+
+
+def test_the_schema_tells_the_model_which_language_codes_to_write() -> None:
+    """The charter prompt never asks for this field; the model fills it in regardless."""
+    described = Charter.model_json_schema()["properties"]["languages"]["description"]
+    assert "three letters" in described
+    assert "eng" in described
+
+
 def test_duplicate_topic_slugs_are_rejected() -> None:
     """They are directory names; the second would silently overwrite the first."""
     with pytest.raises(ValidationError, match="unique"):

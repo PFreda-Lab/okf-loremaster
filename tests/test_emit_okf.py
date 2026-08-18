@@ -23,6 +23,7 @@ import yaml
 from okf_loremaster.emitters.okf import _expansion_is_mechanical, search_markdown
 from okf_loremaster.okf.frontmatter import load, parse, split
 from okf_loremaster.okf.layout import (
+    ABSTRACT_SECTION,
     BODY_SECTIONS,
     CATALOG_FILENAME,
     CHARTER_FILENAME,
@@ -277,6 +278,108 @@ async def test_an_effect_verification_removed_is_marked_rather_than_printed(
     # And the bundle is still a valid bundle: a dropped number is a downgrade, not a
     # structural failure.
     assert validate_bundle(bundle).ok
+
+
+# --- the abstract -----------------------------------------------------------
+
+
+async def test_the_abstract_is_written_unless_it_is_turned_off(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On by default, and off only when asked. The flag is the whole feature, so the
+    thing worth checking is that the default did not quietly become the other one."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    documents = list(read_bundle(bundle).documents())
+    assert documents
+    assert all(document.section(ABSTRACT_SECTION) for document in documents)
+
+
+async def test_no_abstract_leaves_the_section_out_of_every_document(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every document, not most of them, and still a valid bundle: `# Abstract` is
+    outside `REQUIRED_BODY_SECTIONS` precisely so a corpus may be written without it."""
+    _, bundle = await golden(settings_factory, tmp_path, monkeypatch, abstracts=False)
+
+    documents = list(read_bundle(bundle).documents())
+    assert documents
+    for document in documents:
+        headings = [name for name, _ in document.sections()]
+        assert ABSTRACT_SECTION not in headings, document.path.name
+        assert set(REQUIRED_BODY_SECTIONS) <= set(headings), document.path.name
+        assert headings == [name for name in BODY_SECTIONS if name in headings], (
+            document.path.name
+        )
+
+    report = validate_bundle(bundle)
+    assert report.errors == (), report.lines()
+
+
+async def test_no_abstract_removes_the_section_and_disturbs_nothing_else(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The claim the flag makes: the same papers, read the same way, minus one section.
+
+    Two runs off the same fixtures and the same scripted model, compared document for
+    document. A flag that also changed which papers were kept, or what a table said about
+    them, would be a different corpus wearing the same name — and the only way to know is
+    to build both and diff them.
+    """
+    first, second = tmp_path / "with", tmp_path / "without"
+    first.mkdir()
+    second.mkdir()
+    _, kept = await golden(settings_factory, first, monkeypatch)
+    _, dropped = await golden(settings_factory, second, monkeypatch, abstracts=False)
+
+    with_abstract = {d.pmid: d for d in read_bundle(kept).documents()}
+    without = {d.pmid: d for d in read_bundle(dropped).documents()}
+    assert set(with_abstract) == set(without)
+
+    for pmid, document in with_abstract.items():
+        other = without[pmid]
+        assert document.filename == other.filename
+        assert document.domain == other.domain
+        # Every section but the abstract, byte for byte, in the same order.
+        assert [
+            (name, text) for name, text in document.sections() if name != ABSTRACT_SECTION
+        ] == list(other.sections()), pmid
+        # And the one that went was not empty to begin with, or this proves nothing.
+        assert (document.section(ABSTRACT_SECTION) or "").strip()
+
+
+async def test_a_bundle_with_no_abstracts_says_so_rather_than_looking_unlucky(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing `# Abstract` already means "PubMed had none". A whole corpus of them has
+    to be able to say which of the two happened, and the documents cannot — so the log,
+    the root index and the descriptor do, and only when the answer is the unusual one."""
+    run, bundle = await golden(settings_factory, tmp_path, monkeypatch, abstracts=False)
+
+    manifest = run.state["manifest"]
+    assert manifest is not None and manifest.abstracts is False
+
+    for filename in (LOG_FILENAME, INDEX_FILENAME):
+        text = (bundle / filename).read_text(encoding="utf-8")
+        assert "--no-abstract" in text, filename
+    descriptor = yaml.safe_load((bundle / DESCRIPTOR_FILENAME).read_text(encoding="utf-8"))
+    assert descriptor["abstracts"] is False
+
+
+async def test_a_default_bundle_says_nothing_about_abstracts_at_all(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the rule. A line announcing that the normal thing happened, on
+    every bundle ever built, teaches readers to skip the place the unusual one is said."""
+    run, bundle = await golden(settings_factory, tmp_path, monkeypatch)
+
+    manifest = run.state["manifest"]
+    assert manifest is not None and manifest.abstracts is True
+
+    for filename in (LOG_FILENAME, INDEX_FILENAME):
+        assert "--no-abstract" not in (bundle / filename).read_text(encoding="utf-8"), filename
+    descriptor = yaml.safe_load((bundle / DESCRIPTOR_FILENAME).read_text(encoding="utf-8"))
+    assert "abstracts" not in descriptor
 
 
 # --- evidence strength ------------------------------------------------------
@@ -676,7 +779,7 @@ def attach(monkeypatch: pytest.MonkeyPatch, signoff: Signoff) -> StubReviewer:
     """Stand in for the console reviewer `--review` would have built."""
     stub = StubReviewer(signoff)
 
-    def build(signer: str, console: Any = None) -> StubReviewer:
+    def build(signer: str, console: Any = None, **_: Any) -> StubReviewer:
         return stub
 
     monkeypatch.setattr("okf_loremaster.ui.review.ConsoleReviewer", build)

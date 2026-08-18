@@ -139,6 +139,81 @@ def test_zero_dollars_only_ever_means_zero_calls() -> None:
             assert format_cost(0.0, calls=calls, unpriced=unpriced) != "$0.00"
 
 
+# --- reasoning effort ------------------------------------------------------
+
+
+async def test_no_effort_configured_sends_no_effort_at_all(settings_factory: Any) -> None:
+    """Unset must mean "say nothing" rather than "say none". A provider whose model
+    reasons by default should keep doing so until somebody asks it not to."""
+    completion = FakeCompletion()
+    router, _ = _router(settings_factory, completion=completion)
+
+    await router.complete(Role.BALANCED, MESSAGES, node="extract")
+
+    assert "reasoning_effort" not in completion.calls[0]
+
+
+async def test_effort_is_sent_per_tier_and_not_to_the_others(settings_factory: Any) -> None:
+    """The tiers are asked for different work, so they get separate settings: one call
+    per run on the charter, one per paper on extraction, one per abstract on screening."""
+    completion = FakeCompletion()
+    router, _ = _router(
+        settings_factory, completion=completion, effort_reasoning="high", effort_fast="none"
+    )
+
+    await router.complete(Role.REASONING, MESSAGES, node="charter")
+    await router.complete(Role.FAST, MESSAGES, node="screen")
+    await router.complete(Role.BALANCED, MESSAGES, node="extract")
+
+    assert completion.calls[0]["reasoning_effort"] == "high"
+    assert completion.calls[1]["reasoning_effort"] == "none"
+    assert "reasoning_effort" not in completion.calls[2]
+
+
+async def test_a_thinking_budget_is_added_to_the_reply_allowance_not_taken_from_it(
+    settings_factory: Any,
+) -> None:
+    """Anthropic spends thinking from the same ceiling as the reply and requires
+    `max_tokens` to exceed the budget outright. LiteLLM caps that budget for a caller who
+    passes `thinking` directly and does not for one who passes `reasoning_effort`, so the
+    room has to be made here — screening asks for 256 tokens, which is below every
+    thinking budget there is, and would be refused on every paper it screened."""
+    completion = FakeCompletion()
+    router, _ = _router(settings_factory, completion=completion, effort_fast="high")
+
+    await router.complete(Role.FAST, MESSAGES, node="screen", max_tokens=256)
+
+    assert completion.calls[0]["max_tokens"] == 256 + 4096
+
+
+async def test_effort_and_temperature_are_never_sent_together(settings_factory: Any) -> None:
+    """Anthropic rejects any temperature but 1 once thinking is on, and OpenAI's reasoning
+    models reject the parameter outright — so it is dropped rather than pinned to 1.0.
+
+    `drop_params` cannot cover this: temperature is a parameter Anthropic fully supports,
+    and only the combination is refused. Screening asks at temperature 0, so this took out
+    30 of 30 calls on a real run and the bundle emitted anyway, on nothing."""
+    completion = FakeCompletion()
+    router, _ = _router(settings_factory, completion=completion, effort_fast="low")
+
+    await router.complete(Role.FAST, MESSAGES, node="screen")
+    await router.complete(Role.BALANCED, MESSAGES, node="extract")
+
+    assert "temperature" not in completion.calls[0]
+    assert completion.calls[0]["reasoning_effort"] == "low"
+    # The tier with no effort set is untouched: it still asks deterministically.
+    assert completion.calls[1]["temperature"] == 0.0
+
+
+async def test_an_unknown_effort_is_refused_by_name(settings_factory: Any) -> None:
+    """Config failures are loud and name the variable. A typo here would otherwise reach
+    the provider and come back as a 400 on the first node of a run."""
+    with pytest.raises(Exception) as caught:
+        settings_factory(effort_balanced="thorough")
+
+    assert "effort_balanced" in str(caught.value)
+
+
 # --- retries ---------------------------------------------------------------
 
 

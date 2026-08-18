@@ -97,11 +97,19 @@ async def search_node(state: RunState, deps: Deps) -> dict[str, Any]:
         # presented as a finished one is the same defect as a blank paper presented as a
         # read one: the tool reporting success for work it did not do. It stops here,
         # while the cause is still on screen and before the run spends anything more.
+        # *Every* query, not most of them, which is the part worth reading twice. A bad
+        # clause zeroes one query; only something the plan shares can zero all of them,
+        # and what every query shares is the filters `with_filters` appends. So the
+        # message names those first — it used to blame a long `population` or `outcome`
+        # alone, which sent a real diagnosis looking at twelve well-formed queries for
+        # an hour while the words `AND en[la]` sat at the end of each one.
         raise RuntimeError(
             "no papers retrieved: every query returned zero hits, so there is nothing "
             "to build a bundle from. The queries as PubMed ran them are in the log "
-            "above — the usual cause is an over-long `population` or `outcome` in the "
-            "charter being searched as an exact phrase"
+            "above. All of them failing points at what they share — the charter's "
+            "`languages` and `min_year`, appended to each one — rather than at any "
+            "single clause; failing that, an over-long `population` or `outcome` is "
+            "searched as an exact phrase and matches nothing"
         )
 
     return {

@@ -183,6 +183,15 @@ class Deps:
     # rather than merely the reading: see `rank` for the availability pass that enforces
     # `FULL_TEXT`, and `fulltext` for the BioC call `ABSTRACT` skips.
     basis: TextBasisPolicy = TextBasisPolicy.ANY
+    # Whether the emitted documents carry `# Abstract`. On `Deps` and not in state, unlike
+    # `basis`: this one is spent in `emit_okf`, so a run resumed from anywhere before that
+    # node picks up the flag it is resumed with. `--basis` cannot work that way, because
+    # the corpus it would restrict was chosen rounds earlier.
+    #
+    # Which is as far as it goes: resuming a run that already *finished* replays a graph
+    # with nothing left to execute, so `emit_okf` does not run and no flag on that command
+    # changes anything. Rebuild, or emit again from an unfinished checkpoint.
+    abstracts: bool = True
     max_queries: int = 12
     # Search rounds allowed, including the first. Capped at `MAX_ROUNDS` by the CLI;
     # 1 turns the conditional re-query edge off entirely.

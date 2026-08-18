@@ -108,6 +108,10 @@ def manifest_for(
         # From state, not from `deps`. The two agree on a fresh run and can disagree on a
         # resumed one, and state is the one that was in force when the corpus was chosen.
         text_basis_policy=str(state.get("basis") or ""),
+        # From `deps`, not state, because it is spent here rather than rounds ago: a run
+        # resumed from before this node writes its documents with the flag it was resumed
+        # with. A finished run resumed has no node left to execute and so ignores it.
+        abstracts=deps.abstracts,
         cost=_cost(deps),
         stale_after=None,
         warnings=list(state.get("warnings") or []),

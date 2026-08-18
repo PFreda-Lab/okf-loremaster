@@ -265,6 +265,18 @@ def build(
             "otherwise; the other two drop papers that cannot satisfy them.",
         ),
     ] = TextBasisPolicy.ANY,
+    # Distinct from `--basis`, and the two are easy to confuse: `--basis` is what a paper
+    # is *read from*, this is what the document *carries*. Nothing upstream changes — the
+    # same papers are screened and extracted from the same text — so this is purely
+    # whether the publisher's own words are copied into the bundle at the end.
+    abstracts: Annotated[
+        bool,
+        typer.Option(
+            "--abstract/--no-abstract",
+            help="Copy each paper's abstract into its document. Off shortens the bundle "
+            "by about a fifth and changes nothing about what was read.",
+        ),
+    ] = True,
     # Literals rather than the constants they mirror: importing them would pull pydantic
     # into `--help`. `test_cli_defaults` fails if the two ever drift apart.
     target_papers: Annotated[int, typer.Option(help="Target retained paper count.")] = 150,
@@ -376,6 +388,7 @@ def build(
         pool_size=pool_size,
         screen_budget=screen_budget,
         basis=basis,
+        abstracts=abstracts,
         target_papers=target_papers,
         topic_paper_min=topic_paper_min,
         topic_paper_max=topic_paper_max,

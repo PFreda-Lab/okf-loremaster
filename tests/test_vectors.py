@@ -28,12 +28,14 @@ from okf_loremaster.cli import app
 from okf_loremaster.emitters.vectors import (
     COLLECTION,
     DISTANCE,
+    FALLBACK_WINDOW,
     REQUIRED_KEYS,
     ROW_LEVEL_KEYS,
     Chunk,
     build_index,
     chunks_for,
     index_descriptor,
+    window_for,
 )
 from okf_loremaster.finalize import Finalize
 from okf_loremaster.okf.layout import (
@@ -62,9 +64,16 @@ class StubEmbedder:
     revision is supposed to buy in production.
     """
 
-    def __init__(self, *, model: str = "stub/embedder", revision: str = "a" * 40) -> None:
+    def __init__(
+        self,
+        *,
+        model: str = "stub/embedder",
+        revision: str = "a" * 40,
+        window: int = 10_000,
+    ) -> None:
         self._model = model
         self._revision = revision
+        self._window = window
         self.batches: list[list[str]] = []
 
     @property
@@ -78,6 +87,17 @@ class StubEmbedder:
     @property
     def dimensions(self) -> int:
         return DIMENSIONS
+
+    @property
+    def window(self) -> int:
+        # Wide enough that nothing splits unless a test asks for a narrow one, so the
+        # chunk-per-row and metadata assertions are not written around part boundaries.
+        return self._window
+
+    def count(self, text: str) -> int:
+        # Whitespace-delimited words. Not what a real tokenizer does, and it does not need
+        # to be: what is under test is that chunking respects whatever the embedder says.
+        return len(text.split())
 
     def encode(self, texts: Sequence[str]) -> list[list[float]]:
         self.batches.append(list(texts))
@@ -201,6 +221,153 @@ async def test_a_row_chunk_carries_the_quote_keyed_to_its_number(
     for line in quoted:
         number, _, text = line.partition(". ")
         assert text in chunks[int(number)].text
+
+
+# --- fitting the window -----------------------------------------------------
+
+
+async def test_a_chunk_too_long_for_the_window_is_split_rather_than_truncated(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An encoder truncates at its window and returns a vector anyway, so an over-long
+    chunk is indexed by its head and its tail answers nothing — silently. Measured on a
+    real corpus, half of all chunks overran the default checkpoint's 350-token window and
+    a fifth of every token written was never embedded at all."""
+    bundle = await golden(settings_factory, tmp_path, monkeypatch)
+    window = window_for(StubEmbedder(window=40))
+
+    split_something = False
+    for document in read_bundle(bundle).documents():
+        chunks = chunks_for(document, root=bundle, window=window)
+        for chunk in chunks:
+            assert window.fits(chunk.text), (chunk.id, window.count(chunk.text))
+        split_something |= any(chunk.metadata["chunk_parts"] > 1 for chunk in chunks)
+
+    assert split_something, "nothing split, so nothing was proved about splitting"
+
+
+async def test_splitting_drops_no_word_of_the_chunk_it_split(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point. Splitting that lost text would be truncation with extra steps."""
+    bundle = await golden(settings_factory, tmp_path, monkeypatch)
+    window = window_for(StubEmbedder(window=40))
+
+    for document in read_bundle(bundle).documents():
+        whole = {chunk.id: chunk.text for chunk in chunks_for(document, root=bundle)}
+        parts: dict[str, list[str]] = {}
+        for chunk in chunks_for(document, root=bundle, window=window):
+            parts.setdefault(chunk.id.split(".")[0], []).append(chunk.text)
+        for handle, text in whole.items():
+            rejoined = " ".join(parts[handle])
+            missing = [word for word in text.split() if word not in rejoined]
+            assert not missing, (handle, missing[:5])
+
+
+async def test_every_part_says_which_paper_it_came_from(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A part is retrieved on its own, and one that opened mid-caveat with no title would
+    be a paragraph from nowhere."""
+    bundle = await golden(settings_factory, tmp_path, monkeypatch)
+    window = window_for(StubEmbedder(window=40))
+
+    for document in read_bundle(bundle).documents():
+        for chunk in chunks_for(document, root=bundle, window=window):
+            assert chunk.text.startswith(document.title), chunk.id
+
+
+async def test_a_chunk_that_fits_keeps_the_id_and_the_text_it_always_had(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Splitting is for the chunks that need it. A part suffix on every id in the store
+    would be a contract change charged to every consumer to fix a problem most chunks in
+    most bundles do not have."""
+    bundle = await golden(settings_factory, tmp_path, monkeypatch)
+    window = window_for(StubEmbedder(window=10_000))
+
+    for document in read_bundle(bundle).documents():
+        before = chunks_for(document, root=bundle)
+        after = chunks_for(document, root=bundle, window=window)
+        assert [chunk.id for chunk in after] == [chunk.id for chunk in before]
+        assert [chunk.text for chunk in after] == [chunk.text for chunk in before]
+        assert all(chunk.metadata["chunk_parts"] == 1 for chunk in after)
+        assert all(chunk.metadata["chunk_part"] == 0 for chunk in after)
+
+
+async def test_the_parts_of_one_chunk_share_its_index_and_number_from_zero(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`chunk_index` stays the predictor's row number, which is what joins a chunk back to
+    the table it came from. Renumbering parts through it would break that join, so parts
+    are a second axis rather than more of the first."""
+    bundle = await golden(settings_factory, tmp_path, monkeypatch)
+    window = window_for(StubEmbedder(window=40))
+    document = next(iter(read_bundle(bundle).documents()))
+
+    groups: dict[str, list[Any]] = {}
+    for chunk in chunks_for(document, root=bundle, window=window):
+        groups.setdefault(chunk.id.split(".")[0], []).append(chunk)
+
+    rows = len(markdown_table(document.section("Predictors reported") or ""))
+    assert sorted(int(chunk[0].metadata["chunk_index"]) for chunk in groups.values()) == list(
+        range(rows + 1)
+    )
+    for handle, chunks in groups.items():
+        assert len({chunk.metadata["chunk_index"] for chunk in chunks}) == 1, handle
+        assert [chunk.metadata["chunk_part"] for chunk in chunks] == list(range(len(chunks)))
+        assert all(chunk.metadata["chunk_parts"] == len(chunks) for chunk in chunks)
+
+
+def test_the_window_is_the_embedders_own_and_not_a_constant_here() -> None:
+    """Two checkpoints have two different windows and two tokenizers that disagree about
+    what the same sentence costs. The default one answers 350, not the 512 a BERT-family
+    encoder is usually assumed to have — chunking to 512 would build every chunk a third
+    too long for the model that embeds it."""
+    assert window_for(StubEmbedder(window=128)).limit == 128
+    assert window_for(StubEmbedder(window=512)).limit == 512
+    # The stub counts words, so this is the stub's answer and not a character heuristic.
+    assert window_for(StubEmbedder()).count("one two three") == 3
+
+
+def test_an_embedder_that_cannot_say_gets_a_floor_rather_than_no_limit() -> None:
+    """An embedder written against the older three-member protocol still indexes. It
+    cannot be measured exactly, so it is measured pessimistically."""
+
+    class Older:
+        model_id = "older/embedder"
+        revision = ""
+        dimensions = 8
+
+        def encode(self, texts: Sequence[str]) -> list[list[float]]:
+            return [[0.0] * 8 for _ in texts]
+
+    window = window_for(Older())  # type: ignore[arg-type]
+    assert window.limit == FALLBACK_WINDOW
+    # Three characters a token is near the dense end of what real chunk text measured,
+    # so the estimate over-counts prose rather than letting it overrun unnoticed.
+    assert window.count("a" * 30) == 10
+
+
+async def test_the_run_reports_what_it_split_instead_of_splitting_quietly(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store with 1.7x the chunks of the bundle it came from is a surprise worth
+    explaining where it happens."""
+    bundle = await golden(settings_factory, tmp_path, monkeypatch)
+    result = await build_index(
+        bundle, embedder=StubEmbedder(window=40), store=RecordingStore()
+    )
+
+    assert result.split
+    assert result.window == 40
+    assert f"{result.split} split to fit a 40-token window" in result.summary()
+
+    unsplit = await build_index(
+        bundle, embedder=StubEmbedder(window=10_000), store=RecordingStore()
+    )
+    assert unsplit.split == 0
+    assert "split" not in unsplit.summary()
 
 
 # --- metadata ---------------------------------------------------------------

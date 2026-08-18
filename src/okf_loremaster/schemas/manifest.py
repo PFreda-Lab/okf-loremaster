@@ -132,6 +132,14 @@ class RunManifest(Model):
     # thing `any` means, and left empty rather than backfilled because a manifest should
     # not claim a decision nobody made.
     text_basis_policy: str = ""
+
+    # Whether `# Abstract` was written into the documents. False under `--no-abstract`.
+    # Recorded for the same reason `text_basis_policy` is: the documents cannot say it
+    # themselves. That heading is optional either way — roughly one PubMed record in ten
+    # carries no abstract at all — so a corpus with none of them is indistinguishable from
+    # a corpus PubMed had nothing to serve for, and those are not the same bundle. True for
+    # one built before the flag existed, which is what those bundles did.
+    abstracts: bool = True
     cost: CostSummary = Field(default_factory=CostSummary)
 
     # Resolved at index time, not read from config: the descriptor has to name the

@@ -11,9 +11,17 @@ Five choices here are load-bearing:
 table.** One chunk carries the paper's identity — bottom line, null findings, vocabulary
 hints, caveats — and one chunk carries each predictor row with the population, the
 outcome definition and the bottom line around it for context. The table is left out of
-the concept chunk because it is already covered row by row, and because a whole document
-would overrun a sentence encoder's window and be silently truncated: the tail of a
-truncated chunk is not indexed and nothing says so.
+the concept chunk because it is already covered row by row.
+
+**A chunk that does not fit the encoder's window is split, never allowed to overrun it.**
+An encoder truncates at its window and returns a vector anyway, so the tail of an
+over-long chunk is simply not indexed and nothing says so — text that is plainly in the
+bundle answers no query. The window is measured in *tokens, by the embedder's own
+tokenizer*, because a character budget cannot do this job: across three real bundles
+chunk text ran from 2.1 to 6.8 characters per token, so any single constant is either
+too tight for most chunks or too loose for the dense ones. Splitting is at natural
+boundaries — section, then paragraph, then line, then word — and every part repeats the
+paper's title so it can still be read on its own when it comes back alone.
 
 **Metadata is never `None`.** Chroma raises `TypeError` on a null value, so a missing
 field is written as `""`. `n` is the exception that proves it: it is written as an `int`
@@ -69,11 +77,13 @@ __all__ = [
     "IndexResult",
     "SentenceTransformerEmbedder",
     "VectorStore",
+    "Window",
     "build_index",
     "chroma_settings",
     "chunks_for",
     "index_descriptor",
     "link_index",
+    "window_for",
 ]
 
 MetadataValue: TypeAlias = str | int | float | bool
@@ -109,10 +119,21 @@ ROW_LEVEL_KEYS = tuple(_ROW_METADATA)
 # the descriptor's `metadata_map` is an identity map rather than a translation.
 REQUIRED_KEYS = ("source", "title", "id", "chunk_index")
 
-# Roughly a 512-token window at four characters a token — the size of the BERT-family
-# encoders this tool defaults to. Only used to warn: the embedder truncates silently, and
-# a chunk that lost its tail is worth knowing about.
-TRUNCATION_CHARS = 2000
+# Where the window lands when an embedder cannot say what its own is. 350 tokens is the
+# default checkpoint's, and is on the small side of the BERT family — guessing small
+# over-splits, which costs a little retrieval precision; guessing large loses text.
+FALLBACK_WINDOW = 350
+
+# Room left inside the window for the special tokens an encoder adds ([CLS], [SEP]) and
+# for the tokenizer disagreeing with itself about a boundary a split landed on.
+WINDOW_MARGIN = 8
+
+# Packing is *balanced*, not greedy: a chunk needing two parts is split near the middle
+# rather than filled to the brim and left with a remainder. Greedy packing of a 400-token
+# chunk into a 350-token window yields a 50-token second part, which is a fragment that
+# matches on the strength of the repeated title alone. This is the fraction of the window
+# a balanced target may be relaxed by to avoid landing a boundary mid-section.
+BALANCE_SLACK = 0.15
 
 # The sections chunking treats specially are imported by name from `layout`. They were
 # `BODY_SECTIONS[0]` and `BODY_SECTIONS[1]` for one version, which was a bomb with a long
@@ -151,6 +172,24 @@ class Chunk:
 
 
 @dataclass(frozen=True, slots=True)
+class Window:
+    """How much text one embedded unit may carry, and how to measure it.
+
+    Both halves come from the embedder rather than from a constant here, because the
+    answer is a property of the checkpoint somebody configured: the default one has a
+    350-token window, another has 512, and their tokenizers disagree about how many
+    tokens the same sentence is. `count` is the embedder's own tokenizer, so the measure
+    and the thing being measured cannot drift apart.
+    """
+
+    limit: int
+    count: Callable[[str], int]
+
+    def fits(self, text: str) -> bool:
+        return self.count(text) <= self.limit
+
+
+@dataclass(frozen=True, slots=True)
 class IndexResult:
     """What `build_index` did, for the node and the CLI to report."""
 
@@ -166,27 +205,46 @@ class IndexResult:
     embed_revision: str = ""
     dimensions: int = 0
     replaced: bool = False
+    split: int = 0
+    window: int = 0
     warnings: tuple[str, ...] = ()
 
     def summary(self) -> str:
-        return (
+        line = (
             f"{self.chunks} chunk(s) from {self.documents} document(s) "
             f"({self.concept_chunks} concept, {self.predictor_chunks} predictor)"
         )
+        # Said out loud because it is the difference between the store holding the whole
+        # bundle and holding the first 350 tokens of each piece of it.
+        if self.split:
+            line += f", {self.split} split to fit a {self.window}-token window"
+        return line
 
 
 # --- chunking ---------------------------------------------------------------
 
 
-def chunks_for(document: OkfDocument, *, root: Path) -> list[Chunk]:
-    """Every chunk one document contributes: one concept chunk, then one per row."""
+def chunks_for(
+    document: OkfDocument, *, root: Path, window: Window | None = None
+) -> list[Chunk]:
+    """Every chunk one document contributes: one concept chunk, then one per row.
+
+    With a `window`, a chunk too long for it becomes several parts that each fit; without
+    one, each is emitted whole and whatever embeds it decides what to keep. The parameter
+    is optional so that this stays a pure function of the document for anything that only
+    wants to see what a paper contributes.
+    """
     base = _document_metadata(document, root=root)
     handle = str(base["id"])
 
-    chunks = [
-        Chunk(
-            id=_chunk_id(handle, 0),
-            text=_concept_text(document),
+    chunks = list(
+        _parts(
+            _concept_blocks(document),
+            handle=handle,
+            index=0,
+            lead=document.title,
+            joiner=_JOINER,
+            window=window,
             metadata={
                 **base,
                 "chunk_index": 0,
@@ -194,30 +252,37 @@ def chunks_for(document: OkfDocument, *, root: Path) -> list[Chunk]:
                 **dict.fromkeys(ROW_LEVEL_KEYS, ""),
             },
         )
-    ]
+    )
 
     section = document.section(PREDICTORS_SECTION) or ""
     facts = fact_list(document.section(BOTTOM_LINE_SECTION) or "")
     quotes = _numbered(section)
     for number, row in enumerate(markdown_table(section), start=1):
-        chunks.append(
-            Chunk(
-                id=_chunk_id(handle, number),
-                text=_row_text(document, row, facts=facts, quote=quotes.get(number, "")),
-                metadata={
-                    **base,
-                    "chunk_index": number,
-                    "chunk_level": PREDICTOR_LEVEL,
-                    **{key: row.get(column, "") for key, column in _ROW_METADATA.items()},
-                },
-            )
+        chunks += _parts(
+            _row_blocks(document, row, facts=facts, quote=quotes.get(number, "")),
+            handle=handle,
+            index=number,
+            lead=document.title,
+            joiner=_JOINER,
+            window=window,
+            metadata={
+                **base,
+                "chunk_index": number,
+                "chunk_level": PREDICTOR_LEVEL,
+                **{key: row.get(column, "") for key, column in _ROW_METADATA.items()},
+            },
         )
     return chunks
 
 
-def _chunk_id(handle: str, index: int) -> str:
-    """Unique within the store, and legible: `10000#3` is the fourth chunk of PMID 10000."""
-    return f"{handle}#{index}"
+def _chunk_id(handle: str, index: int, part: int = 0) -> str:
+    """Unique within the store, and legible: `10000#3` is the fourth chunk of PMID 10000.
+
+    A part suffix is appended only when there is more than one, so the id of a chunk that
+    fits its window is the id it has always had — and `10000#3.1` reads as the second part
+    of that chunk rather than as some fourteenth one.
+    """
+    return f"{handle}#{index}" if part == 0 else f"{handle}#{index}.{part}"
 
 
 def _document_metadata(document: OkfDocument, *, root: Path) -> dict[str, MetadataValue]:
@@ -268,50 +333,186 @@ def _relative(path: Path, root: Path) -> str:
         return path.name
 
 
-def _concept_text(document: OkfDocument) -> str:
-    """The paper as one chunk: everything except what is covered row by row.
+def _concept_blocks(document: OkfDocument) -> list[str]:
+    """The paper as blocks: everything except what is covered row by row, minus the title.
 
-    `# Abstract` is left out too, and that is a deliberate trade rather than an oversight.
-    A structured abstract runs 250 to 350 words; adding one would push almost every concept
-    chunk past `TRUNCATION_CHARS`, where the embedder drops the tail *silently* — so the
-    caveats and vocabulary hints at the end of the document would stop being retrievable
-    at all, in exchange for prose that restates a bottom line written from the same source.
-    The abstract stays in the bundle for an agent that opens the file; the index keeps its
-    two levels, and both of them keep fitting in the window.
+    The title is the *lead* rather than a block, because it is repeated at the head of
+    every part this becomes — so a part that arrives on its own still says which paper it
+    is from.
+
+    `# Abstract` is left out, and that is a trade rather than an oversight: it is prose
+    restating a bottom line written from the same source, so indexing it spends window on
+    a second telling of what the concept chunk already says. It stays in the bundle for an
+    agent that opens the file.
     """
-    parts = [document.title, _text(document.fields.get("description"))]
-    parts += [
+    blocks = [_text(document.fields.get("description"))]
+    blocks += [
         f"{heading}: {body}"
         for heading, body in document.sections()
         if heading not in (PREDICTORS_SECTION, ABSTRACT_SECTION)
     ]
-    return "\n\n".join(part for part in parts if part)
+    return [block for block in blocks if block]
 
 
-def _row_text(
+def _row_blocks(
     document: OkfDocument,
     row: Mapping[str, str],
     *,
     facts: Mapping[str, str],
     quote: str,
-) -> str:
-    """One predictor row, with enough of its paper around it to stand alone."""
-    lines = [document.title, ""]
+) -> list[str]:
+    """One predictor row, with enough of its paper around it to stand alone.
+
+    The row's own fields are a single block on purpose. They are what the chunk *is*, and
+    a split that put `Predictor:` in one part and `Effect:` in another would produce two
+    halves that each read as a different claim than the row makes.
+    """
     # `NONE_CELL` is skipped, not embedded. It is the table's way of writing "nothing
     # here", and `Interacts with: —` on the nineteen rows in twenty that state no
     # interaction is a sentence that means nothing and still moves the vector.
-    lines += [
+    lines = [
         f"{label}: {row[column]}"
         for column, label in _ROW_LABELS
         if row.get(column) and row[column] != NONE_CELL
     ]
     lines += [f"{label}: {facts[label]}" for label in _CONTEXT_FACTS if facts.get(label)]
-    bottom = _first_paragraph(document.section(BOTTOM_LINE_SECTION) or "")
-    if bottom:
-        lines += ["", bottom]
-    if quote:
-        lines += ["", f"Quoted from the paper: {quote}"]
-    return "\n".join(lines)
+    blocks = ["\n".join(lines)]
+    blocks.append(_first_paragraph(document.section(BOTTOM_LINE_SECTION) or ""))
+    blocks.append(f"Quoted from the paper: {quote}" if quote else "")
+    return [block for block in blocks if block]
+
+
+# --- fitting the window -----------------------------------------------------
+
+# Blocks are joined, and split, at the coarsest boundary that gets a part under the
+# window. A blank line separates sections and paragraphs; a newline separates the lines
+# within one; a space is the last resort before giving up on a boundary altogether.
+_JOINER = "\n\n"
+_BOUNDARIES = ("\n\n", "\n", " ")
+
+
+def _parts(
+    blocks: Sequence[str],
+    *,
+    handle: str,
+    index: int,
+    lead: str,
+    joiner: str,
+    window: Window | None,
+    metadata: Mapping[str, MetadataValue],
+) -> list[Chunk]:
+    """One chunk per part: same metadata throughout, differing only in id and part."""
+    texts = _pack(blocks, lead=lead, joiner=joiner, window=window)
+    return [
+        Chunk(
+            id=_chunk_id(handle, index, part),
+            text=text,
+            metadata={**metadata, "chunk_part": part, "chunk_parts": len(texts)},
+        )
+        for part, text in enumerate(texts)
+    ]
+
+
+def _pack(
+    blocks: Sequence[str], *, lead: str, joiner: str, window: Window | None
+) -> list[str]:
+    """The text of each part, in order. One part whenever the whole thing fits."""
+    units = [block for block in blocks if block]
+    whole = joiner.join([lead, *units]) if units else lead
+    if window is None or window.fits(whole):
+        return [whole]
+
+    # Room for the lead on every part, and for the tokenizer counting a join boundary
+    # differently than it counted the two sides separately.
+    budget = window.limit - WINDOW_MARGIN - window.count(lead)
+    if budget < 1:
+        # A title alone fills the window. Nothing here can help, and splitting into
+        # title-only parts would be worse than one over-long chunk.
+        return [whole]
+
+    atoms = [piece for unit in units for piece in _atoms(unit, budget=budget, window=window)]
+    filled = _fill(atoms, budget=budget, joiner=joiner, window=window)
+
+    # Balanced rather than greedy: refill against an even share of the same number of
+    # parts, and keep it only if it still costs no more parts than filling to the brim.
+    share = sum(window.count(atom) for atom in atoms) / len(filled)
+    relaxed = min(budget, int(share * (1 + BALANCE_SLACK)) + 1)
+    if relaxed < budget:
+        balanced = _fill(atoms, budget=relaxed, joiner=joiner, window=window)
+        if len(balanced) <= len(filled):
+            filled = balanced
+
+    return [joiner.join([lead, *part]) for part in filled]
+
+
+def _fill(
+    atoms: Sequence[str], *, budget: int, joiner: str, window: Window
+) -> list[list[str]]:
+    """Group atoms into parts, each under `budget`. Never empty, never an empty group.
+
+    Sized from per-atom counts plus a token for each join rather than by re-counting every
+    candidate part, which would be quadratic in the number of atoms for an answer that
+    `WINDOW_MARGIN` already covers.
+    """
+    parts: list[list[str]] = []
+    current: list[str] = []
+    size = 0
+    for atom in atoms:
+        cost = window.count(atom) + 1
+        if current and size + cost > budget:
+            parts.append(current)
+            current, size = [], 0
+        current.append(atom)
+        size += cost
+    if current:
+        parts.append(current)
+    return parts or [[]]
+
+
+def _atoms(text: str, *, budget: int, window: Window) -> list[str]:
+    """`text` as the largest runs that each fit `budget`, split at the coarsest boundary.
+
+    A run is rejoined with the separator it was split on, so a paragraph broken at spaces
+    comes back as prose rather than as a column of words.
+    """
+    if window.count(text) <= budget:
+        return [text]
+    for separator in _BOUNDARIES:
+        pieces = [piece for piece in text.split(separator) if piece.strip()]
+        if len(pieces) < 2:
+            continue
+        runs = _join_runs(pieces, separator=separator, budget=budget, window=window)
+        if all(window.count(run) <= budget for run in runs):
+            return runs
+        return [
+            atom
+            for run in runs
+            for atom in (
+                _atoms(run, budget=budget, window=window)
+                if run != text and window.count(run) > budget
+                else [run]
+            )
+        ]
+    # One token longer than the whole window. Embedding it truncated is the only option
+    # left, and it is a single word, so there is no tail of meaning to lose.
+    return [text]
+
+
+def _join_runs(
+    pieces: Sequence[str], *, separator: str, budget: int, window: Window
+) -> list[str]:
+    runs: list[str] = []
+    current: list[str] = []
+    for piece in pieces:
+        candidate = [*current, piece]
+        if current and window.count(separator.join(candidate)) > budget:
+            runs.append(separator.join(current))
+            current = [piece]
+        else:
+            current = candidate
+    if current:
+        runs.append(separator.join(current))
+    return runs
 
 
 def _first_paragraph(text: str) -> str:
@@ -444,6 +645,19 @@ class Embedder(Protocol):
     @property
     def dimensions(self) -> int: ...
 
+    @property
+    def window(self) -> int:
+        """How many tokens one text may carry before the rest is dropped, or 0 if unknown.
+
+        Optional in the sense that 0 is a legal answer — an embedder behind an HTTP API
+        may genuinely not know — and chunking then falls back to `FALLBACK_WINDOW`.
+        """
+        ...
+
+    def count(self, text: str) -> int:
+        """Tokens `text` occupies, by this embedder's own tokenizer."""
+        ...
+
     def encode(self, texts: Sequence[str]) -> list[list[float]]: ...
 
 
@@ -511,10 +725,51 @@ class SentenceTransformerEmbedder:
     def dimensions(self) -> int:
         return int(self.load().get_sentence_embedding_dimension())
 
+    @property
+    def window(self) -> int:
+        """`max_seq_length`, which is the checkpoint's own answer and not always 512.
+
+        The default checkpoint says 350. Assuming the BERT architectural maximum instead
+        would have every chunk built a third too long for the model that embeds it.
+        """
+        return int(getattr(self.load(), "max_seq_length", 0) or 0)
+
+    def count(self, text: str) -> int:
+        # `add_special_tokens` because [CLS] and [SEP] occupy the same window the text
+        # does, and a chunk sized to the window without them is two tokens over it.
+        tokenizer = self.load().tokenizer
+        return len(tokenizer.encode(text, add_special_tokens=True, truncation=False))
+
     def encode(self, texts: Sequence[str]) -> list[list[float]]:
         model = self.load()
         vectors = model.encode(list(texts), batch_size=self.batch_size, convert_to_numpy=True)
         return [[float(value) for value in vector] for vector in vectors]
+
+
+def window_for(embedder: Embedder) -> Window:
+    """What to chunk against: the embedder's own window and tokenizer where it has them.
+
+    Read through `getattr` rather than off the protocol directly, so an embedder written
+    against the older three-member `Embedder` still indexes. It gets the fallback window
+    and a characters-per-token estimate, which is worse than an exact count and much
+    better than emitting chunks nothing measured at all.
+    """
+    limit = int(getattr(embedder, "window", 0) or 0)
+    count = getattr(embedder, "count", None)
+    return Window(
+        limit=limit or FALLBACK_WINDOW,
+        count=count if callable(count) else _estimate_tokens,
+    )
+
+
+def _estimate_tokens(text: str) -> int:
+    """Tokens, for an embedder that cannot count its own. Deliberately pessimistic.
+
+    Real chunk text measured 2.1 to 6.8 characters per token against the default
+    checkpoint. Three is near the dense end, so this over-counts typical prose and
+    over-splits rather than letting a dense chunk overrun a window unmeasured.
+    """
+    return -(-len(text) // 3)
 
 
 # --- building ---------------------------------------------------------------
@@ -537,7 +792,14 @@ async def build_index(
     read = read_bundle(bundle)
     target = store_path if store_path is not None else vector_store_path(bundle)
     documents = list(read.documents())
-    chunks = [chunk for document in documents for chunk in chunks_for(document, root=bundle)]
+    # Off the loop because the first call to either loads the model, and chunking needs
+    # the answer before anything is embedded.
+    window = await asyncio.to_thread(window_for, embedder)
+    chunks = [
+        chunk
+        for document in documents
+        for chunk in chunks_for(document, root=bundle, window=window)
+    ]
 
     if not chunks:
         return IndexResult(
@@ -551,11 +813,13 @@ async def build_index(
         )
 
     warnings: list[str] = []
-    overlong = sum(1 for chunk in chunks if len(chunk.text) > TRUNCATION_CHARS)
+    overlong = [chunk for chunk in chunks if not window.fits(chunk.text)]
     if overlong:
+        # Only reachable when a single word is longer than the whole window, since
+        # everything else was split to fit. Worth saying rather than swallowing.
         warnings.append(
-            f"{overlong} of {len(chunks)} chunk(s) are over {TRUNCATION_CHARS} characters "
-            f"and may be truncated by the embedder, which drops their tail silently"
+            f"{len(overlong)} of {len(chunks)} chunk(s) could not be split under the "
+            f"{window.limit}-token window of {embedder.model_id} and will be truncated"
         )
 
     vectors = await _embed(chunks, embedder, on_progress=on_progress)
@@ -582,6 +846,12 @@ async def build_index(
         embed_revision=embedder.revision,
         dimensions=embedder.dimensions,
         replaced=bool(getattr(sink, "replaced", False)),
+        # Chunks that became more than one part, counted as the parent chunks they came
+        # from rather than as the parts they became.
+        split=len(
+            {chunk.id.split(".")[0] for chunk in chunks if chunk.metadata["chunk_parts"] != 1}
+        ),
+        window=window.limit,
         warnings=tuple(warnings),
     )
 
@@ -667,7 +937,11 @@ def index_descriptor(
             f"chunk carries \"\" for all three, so a filter on any of them must either "
             f"allow \"\" or select chunk_level == \"{PREDICTOR_LEVEL}\". Missing values "
             f"are \"\" everywhere, never null; n is an integer when the paper reported "
-            f"one."
+            f"one. A chunk too long for the embedding window is split into chunk_parts "
+            f"parts numbered by chunk_part, each repeating the paper title, so (id, "
+            f"chunk_index) identifies a chunk and (id, chunk_index, chunk_part) "
+            f"identifies a row of this store; retrieving several parts of one chunk is "
+            f"expected and they are contiguous text in that order."
         ),
     }
     return str(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, width=100))
@@ -678,6 +952,8 @@ _METADATA_KEYS = (
     *REQUIRED_KEYS,
     *ROW_LEVEL_KEYS,
     "chunk_level",
+    "chunk_part",
+    "chunk_parts",
     "pmid",
     "domain",
     "journal",

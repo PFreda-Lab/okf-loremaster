@@ -407,6 +407,10 @@ class RunOptions:
     # reading, and both are recorded in the manifest so a bundle can tell "abstract-only
     # by policy" from "abstract-only because that is all PMC had".
     basis: TextBasisPolicy = TextBasisPolicy.ANY
+    # Whether `# Abstract` is written into each document. `--no-abstract` turns it off and
+    # nothing else changes — the papers are screened and read exactly the same way, and
+    # the manifest records the choice so the bundle can say which happened.
+    abstracts: bool = True
     target_papers: int = DEFAULT_TARGET_PAPERS
     topic_paper_min: int = DEFAULT_TOPIC_PAPER_MIN
     topic_paper_max: int = DEFAULT_TOPIC_PAPER_MAX
@@ -628,6 +632,7 @@ async def build_run(
         pool_size=options.pool_size,
         screen_budget=options.screen_budget,
         basis=basis,
+        abstracts=options.abstracts,
         max_queries=options.max_queries,
         max_rounds=options.max_rounds,
         target_papers=options.target_papers,
@@ -865,7 +870,10 @@ def _reviewer(options: RunOptions, settings: Settings, console: Console | None) 
     from okf_loremaster.review import signer_id
     from okf_loremaster.ui.review import ConsoleReviewer
 
-    return ConsoleReviewer(signer_id(settings), console=console)
+    # `abstracts` so the specimen it shows is the file that will be written. A reviewer
+    # signing off on a document with an `# Abstract` the bundle will not carry has been
+    # shown something other than what they are attesting to.
+    return ConsoleReviewer(signer_id(settings), console=console, abstracts=options.abstracts)
 
 
 def _start_renderer(

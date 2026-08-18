@@ -26,6 +26,45 @@ class Role(StrEnum):
     REASONING = "reasoning"
 
 
+class Effort(StrEnum):
+    """How hard a reasoning model may think before it answers, per tier.
+
+    The names are LiteLLM's `reasoning_effort` vocabulary, which is why they are these
+    seven and not a scale of our own: it translates them per provider — to a thinking
+    budget for Anthropic, to the native parameter for OpenAI — so one setting means the
+    same thing whichever provider a deployment points at. Unset is not `NONE`: unset
+    sends nothing at all and takes the provider's default, while `NONE` asks explicitly
+    for no reasoning, and on a model that reasons by default those differ.
+    """
+
+    MINIMAL = "minimal"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+    MAX = "max"
+    NONE = "none"
+
+
+# What each level costs in thinking tokens, mirroring LiteLLM's defaults.
+#
+# Held here because the reply allowance has to be sized around it and LiteLLM will not do
+# that: Anthropic requires `max_tokens > thinking.budget_tokens` and counts thinking
+# against the same ceiling as the reply, and while LiteLLM caps the budget for a caller
+# who passes `thinking` directly, the `reasoning_effort` path sets one and never checks.
+# Screening asks for 256 tokens, which is below every budget on this table, so a run with
+# effort set on FAST and no headroom added would 400 on every paper it screened.
+EFFORT_THINKING_TOKENS = {
+    Effort.MINIMAL: 1024,
+    Effort.LOW: 1024,
+    Effort.MEDIUM: 2048,
+    Effort.HIGH: 4096,
+    Effort.XHIGH: 8192,
+    Effort.MAX: 16384,
+    Effort.NONE: 0,
+}
+
+
 class ConfigError(RuntimeError):
     """Raised with a message that names the offending environment variable."""
 
@@ -70,6 +109,18 @@ class Settings(BaseSettings):
     model_fast: str = ""
     model_balanced: str = ""
     model_reasoning: str = ""
+
+    # How hard each tier may think, or unset to take whatever the provider does by
+    # default. Per tier rather than one global setting because the tiers are asked for
+    # different work: the charter is a judgment call made once, extraction is one call per
+    # paper and sets a run's price, and screening is a yes or no on an abstract that a
+    # thinking budget would multiply the cost of for no better answer.
+    #
+    # `max_tokens` is raised by the tier's budget wherever one is set, so a node's
+    # measured reply allowance still holds and the thinking happens on top of it.
+    effort_fast: Effort | None = None
+    effort_balanced: Effort | None = None
+    effort_reasoning: Effort | None = None
 
     # Credentials are conventionally unprefixed, so accept both spellings.
     api_key: str = Field(
@@ -215,6 +266,19 @@ class Settings(BaseSettings):
             Role.BALANCED: self.concurrency_balanced,
             Role.REASONING: self.concurrency_reasoning,
         }[role]
+
+    def effort_for(self, role: Role) -> Effort | None:
+        """How hard this tier may think, or `None` to send nothing and take the default."""
+        return {
+            Role.FAST: self.effort_fast,
+            Role.BALANCED: self.effort_balanced,
+            Role.REASONING: self.effort_reasoning,
+        }[role]
+
+    def thinking_tokens_for(self, role: Role) -> int:
+        """Tokens this tier's effort will spend thinking, on top of its reply allowance."""
+        effort = self.effort_for(role)
+        return 0 if effort is None else EFFORT_THINKING_TOKENS[effort]
 
     # --- Preflight ---------------------------------------------------------
 

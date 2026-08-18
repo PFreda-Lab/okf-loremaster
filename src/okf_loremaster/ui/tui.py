@@ -181,9 +181,10 @@ class TuiReviewer:
     reached for, not arrived at by pressing enter.
     """
 
-    def __init__(self, app: LoremasterApp, signer: str) -> None:
+    def __init__(self, app: LoremasterApp, signer: str, *, abstracts: bool = True) -> None:
         self._app = app
         self._signer = signer
+        self._abstracts = abstracts
 
     async def sign_off(
         self,
@@ -196,7 +197,11 @@ class TuiReviewer:
         if not records:
             return Signoff.declined("no records")
         view = signoff_view(
-            records, topics=topics, verification=verification, warnings=warnings
+            records,
+            topics=topics,
+            verification=verification,
+            warnings=warnings,
+            abstracts=self._abstracts,
         )
         view.append(signoff_caption(self._signer, len(records)))
         approved = await self._app.confirm(
@@ -350,7 +355,7 @@ class LoremasterApp(App[None]):
         from okf_loremaster.review import signer_id
 
         settings = self._settings if self._settings is not None else load_settings()
-        return TuiReviewer(self, signer_id(settings))
+        return TuiReviewer(self, signer_id(settings), abstracts=self._options.abstracts)
 
     def _subscribe(self, bus: EventBus) -> asyncio.Task[None]:
         """Subscribe before the first node runs, then consume until the bus closes."""

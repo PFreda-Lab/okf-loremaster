@@ -47,8 +47,15 @@ def signoff_view(
     topics: dict[str, list[str]],
     verification: VerificationSummary | None,
     warnings: Sequence[str],
+    abstracts: bool = True,
 ) -> list[RenderableType]:
-    """What a reviewer looks at before signing. Empty `records` yields the rule alone."""
+    """What a reviewer looks at before signing. Empty `records` yields the rule alone.
+
+    `abstracts` is `--no-abstract`, and it is here rather than left at its default so the
+    specimen is the file that will be written. Showing a section the bundle will not carry
+    would make the one thing this screen promises — that a signature is given to something
+    somebody saw — untrue in the only way that matters.
+    """
     view: list[RenderableType] = [Rule("[bold]review[/bold]")]
     if not records:
         view.append(
@@ -61,7 +68,7 @@ def signoff_view(
     view.append(_topic_table(records, topics))
     view.extend(_verification(verification))
     view.extend(_warnings(warnings))
-    view.extend(_specimen(records))
+    view.extend(_specimen(records, abstracts=abstracts))
     return view
 
 
@@ -77,9 +84,12 @@ def signoff_caption(signer: str, count: int) -> Text:
 class ConsoleReviewer:
     """Shows the bundle-to-be and asks whether to attest to it."""
 
-    def __init__(self, signer: str, console: Console | None = None) -> None:
+    def __init__(
+        self, signer: str, console: Console | None = None, *, abstracts: bool = True
+    ) -> None:
         self._signer = signer
         self._console = console if console is not None else Console(stderr=True)
+        self._abstracts = abstracts
 
     async def sign_off(
         self,
@@ -91,7 +101,11 @@ class ConsoleReviewer:
     ) -> Signoff:
         console = self._console
         for item in signoff_view(
-            records, topics=topics, verification=verification, warnings=warnings
+            records,
+            topics=topics,
+            verification=verification,
+            warnings=warnings,
+            abstracts=self._abstracts,
         ):
             console.print(item)
 
@@ -178,9 +192,14 @@ def _warnings(warnings: Sequence[str]) -> list[RenderableType]:
     return view
 
 
-def _specimen(records: Sequence[ConceptRecord]) -> list[RenderableType]:
+def _specimen(records: Sequence[ConceptRecord], *, abstracts: bool = True) -> list[RenderableType]:
     specimen = max(records, key=lambda record: len(record.extraction.predictors))
     return [
         Rule(f"[dim]{specimen.domain}/{specimen.filename}[/dim]"),
-        Syntax(document_for(specimen), "markdown", theme="ansi_dark", word_wrap=True),
+        Syntax(
+            document_for(specimen, abstracts=abstracts),
+            "markdown",
+            theme="ansi_dark",
+            word_wrap=True,
+        ),
     ]

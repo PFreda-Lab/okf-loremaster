@@ -288,6 +288,12 @@ def project_spend(
     ) -> None:
         if calls <= 0:
             return
+        # Thinking is billed as output, once per call, on top of the reply. Counted at the
+        # tier's full budget because that is the only number available before a run — the
+        # allowances above are measured means, this one is a ceiling, and a projection
+        # that ignored it would under-report a tier with effort set the way the schema
+        # tokens used to under-report every tier.
+        completion_tokens += calls * settings.thinking_tokens_for(role)
         nodes.append(
             NodeEstimate(
                 node=node,
@@ -478,6 +484,17 @@ def project_spend(
         "a re-query round, if a topic comes up short, adds at most one curation call "
         "per thin topic — screening is bounded by the budget above whatever happens"
     )
+    thinking = [
+        f"{role.value} {settings.effort_for(role)}"
+        for role in Role
+        if settings.thinking_tokens_for(role)
+    ]
+    if thinking:
+        notes.append(
+            "reasoning effort set on " + ", ".join(thinking) + " — thinking is billed as "
+            "output and counted here at its full budget on every call, so a tier that "
+            "thinks less than it is allowed to will come in under this"
+        )
     unpriced = [n.node for n in nodes if n.usd is None]
     if unpriced:
         notes.append(

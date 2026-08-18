@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Protocol
 
-from okf_loremaster.config import Role, Settings
+from okf_loremaster.config import Effort, Role, Settings
 from okf_loremaster.events import EventBus, LLMCall, Progress, WarningEvent
 
 # Provider errors that are worth another attempt. Anything else - a bad key, a
@@ -283,7 +283,12 @@ class Router:
         response_format: dict[str, Any] | None = None,
     ) -> LLMResult:
         model = self._settings.model_for(role)
-        budget = max_tokens
+        # Thinking is spent from the same ceiling as the reply, and every node's ceiling
+        # here was measured against replies with no thinking in them. Added rather than
+        # shared, so turning effort on cannot quietly truncate the answer it was turned on
+        # to improve — and so screening's 256 tokens, which is under every thinking budget
+        # there is, does not become a request the provider refuses outright.
+        budget = max_tokens + self._settings.thinking_tokens_for(role)
         async with self._semaphores[role]:
             started = time.monotonic()
             for growth in range(_TRUNCATION_ATTEMPTS):
@@ -407,6 +412,7 @@ class Router:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     response_format=response_format,
+                    effort=self._settings.effort_for(role),
                 )
             except BaseException as exc:
                 if response_format is not None and not schema_retried and _refuses_schema(exc):
@@ -479,14 +485,41 @@ class Router:
         max_tokens: int,
         temperature: float,
         response_format: dict[str, Any] | None,
+        effort: Effort | None = None,
     ) -> Any:
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
-            "temperature": temperature,
             "timeout": self._settings.request_timeout,
         }
+        # Effort and temperature are mutually exclusive, and the two branches below are the
+        # only requests the providers accept.
+        #
+        # `reasoning_effort` is LiteLLM's own vocabulary, translated per provider — a
+        # thinking budget for Anthropic, the native parameter for OpenAI — so one setting
+        # means the same thing across deployments. Omitted entirely when unset, which is
+        # not the same as sending "none": a model that reasons by default keeps doing so.
+        #
+        # Sending it means sending no temperature at all. Anthropic refuses any value but 1
+        # once thinking is on ("`temperature` may only be set to 1 when thinking is
+        # enabled") and OpenAI's reasoning models refuse the parameter outright, so the
+        # parameter goes rather than the value: 1.0 would satisfy the first and fail the
+        # second. `drop_params` cannot help, because it drops what a model does not support
+        # and Anthropic supports temperature perfectly well — it is the *combination* that
+        # is rejected, which LiteLLM has no way to see.
+        #
+        # It cost a real run to find. Screening asks at temperature 0, so effort on the FAST
+        # tier turned that node into a wall of 400s — 30 calls, 30 failures — and the run
+        # went on to emit a bundle that validated cleanly on the papers nothing had screened.
+        #
+        # The trade is real and belongs to whoever sets the variable: a tier with effort on
+        # no longer samples deterministically. That is the provider's rule, and no
+        # configuration of ours buys back both.
+        if effort is None:
+            kwargs["temperature"] = temperature
+        else:
+            kwargs["reasoning_effort"] = effort.value
         if self._settings.api_key:
             kwargs["api_key"] = self._settings.api_key
         if self._settings.api_base:

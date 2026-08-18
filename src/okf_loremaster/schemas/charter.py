@@ -31,6 +31,7 @@ __all__ = [
     "DEFAULT_TOPIC_PAPER_MAX",
     "DEFAULT_TOPIC_PAPER_MIN",
     "MAX_TOPIC_SCOPE_CHARS",
+    "PUBMED_LANGUAGES",
     "Charter",
     "Topic",
 ]
@@ -62,6 +63,115 @@ DEFAULT_MAX_TOPICS = 8
 # One line of prose per topic, shown at the confirmation pause and reused as the topic's
 # `index.md` header. A budget rather than a schema constraint — see `common.prose`.
 MAX_TOPIC_SCOPE_CHARS = 300
+
+# Every value PubMed's `[la]` field accepts, with the ISO 639-1 code and English name
+# that map onto it. Three-letter ISO 639-2/B, which is not the form anyone reaches for
+# first: `en`, `de` and `fr` are the codes a web page or an HTTP header uses, and they
+# are the ones a model writes when nothing tells it otherwise.
+#
+# Getting this wrong is invisible at every layer that could catch it. `[la]` is a real
+# field tag, so PubMed does not rewrite it the way it rewrites an unknown one; it just
+# matches nothing, reports an empty `errorlist`, and returns `Count 0`. Since the filter
+# is appended to every query in a plan, one bad code takes the entire run to zero hits —
+# which is what it did, with a charter that was otherwise perfectly well drafted.
+#
+# `""` where a language has no two-letter form.
+_LANGUAGES: tuple[tuple[str, str, str], ...] = (
+    ("afr", "af", "afrikaans"),
+    ("alb", "sq", "albanian"),
+    ("amh", "am", "amharic"),
+    ("ara", "ar", "arabic"),
+    ("arm", "hy", "armenian"),
+    ("aze", "az", "azerbaijani"),
+    ("ben", "bn", "bengali"),
+    ("bos", "bs", "bosnian"),
+    ("bul", "bg", "bulgarian"),
+    ("cat", "ca", "catalan"),
+    ("chi", "zh", "chinese"),
+    ("cze", "cs", "czech"),
+    ("dan", "da", "danish"),
+    ("dut", "nl", "dutch"),
+    ("eng", "en", "english"),
+    ("epo", "eo", "esperanto"),
+    ("est", "et", "estonian"),
+    ("fin", "fi", "finnish"),
+    ("fre", "fr", "french"),
+    ("geo", "ka", "georgian"),
+    ("ger", "de", "german"),
+    ("gla", "gd", "scottish gaelic"),
+    ("gre", "el", "greek"),
+    ("heb", "he", "hebrew"),
+    ("hin", "hi", "hindi"),
+    ("hrv", "hr", "croatian"),
+    ("hun", "hu", "hungarian"),
+    ("ice", "is", "icelandic"),
+    ("ind", "id", "indonesian"),
+    ("ita", "it", "italian"),
+    ("jpn", "ja", "japanese"),
+    ("kin", "rw", "kinyarwanda"),
+    ("kor", "ko", "korean"),
+    ("lat", "la", "latin"),
+    ("lav", "lv", "latvian"),
+    ("lit", "lt", "lithuanian"),
+    ("mac", "mk", "macedonian"),
+    ("mal", "ml", "malayalam"),
+    ("mao", "mi", "maori"),
+    ("may", "ms", "malay"),
+    ("mul", "", "multiple languages"),
+    ("nor", "no", "norwegian"),
+    ("per", "fa", "persian"),
+    ("pol", "pl", "polish"),
+    ("por", "pt", "portuguese"),
+    ("pus", "ps", "pushto"),
+    ("rum", "ro", "romanian"),
+    ("rus", "ru", "russian"),
+    ("san", "sa", "sanskrit"),
+    ("slo", "sk", "slovak"),
+    ("slv", "sl", "slovenian"),
+    ("spa", "es", "spanish"),
+    ("srp", "sr", "serbian"),
+    ("swe", "sv", "swedish"),
+    ("tha", "th", "thai"),
+    ("tur", "tr", "turkish"),
+    ("ukr", "uk", "ukrainian"),
+    ("und", "", "undetermined"),
+    ("urd", "ur", "urdu"),
+    ("vie", "vi", "vietnamese"),
+    ("wel", "cy", "welsh"),
+)
+
+PUBMED_LANGUAGES = frozenset(code for code, _, _ in _LANGUAGES)
+
+# ISO 639-2/T, the other three-letter standard. It agrees with the /B codes above for
+# most languages and disagrees for these, which are exactly the languages whose /B code
+# came from the English name rather than the endonym. Listed because a wrong code here
+# fails the same silent way `en` did, and because a model asked for a three-letter code
+# has no way to know which of the two standards a given field wants.
+_TERMINOLOGY_CODES = {
+    "ces": "cze",
+    "cym": "wel",
+    "deu": "ger",
+    "ell": "gre",
+    "fas": "per",
+    "fra": "fre",
+    "hye": "arm",
+    "isl": "ice",
+    "kat": "geo",
+    "mkd": "mac",
+    "mri": "mao",
+    "msa": "may",
+    "nld": "dut",
+    "ron": "rum",
+    "slk": "slo",
+    "sqi": "alb",
+    "zho": "chi",
+}
+
+_LANGUAGE_ALIASES = {
+    **{iso1: code for code, iso1, _ in _LANGUAGES if iso1},
+    **{name: code for code, _, name in _LANGUAGES},
+    **_TERMINOLOGY_CODES,
+}
 
 
 class Topic(Model):
@@ -100,7 +210,19 @@ class Charter(Model):
     topic_taxonomy: list[Topic] = Field(default_factory=list)
 
     # PubMed language codes. A filter, not a judgment about what is worth reading.
-    languages: list[str] = Field(default_factory=lambda: ["eng"])
+    #
+    # The description is the only place the model is told the format. The charter prompt
+    # never asks for this field and a run that leaves it alone gets the default, but a
+    # model handed the schema fills it in anyway — and what it wrote, unprompted, was the
+    # two-letter code that silently zeroes every query. Cheaper to say than to repair.
+    languages: list[str] = Field(
+        default_factory=lambda: ["eng"],
+        description=(
+            "PubMed [la] codes, three letters each: eng, fre, ger, chi, jpn, spa, rus. "
+            "Never the two-letter form — PubMed matches nothing on those. Omit for "
+            "English only."
+        ),
+    )
     min_year: int | None = None
 
     target_papers: int = Field(default=DEFAULT_TARGET_PAPERS, ge=1)
@@ -137,7 +259,38 @@ class Charter(Model):
     @field_validator("languages", mode="after")
     @classmethod
     def _normalize_languages(cls, value: list[str]) -> list[str]:
-        return [code.strip().lower() for code in value if code.strip()]
+        """Every entry as the code PubMed's `[la]` field actually accepts.
+
+        Accepts what a person or a model plausibly writes — `en`, `eng`, `english`,
+        `deu` — and stores the one form PubMed answers to. Deduplicated afterward, since
+        two spellings of English would otherwise appear as two clauses of an OR.
+
+        Fatal rather than advisory, unlike a topic scope line that ran long. Prose that
+        overruns is a cosmetic defect in something a human is about to read; a language
+        code PubMed does not know is appended to every query in the plan and takes the
+        whole run to zero hits, an hour and a reasoning call after the mistake was made.
+        The message is the repair hint the drafting call gets to retry against, so it is
+        written as an instruction rather than a complaint.
+        """
+        codes: list[str] = []
+        unknown: list[str] = []
+        for raw in value:
+            entry = raw.strip().lower()
+            if not entry:
+                continue
+            code = entry if entry in PUBMED_LANGUAGES else _LANGUAGE_ALIASES.get(entry, "")
+            if not code:
+                unknown.append(raw.strip())
+            elif code not in codes:
+                codes.append(code)
+        if unknown:
+            raise ValueError(
+                f"languages: PubMed has no language {', '.join(unknown)} — use its "
+                "three-letter [la] codes, such as eng, fre, ger, chi, jpn, spa. PubMed "
+                "accepts that field with any value and reports no error, so a code it "
+                "does not know returns zero hits for every query in the run"
+            )
+        return codes
 
     @model_validator(mode="after")
     def _check_topics(self) -> Self:
