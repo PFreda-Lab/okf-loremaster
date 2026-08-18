@@ -4,6 +4,6 @@ from __future__ import annotations
 
 __all__ = ["DISPLAY_NAME", "__version__"]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 DISPLAY_NAME = "OKF Loremaster"

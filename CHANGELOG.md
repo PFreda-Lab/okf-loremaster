@@ -8,6 +8,17 @@ The bundle contract downstream reads is the part to watch — it is called out h
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-18
+
+**The bundle contract is unchanged, and a vector index built before this should be rebuilt.** Every
+per-paper document has the same frontmatter, the same twelve-column finding table and the same
+folder layout as 0.2.0, so a reader written against that release needs no change. Two things do
+move. `--no-abstract` makes the `# Abstract` section optional, which a reader that assumed it was
+always present should know about — the bundle says which it is, in `resource_descriptor.yaml`,
+rather than leaving it to be inferred. And the vector index now splits any chunk that overran the
+embedding model's window, so chunk ids gain a `.1`, `.2` suffix where a split happened; 21% of one
+199-paper bundle's tokens were never reaching the store before this.
+
 ### Added
 
 - **Per-tier reasoning effort, set in `.env`.** `OKF_LOREMASTER_EFFORT_FAST`, `_BALANCED` and
@@ -262,7 +273,8 @@ First public release.
 - Apache-2.0 covers this code, not the bundles it builds. Each emitted document records the
   `license` its publisher reported, and `export_safe` says whether it may leave.
 
-[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.1...v0.1.3
 [0.1.1]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.0...v0.1.1
