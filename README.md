@@ -126,11 +126,32 @@ Three things hold whatever you picked:
 - **Set the three tiers to different models, or to the same one.** Nothing requires a provider to
   offer three sizes.
 
-**Azure OpenAI**, two extra notes. LiteLLM defaults to API version `2025-02-01-preview`; to pin a
+**Azure OpenAI**, one extra note. LiteLLM defaults to API version `2025-02-01-preview`; to pin a
 different one, export `AZURE_API_VERSION` in your shell, because LiteLLM reads it from the process
-environment and this tool does not copy `.env` there. And LiteLLM cannot price a deployment name,
-so a run reports "cost unavailable" until you set `OKF_LOREMASTER_PRICE_*` — the
-[table below](#the-rest-of-env) has them.
+environment and this tool does not copy `.env` there.
+
+**3b — tell it what your models cost.** Optional, and worth two minutes whatever you are running.
+
+```bash
+OKF_LOREMASTER_PRICE_BALANCED_IN=3.0          # USD per 1M tokens
+OKF_LOREMASTER_PRICE_BALANCED_OUT=15.0        # both halves, or the tier is ignored
+```
+
+Six variables, one pair per tier, and they follow whatever you bound above rather than naming a
+model — point BALANCED at GPT or Gemini and set BALANCED's pair to that model's list price. Read
+the numbers off the vendor's pricing page; there is nowhere to look them up programmatically,
+because providers return token counts and never dollars. Every dollar figure any tool shows you is
+that multiplication done against a table somebody typed in.
+
+Skip it and pricing falls back to LiteLLM's own table, which is wrong two ways. It cannot price a
+gateway or Azure deployment name at all, and answers `0.0` — reported here as "cost unavailable",
+never `$0.00`, because those are not the same claim. And it is a static file shipped inside the
+installed wheel, so a price that moves after that release leaves it quoting release day: it was
+still answering $2/$10 for `claude-sonnet-5` months after that became $3/$15, which understates a
+bill by a third with nothing in the output to show for it.
+
+`--dry-run` confirms they took, at zero cost: it prints a figure rather than "unpriced (tokens
+only)".
 
 **4 — set the NCBI email.**
 
@@ -191,9 +212,9 @@ except where written out in full:
 |---|---|---|---|
 | **Models** | `API_BASE` | unset | Azure, a gateway, or anything self-hosted. `ANTHROPIC_BASE_URL` is an alias |
 | **Cost** | `MAX_USD` | unset | a run should warn and pause at a dollar figure — it warns, never aborts |
-| **Cost** | `PRICE_{FAST,BALANCED,REASONING}_{IN,OUT}` | unset | a run reports "cost unavailable". USD per 1M tokens |
+| **Cost** | `PRICE_{FAST,BALANCED,REASONING}_{IN,OUT}` | unset | your prices, consulted before LiteLLM's shipped table. USD per 1M tokens, both halves or neither |
 | **Throughput** | `CONCURRENCY_FAST` | 4 | screening hits `RateLimitError` — lower this one first |
-| **Throughput** | `CONCURRENCY_BALANCED` | 3 | extraction hits `RateLimitError`. Sets the wall clock: one call per paper |
+| **Throughput** | `CONCURRENCY_BALANCED` | 6 | extraction hits `RateLimitError`. Sets the wall clock: one call per paper |
 | **Throughput** | `CONCURRENCY_REASONING` | 3 | rarely — the charter is a single call |
 | **Throughput** | `MAX_RETRIES` | 6 | attempts per model call. Has to outlast a 60-second rate-limit window |
 | **Throughput** | `REQUEST_TIMEOUT` | 300 | rarely. Too short and an extraction times out on its own success |
@@ -232,7 +253,7 @@ okf-loremaster build "<your question>" -o my-corpus  # do it
 | `--review` | off | sign the bundle off by hand before it is written |
 | `--tui` | off | full-screen interface |
 | `--basis any\|abstract\|full-text` | `any` | what each paper is read from; `full-text` keeps only open-access papers |
-| `--target-papers` | 200 | 120–250 is a browsability ceiling, not a recall target |
+| `--target-papers` | 150 | 120–250 is a browsability ceiling, not a recall target |
 | `--topic-paper-min` / `--topic-paper-max` | 8 / 40 | papers inside one topic folder |
 | `--max-topics` | 8 | how many topic folders the review is divided into |
 | `--pool-size` | 800 | candidates considered before screening |
