@@ -17,6 +17,7 @@ crashing the run at the last node would be a worse answer than saying so.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,8 @@ NODE = "index_vectors"
 
 
 async def index_vectors_node(state: RunState, deps: Deps) -> dict[str, Any]:
-    if deps.embedder is None:
+    embedder = deps.embedder
+    if embedder is None:
         # Not an error and not worth an event: the graph runs this node on every run,
         # and "you did not ask for an index" is not news.
         return {}
@@ -42,11 +44,20 @@ async def index_vectors_node(state: RunState, deps: Deps) -> dict[str, Any]:
     warnings = list(state.get("warnings") or [])
 
     with span(deps, NODE) as report:
-        deps.progress(NODE, f"embedding with {deps.embedder.model_id}")
         try:
+            # The model loads lazily, and on the first run that means downloading several
+            # hundred megabytes. Left inside `build_index` that wait falls between
+            # "embedding with X" and the first chunk count with nothing on screen, on the
+            # last node of an hour-long run — which reads as a hang, and was reported as
+            # one. Warmed here so it can be narrated, and in a thread because the load is
+            # blocking: on the event loop it would stall the renderer too, and the message
+            # announcing the wait would not itself be drawn until the wait was over.
+            deps.progress(NODE, f"loading {embedder.model_id}")
+            await asyncio.to_thread(lambda: embedder.dimensions)
+            deps.progress(NODE, f"embedding with {embedder.model_id}")
             result = await build_index(
                 path,
-                embedder=deps.embedder,
+                embedder=embedder,
                 on_progress=lambda done, total: deps.progress(
                     NODE, f"embedded {done}/{total} chunks", current=done, total=total
                 ),

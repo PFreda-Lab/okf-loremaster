@@ -661,7 +661,11 @@ async def build_run(
         _write_charter(settled, directory / CHARTER_FILENAME)
 
     if state.get("bundle") and not options.dry_run:
-        _settle_finalize(options.finalize, corpus, console=console)
+        # `attach` means something else is driving the display, and under `--tui` that
+        # something else owns the terminal itself — see `_ask_finalize`.
+        _settle_finalize(
+            options.finalize, corpus, console=console, terminal_owned=attach is not None
+        )
 
     # Again on the way out, so the stores rest at their ceilings rather than at their
     # ceilings plus this run. After `_settle_finalize`, because that is what decides
@@ -676,7 +680,13 @@ async def build_run(
 # --- what the run keeps ------------------------------------------------------
 
 
-def _settle_finalize(chosen: Finalize | None, corpus: Path, *, console: Console | None) -> Finalize:
+def _settle_finalize(
+    chosen: Finalize | None,
+    corpus: Path,
+    *,
+    console: Console | None,
+    terminal_owned: bool = False,
+) -> Finalize:
     """Ask what to keep, then make it so. Returns what was actually kept.
 
     Asked at the end rather than up front because it is a question about a thing that
@@ -689,7 +699,7 @@ def _settle_finalize(chosen: Finalize | None, corpus: Path, *, console: Console 
 
     store = vector_store_path(corpus)
     if chosen is None:
-        chosen = _ask_finalize(corpus, store, console=console)
+        chosen = _ask_finalize(corpus, store, console=console, terminal_owned=terminal_owned)
 
     if not chosen.builds_vectors and store.exists():
         shutil.rmtree(store)
@@ -698,11 +708,28 @@ def _settle_finalize(chosen: Finalize | None, corpus: Path, *, console: Console 
     return chosen
 
 
-def _ask_finalize(corpus: Path, store: Path, *, console: Console | None) -> Finalize:
+def _ask_finalize(
+    corpus: Path, store: Path, *, console: Console | None, terminal_owned: bool = False
+) -> Finalize:
     """The end-of-run question, or `BOTH` when there is nobody to ask.
 
     A terminal that cannot prompt is not a terminal that should be guessed at, so every
     non-interactive path lands on the answer that deletes nothing.
+
+    `terminal_owned` is the third such path and the one that had to be learned the hard
+    way. Under `--tui` stdin is a tty and rich is enabled, so both guards above pass —
+    but Textual has the terminal in raw mode and is reading those keystrokes itself.
+    `IntPrompt.ask` then paints its question underneath a full-screen app that is
+    repainting over it, and blocks the main thread on a `readline` that no keypress can
+    reach. The run has finished, the bundle is on disk, and the process sits there
+    forever: `q` does not quit and `c` does not copy, because the loop that handles them
+    is the loop that is blocked. Observed on a 200-paper run (2026-08-18) that completed
+    everything and then hung, with a `sample` confirming `_textiowrapper_readline`.
+
+    Nothing is guessed here either. The vector store was already built — `finalize` is
+    settled before the graph so the embedder can be constructed — so keeping both is
+    keeping what the run made, and no other answer can be reached without deleting
+    something nobody asked to delete.
     """
     import sys
 
@@ -711,7 +738,7 @@ def _ask_finalize(corpus: Path, store: Path, *, console: Console | None) -> Fina
     from okf_loremaster.finalize import PROMPT_ORDER
     from okf_loremaster.ui.plain import rich_enabled
 
-    if not sys.stdin.isatty() or not rich_enabled():
+    if terminal_owned or not sys.stdin.isatty() or not rich_enabled():
         return Finalize.BOTH
 
     out = console if console is not None else _default_console()

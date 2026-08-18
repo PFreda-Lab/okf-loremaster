@@ -510,3 +510,39 @@ def test_choosing_what_to_keep_is_refused_on_a_dry_run_rather_than_ignored(
 
     assert result.exit_code == 1
     assert "--finalize cannot be combined with --dry-run" in result.output
+
+
+def test_the_end_of_run_question_is_never_asked_into_a_terminal_textual_owns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """This hung a finished 200-paper run until it was killed.
+
+    Under `--tui` stdin is a tty and rich is enabled, so neither existing guard fires —
+    but Textual holds the terminal in raw mode and reads the keystrokes itself. The
+    prompt paints under a full-screen app that repaints over it, and blocks the main
+    thread on a `readline` nothing can satisfy: pressing Enter does not help, because
+    the keypress goes to Textual. `q` and `c` stop working for the same reason, so the
+    log cannot even be copied out. `sample` on the live process showed
+    `_textiowrapper_readline`, and the bundle was already complete on disk.
+
+    Both guards are forced on so the test fails if `terminal_owned` stops being
+    consulted, rather than passing because the harness has no tty anyway.
+    """
+    import sys
+
+    from okf_loremaster.run import _ask_finalize
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("okf_loremaster.ui.plain.rich_enabled", lambda: True)
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("blocked on stdin under a full-screen app; the run hangs here")
+
+    monkeypatch.setattr("rich.prompt.IntPrompt.ask", never)
+
+    kept = _ask_finalize(tmp_path / "okf", tmp_path / "vectors", console=None, terminal_owned=True)
+
+    # Keeping both is keeping what the run already built — `finalize` is settled before
+    # the graph so the embedder can be constructed — so no unasked-for deletion follows
+    # from declining to ask.
+    assert kept is Finalize.BOTH
