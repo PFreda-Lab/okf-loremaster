@@ -43,6 +43,12 @@ bundles/
 # operator-specific, and none of it describes the package.
 .claude/
 
+# The manuscript, while it is still being drafted. Anchored to the root so a `paper.md`
+# somewhere inside the package would still ship. This comes out when the preprint is
+# posted — a JOSS submission requires `paper.md` to be committed beside the code, so the
+# rule is temporary by design.
+/paper/
+
 # A virtualenv inside the repo is against policy — the conda env is kept outside so it
 # does not bloat cloud sync — but a stray one committed is thousands of files, so it is
 # ignored rather than trusted not to appear.

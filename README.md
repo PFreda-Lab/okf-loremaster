@@ -13,7 +13,7 @@
 
 OKF Loremaster searches PubMed and PubMed Central (PMC, NIH's free full-text archive), summarizes papers and abstracts, identifies
 experimental features and their associated effects on outcomes, and files them into a hierarchical markdown
-corpus in [Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
+corpus in [Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md)
 (OKF v0.2) — optionally vectorized for RAG.
 
 ```bash
@@ -826,7 +826,7 @@ of them changed without spending anything.
 
 ## Why Open Knowledge Format
 
-[OKF](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
+[OKF](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md)
 is a small open convention that makes a folder of markdown self-describing: YAML frontmatter on
 every document, an `index.md` per folder, an optional `resource_descriptor.yaml`, and three reserved
 keys that answer where a document came from (`sources`), what produced it (`generated`), and who
