@@ -8,6 +8,38 @@ The bundle contract downstream reads is the part to watch — it is called out h
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-27
+
+**The bundle contract is unchanged.** Nothing about a document, its frontmatter, its table or the
+folder layout moves, and a reader written against 0.3.0 needs no change. What changes is how model
+calls are made and what the FAST tier is bound to by default, so re-read `.env.example` if you
+copied it.
+
+### Added
+
+- **Replies are streamed, and a call that goes quiet is abandoned rather than waited out.**
+  `OKF_LOREMASTER_STREAM_STALL_SECONDS`, default 10, is seconds of silence *between* chunks; 0 turns
+  streaming off and restores the previous whole-reply behavior. A stalled call is retried like any
+  other transient failure, so this changes how long a hang costs, not what happens after one. It
+  deliberately does not police the silence *before* the first token: reasoning happens there and
+  does not stream, so a thinking model is legitimately mute for tens of seconds, and a watchdog
+  there would abandon calls that were succeeding. `OKF_LOREMASTER_REQUEST_TIMEOUT` still owns that
+  window. Tokens that streamed before a call was abandoned are billed by the provider and are
+  counted in the run's cost report alongside the retry that follows, rather than disappearing.
+- **`OKF_LOREMASTER_REQUEST_TIMEOUT_FAST`**, default 60. Screening no longer inherits extraction's
+  300-second deadline; a verdict on one abstract takes seconds, and the deadline was only ever
+  setting the price of a stall.
+
+### Changed
+
+- **The FAST tier defaults to `claude-sonnet-5` instead of `claude-haiku-4-5`.** Anything bound in
+  your own `.env` is untouched. Screening's token profile is unchanged — measured at ~83 output
+  tokens per verdict either way — so the difference is the unit price alone.
+- **`.env.example` sets an effort level on all three tiers** rather than shipping them commented
+  out. A current Anthropic model reasons at `high` when sent nothing, which is not what a screening
+  call wants. Note that effort and temperature are mutually exclusive at the provider, so a tier
+  with effort set no longer samples deterministically.
+
 ## [0.3.0] — 2026-08-18
 
 **The bundle contract is unchanged, and a vector index built before this should be rebuilt.** Every
@@ -273,7 +305,8 @@ First public release.
 - Apache-2.0 covers this code, not the bundles it builds. Each emitted document records the
   `license` its publisher reported, and `export_safe` says whether it may leave.
 
-[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.1...v0.1.3

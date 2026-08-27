@@ -167,6 +167,26 @@ class Settings(BaseSettings):
     # Sized well above the slowest healthy screening call rather than near it, because
     # a timeout that fires on real work loses the paper.
     request_timeout_fast: float = 60.0
+    # Seconds of silence *between* chunks before a streaming call is abandoned and
+    # retried. Zero stops streaming entirely and takes the old single-response path.
+    #
+    # This is the watchdog `request_timeout` cannot be. One number cannot both keep a
+    # slow but healthy extraction alive and cut a wedged one short, because the wedged
+    # call is indistinguishable from the healthy one until the deadline expires — so the
+    # deadline that protects real work is also the price of every hang.
+    #
+    # Streaming separates them. Measured against a live gateway on 2026-08-27, nine
+    # calls across all three tiers with effort on: the largest gap between chunks on a
+    # healthy call was 0.97s. Ten seconds is an order of magnitude above that and thirty
+    # times below the deadline it replaces.
+    #
+    # Deliberately governs only the gap *after* output starts. Silence before the first
+    # chunk is evidence of nothing: thinking does not stream, so a reasoning call sits
+    # mute while it works — measured at 7.9-13.8s, and bounded not by that sample but by
+    # the effort budget, which at medium is ~33s of silence at the observed token rate.
+    # `timeout_for` still owns that window, and a watchdog there would abandon calls that
+    # were working, having already generated tokens the provider will bill for.
+    stream_stall_seconds: float = 10.0
 
     # --- Cost accounting ---------------------------------------------------
     # USD per 1M tokens, and the first thing consulted rather than the last. LiteLLM

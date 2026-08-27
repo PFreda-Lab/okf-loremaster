@@ -15,7 +15,14 @@ import pytest
 
 from okf_loremaster.config import Role
 from okf_loremaster.events import EventBus, LLMCall, Progress, WarningEvent
-from okf_loremaster.llm.fake import FakeChoice, FakeCompletion, FakeMessage, FakeResponse, FakeUsage
+from okf_loremaster.llm.fake import (
+    FakeChoice,
+    FakeCompletion,
+    FakeMessage,
+    FakeResponse,
+    FakeStreamingCompletion,
+    FakeUsage,
+)
 from okf_loremaster.llm.router import Router, format_cost
 
 MESSAGES = [{"role": "user", "content": "a question worth about twenty tokens or so"}]
@@ -197,6 +204,131 @@ async def test_both_deadlines_are_configurable(settings_factory: Any) -> None:
 
     assert completion.calls[0]["timeout"] == 15.0
     assert completion.calls[1]["timeout"] == 90.0
+
+
+# --- the stall watchdog ----------------------------------------------------
+
+
+class _StallsThenWorks:
+    """Stalls mid-stream on the first N calls, then answers normally."""
+
+    def __init__(self, stalls: int) -> None:
+        self._stalls = stalls
+        self.streams: list[FakeStreamingCompletion] = []
+
+    async def __call__(self, **kwargs: Any) -> Any:
+        stalling = len(self.streams) < self._stalls
+        fake = FakeStreamingCompletion(
+            pieces=("par", "tial", "rest") if stalling else ("done",),
+            stall_before=2 if stalling else None,
+        )
+        self.streams.append(fake)
+        return await fake(**kwargs)
+
+
+async def test_a_streamed_reply_is_reassembled_with_the_providers_own_usage(
+    settings_factory: Any,
+) -> None:
+    """Streaming must not turn exact token counts into estimates. LiteLLM's reassembler
+    falls back to counting the text itself when no chunk carries a usage record, so the
+    request has to ask for one and the numbers that come back have to be the ones used."""
+    completion = FakeStreamingCompletion(pieces=("hel", "lo"), usage=(123, 45))
+    router, _ = _router(settings_factory, completion=completion)
+
+    result = await router.complete(Role.BALANCED, MESSAGES, node="extract")
+
+    assert result.text == "hello"
+    assert result.prompt_tokens == 123
+    assert result.completion_tokens == 45
+    assert completion.calls[0]["stream"] is True
+    assert completion.calls[0]["stream_options"] == {"include_usage": True}
+
+
+async def test_a_stalled_stream_is_abandoned_and_retried_rather_than_waited_out(
+    settings_factory: Any,
+) -> None:
+    """The whole point: a call that stops producing output is dead, and the run should
+    find that out in seconds rather than after the full request deadline."""
+    completion = _StallsThenWorks(stalls=1)
+    router, _ = _router(
+        settings_factory,
+        completion=completion,
+        stream_stall_seconds=0.05,
+        request_timeout=30.0,
+    )
+
+    started = asyncio.get_running_loop().time()
+    result = await router.complete(Role.BALANCED, MESSAGES, node="extract")
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert result.text == "done"
+    assert len(completion.streams) == 2, "the stalled attempt should have been retried"
+    assert elapsed < 30.0, "it waited out the request deadline instead of the stall"
+
+
+async def test_the_abandoned_prefix_is_still_billed_to_the_ledger(
+    settings_factory: Any,
+) -> None:
+    """Giving up on a stream does not un-generate what already streamed. Dropping those
+    tokens would understate a bill, which is the same failure as reporting $0.00."""
+    completion = _StallsThenWorks(stalls=1)
+    router, _ = _router(
+        settings_factory,
+        completion=completion,
+        stream_stall_seconds=0.05,
+        price_balanced_in=1.0,
+        price_balanced_out=1.0,
+    )
+
+    await router.complete(Role.BALANCED, MESSAGES, node="extract")
+
+    assert router.ledger.calls == 2, "the stalled attempt is a call that was paid for"
+    assert router.ledger.completion_tokens > 0
+
+
+async def test_an_abandoned_stream_is_closed(settings_factory: Any) -> None:
+    """One leaked connection per stalled attempt, times `max_retries`, times a node that
+    runs once per paper, is a resource leak that outlives the stall that caused it."""
+    completion = _StallsThenWorks(stalls=1)
+    router, _ = _router(settings_factory, completion=completion, stream_stall_seconds=0.05)
+
+    await router.complete(Role.BALANCED, MESSAGES, node="extract")
+
+    assert completion.streams[0].closed is True
+
+
+async def test_silence_before_the_first_chunk_gets_the_full_request_deadline(
+    settings_factory: Any,
+) -> None:
+    """Thinking does not stream, so a reasoning call is legitimately mute while it works.
+    Applying the stall budget there would abandon calls that were succeeding — and bill
+    for every one of them."""
+    completion = FakeStreamingCompletion(pieces=("never",), stall_before=0)
+    router, _ = _router(
+        settings_factory,
+        completion=completion,
+        stream_stall_seconds=0.02,
+        request_timeout=0.4,
+        max_retries=1,
+    )
+
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(TimeoutError):
+        await router.complete(Role.BALANCED, MESSAGES, node="extract")
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert elapsed >= 0.4, "the first chunk was cut off at the stall budget, not the deadline"
+
+
+async def test_streaming_can_be_turned_off_entirely(settings_factory: Any) -> None:
+    """A gateway that streams badly should be recoverable without a new release."""
+    completion = FakeCompletion()
+    router, _ = _router(settings_factory, completion=completion, stream_stall_seconds=0.0)
+
+    await router.complete(Role.BALANCED, MESSAGES, node="extract")
+
+    assert "stream" not in completion.calls[0]
+    assert "stream_options" not in completion.calls[0]
 
 
 async def test_a_thinking_budget_is_added_to_the_reply_allowance_not_taken_from_it(

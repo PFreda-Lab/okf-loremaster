@@ -125,6 +125,77 @@ def _exception_types() -> tuple[tuple[type[BaseException], ...], tuple[type[Base
     return resolve(_TRANSIENT_NAMES), resolve(_PERMANENT_NAMES)
 
 
+class StreamStalled(TimeoutError):
+    """A streamed reply stopped arriving. Carries whatever got through before it did.
+
+    A `TimeoutError` subclass on purpose: `_is_transient` already answers yes for that,
+    so a stall reaches the ordinary retry path without any error taxonomy learning a new
+    word. It arrives sooner than `request_timeout` would have, and nothing else changes.
+
+    `partial` is the reassembled prefix, or None if nothing arrived at all. Those tokens
+    were generated and will be billed whether or not we waited for the rest, so they are
+    ledgered before the retry — the same rule that forbids reporting an unpriced call as
+    free forbids reporting a spent one as never made.
+    """
+
+    def __init__(self, message: str, partial: Any = None) -> None:
+        super().__init__(message)
+        self.partial = partial
+
+
+# `StopAsyncIteration` does not survive being awaited inside a task, so exhaustion is
+# reported as a value instead of an exception.
+_END = object()
+
+
+async def _next_chunk(iterator: Any) -> Any:
+    try:
+        return await iterator.__anext__()
+    except StopAsyncIteration:
+        return _END
+
+
+def _assemble(chunks: list[Any], messages: list[dict[str, str]]) -> Any:
+    """Rebuild one completion response out of the chunks that arrived.
+
+    LiteLLM's own reassembler, rather than ours, because everything downstream reads a
+    completion's shape and a hand-rolled approximation would be a second shape to keep
+    true. Verified against the live gateway 2026-08-27: it preserves the provider's real
+    usage when the final chunk carries one, preserves `finish_reason='length'` so the
+    truncation retry still fires, and puts a schema-constrained reply in
+    `message.content` exactly as the unstreamed path does rather than leaving it in
+    `tool_calls`. That last one is why this was measured before it was written: every
+    judgment node sends a `response_format`, so content landing anywhere else would have
+    emptied all of them at once.
+
+    Returns None for no chunks at all, which the caller treats as a failed call.
+    """
+    if not chunks:
+        return None
+    import litellm
+
+    return litellm.stream_chunk_builder(chunks, messages=messages)
+
+
+async def _aclose(stream: Any) -> None:
+    """Best-effort release of an abandoned stream's connection.
+
+    Abandoning is the point, but the socket underneath is still open, and a run that
+    stalls on several extractions would leak one per attempt.
+    """
+    for name in ("aclose", "close"):
+        closer = getattr(stream, name, None)
+        if closer is None:
+            continue
+        try:
+            result = closer()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:
+            pass
+        return
+
+
 def _is_transient(exc: BaseException) -> bool:
     transient, permanent = _exception_types()
     if permanent and isinstance(exc, permanent):
@@ -405,6 +476,7 @@ class Router:
         schema_retried = False
         while attempt < attempts:
             attempt += 1
+            attempt_started = time.monotonic()
             try:
                 return await self._invoke(
                     model=model,
@@ -416,6 +488,12 @@ class Router:
                     timeout=self._settings.timeout_for(role),
                 )
             except BaseException as exc:
+                if isinstance(exc, StreamStalled) and exc.partial is not None:
+                    # Abandoning a stream does not un-generate what already streamed, and
+                    # the bill will say so. Ledgered here rather than in `_drain` because
+                    # this is where the role and node are known, and counted in addition
+                    # to the retry that follows, which is what the provider charges for.
+                    self._record(role, node, model, exc.partial, time.monotonic() - attempt_started)
                 if response_format is not None and not schema_retried and _refuses_schema(exc):
                     # The request was rejected before the model saw it, so this costs
                     # nothing and is not the caller's retry to spend. `schema_retried`
@@ -529,16 +607,66 @@ class Router:
         if response_format is not None and model not in self._schema_refused:
             kwargs["response_format"] = response_format
 
+        stall = self._settings.stream_stall_seconds
+        if stall > 0:
+            kwargs["stream"] = True
+            # Without this the final chunk carries no usage and every streamed call would
+            # be counted by estimate instead of by the provider's own numbers. Confirmed
+            # honored on all three tiers through an Azure gateway, 2026-08-27.
+            kwargs["stream_options"] = {"include_usage": True}
+
         if self._completion_fn is not None:
-            return await self._completion_fn(**kwargs)
+            response = await self._completion_fn(**kwargs)
+        else:
+            # Imported here, not at module scope: litellm costs seconds to import and
+            # `okf-loremaster --help` should not pay for it.
+            import litellm
 
-        # Imported here, not at module scope: litellm costs seconds to import and
-        # `okf-loremaster --help` should not pay for it.
-        import litellm
+            litellm.suppress_debug_info = True
+            litellm.drop_params = True
+            response = await litellm.acompletion(**kwargs)
 
-        litellm.suppress_debug_info = True
-        litellm.drop_params = True
-        return await litellm.acompletion(**kwargs)
+        # Asked of the response rather than of `stall`, so a fake that answers with a
+        # finished completion keeps taking the unstreamed path unchanged.
+        if hasattr(response, "__aiter__"):
+            return await self._drain(response, messages=messages, first=timeout, stall=stall)
+        return response
+
+    async def _drain(
+        self, stream: Any, *, messages: list[dict[str, str]], first: float, stall: float
+    ) -> Any:
+        """Consume a streamed reply, abandoning it if it goes quiet mid-flight.
+
+        Two deadlines, because the two silences mean different things. Nothing has
+        arrived yet: the model may simply be thinking, which does not stream, so that
+        window stays as wide as `request_timeout` ever was. Output started and then
+        stopped: a healthy gap is under a second, so ten is not a slow call, it is a
+        dead one, and waiting out the rest of the timeout only makes it expensive.
+        """
+        chunks: list[Any] = []
+        iterator = stream.__aiter__()
+        deadline = first
+        while True:
+            try:
+                chunk = await asyncio.wait_for(_next_chunk(iterator), timeout=deadline)
+            except TimeoutError as exc:
+                await _aclose(stream)
+                raise StreamStalled(
+                    f"no output for {deadline:.0f}s after {len(chunks)} chunks",
+                    _assemble(chunks, messages),
+                ) from exc
+            if chunk is _END:
+                break
+            chunks.append(chunk)
+            deadline = stall
+
+        assembled = _assemble(chunks, messages)
+        if assembled is None:
+            # A stream that closes having said nothing is a failed call, not an empty
+            # reply: handing an empty completion onward would look to every parser like
+            # a model that answered badly, and be retried by nobody.
+            raise StreamStalled("the stream closed without producing anything")
+        return assembled
 
     def _price(
         self, role: Role, response: Any, prompt_tokens: int, completion_tokens: int
@@ -549,10 +677,8 @@ class Router:
         # installed wheel — 1.6 MB of it, dated the day the version was cut. Nothing
         # about it is live: it does not ask the provider, and the provider does not
         # answer in dollars anyway, only in token counts. So for every model that file
-        # names, it keeps returning whatever was true at release, indefinitely.
-        # `claude-sonnet-5` went to $3/$15 per million and litellm 1.95.0 still quotes
-        # the introductory $2/$10 (checked 2026-08-18) — every figure we printed was two
-        # thirds of the real one, and nothing in the output could have told you.
+        # names, it keeps returning whatever was true at release, indefinitely — and a
+        # figure that is merely out of date looks exactly like one that is right.
         #
         # Consulting that file first made `OKF_LOREMASTER_PRICE_*` dead code for exactly
         # the models it matters most for: it was written for gateway deployment names
