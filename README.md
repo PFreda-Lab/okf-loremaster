@@ -31,7 +31,7 @@ Five agents make key decisions while integrated deterministic code checks their 
 ## Suggested use case
 
 After producing a bundle with OKF Loremaster, it can be plugged into
-[**AFC Forge**](https://github.com/PFreda-Lab/afc-forge) (still under active development), an agentic system for constructing
+[**ADE Forge**](https://github.com/PFreda-Lab/ade-forge) (still under active development), an agentic system for constructing
 clinical feature sets from structured electronic health/medical records data for downstream machine learning prediction and/or statistical analysis.
 
 ---
@@ -706,44 +706,41 @@ extraction cache: a run you resume or repeat. You pay nothing for a paper the gr
 ```mermaid
 %%{init: {"theme":"base","flowchart":{"wrappingWidth":260},"themeVariables":{"fontSize":"19px","lineColor":"#475569","primaryTextColor":"#111827"}}}%%
 flowchart TB
-    subgraph r1 ["<span style='font-size:24px'><b>1 · frame the task</b></span>"]
+    subgraph r1 ["<b>1 · frame the task</b>"]
         direction LR
         task(["a task, in<br/>plain language"]) --> charter["<b>charter</b><br/>REASONING<br/>topics, scope,<br/>seed terms"] -.-> p1{{"PAUSE 1 · OPTIONAL<br/>only with --interactive<br/>read and edit<br/>the charter"}}
     end
 
-    subgraph r2 ["<span style='font-size:24px'><b>2 · find candidates</b></span>"]
+    subgraph r2 ["<b>2 · find candidates</b>"]
         direction LR
         search["<b>search</b><br/>BALANCED<br/>seed terms into<br/>PubMed queries"] --> dedupe["<b>dedupe</b><br/>code<br/>PMID, DOI,<br/>normalized title"] --> rank["<b>rank</b><br/>code<br/>recency, citations,<br/>diversity"]
     end
 
-    subgraph r3 ["<span style='font-size:24px'><b>3 · choose what is worth reading</b></span>"]
+    subgraph r3 ["<b>3 · choose what is worth reading</b>"]
         direction LR
         p2{{"PAUSE 2 · OPTIONAL<br/>only with --interactive<br/>approve the pool<br/>before screening"}} -.-> screen["<b>screen</b><br/>FAST<br/>keep or drop,<br/>and which topic"] --> curate["<b>curate</b><br/>BALANCED<br/>what to keep,<br/>what is missing,<br/>whether to search again"]
     end
 
-    subgraph r4 ["<span style='font-size:24px'><b>4 · read and record</b></span>"]
+    subgraph r4 ["<b>4 · read and record</b>"]
         direction LR
-        fulltext["<b>fulltext</b><br/>code<br/>license check,<br/>recorded verbatim"] --> extract["<b>extract</b><br/>BALANCED<br/>predictors, nulls,<br/>vocab hints"] --> reconcile["<b>reconcile</b><br/>code<br/>numbers, quotes, codes<br/>re-checked in the text"]
-        cache[("<b>cache</b><br/>on disk<br/>one file per paper,<br/>read back on --resume")]
-        review{{"<b>review</b> · OPTIONAL<br/>only with --review<br/>a person signs<br/>the bundle off"}}
+        fulltext["<b>fulltext</b><br/>code<br/>license check,<br/>recorded verbatim"] --> extract["<b>extract</b><br/>BALANCED<br/>predictors, nulls,<br/>vocab hints"] --> reconcile["<b>reconcile</b><br/>code<br/>numbers, quotes, codes<br/>re-checked in the text"] -.-> review{{"<b>review</b> · OPTIONAL<br/>only with --review<br/>a person signs<br/>the bundle off"}}
+        extract <--> cache[("<b>cache</b><br/>on disk<br/>one file per paper,<br/>read back on --resume")]
     end
 
-    subgraph r5 ["<span style='font-size:24px'><b>5 · build the bundle and check it</b></span>"]
+    subgraph r5 ["<b>5 · build the bundle and check it</b>"]
         direction LR
         emit["<b>emit_okf</b><br/>code<br/>markdown, indexes,<br/>catalog"] --> validate["<b>validate</b><br/>code<br/>the OKF contract,<br/>as a gate"] --> vectors["<b>index_vectors</b><br/>code<br/>embeds the<br/>finished bundle"] --> out(["okf/ and<br/>vectors/"])
         emit --> recur["<b>predictors.md</b><br/>code<br/>what recurs, as<br/>row addresses"] --> validate
     end
 
-    p1 -.-> search
-    rank -.-> p2
-    curate --> fulltext
-    reconcile -.-> review
-    review -.-> emit
-    extract <--> cache
+    r1 -.-> r2
+    r2 -.-> r3
+    r3 --> r4
+    r4 -.-> r5
 
     linkStyle default stroke-width:3px
-    linkStyle 1,4,13,14,16,17 stroke:#1d4ed8,stroke-width:3px
-    linkStyle 18 stroke:#047857,stroke-width:3px,stroke-dasharray:5 3
+    linkStyle 1,4,8,15,16,18 stroke:#1d4ed8,stroke-width:3px
+    linkStyle 9 stroke:#047857,stroke-width:3px,stroke-dasharray:5 3
     classDef agent fill:#fcd34d,stroke:#b45309,stroke-width:2px,color:#111827
     classDef code fill:#e5e7eb,stroke:#6b7280,color:#111827
     classDef human fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,stroke-dasharray:6 4,color:#111827
