@@ -156,6 +156,17 @@ class Settings(BaseSettings):
     # An extraction reads 6,000 tokens of source and writes up to
     # `MAX_EXTRACTION_TOKENS` back. At 120s that call times out on its own success.
     request_timeout: float = 300.0
+    # The same number does two jobs — the deadline a healthy long call is allowed, and
+    # the only thing that ever turns a wedged one into an error. `Router._call` retries
+    # on exceptions and nothing else, so no retry can fire until this expires: one
+    # stalled call costs the whole of it, and `max_retries` attempts cost it again.
+    #
+    # Screening does not need extraction's deadline. A verdict on one abstract is a
+    # couple of seconds, so 300 there buys nothing and only sets the price of a hang —
+    # a measured run lost 5m26s of a 6m30s wall clock to a single call that stalled.
+    # Sized well above the slowest healthy screening call rather than near it, because
+    # a timeout that fires on real work loses the paper.
+    request_timeout_fast: float = 60.0
 
     # --- Cost accounting ---------------------------------------------------
     # USD per 1M tokens, and the first thing consulted rather than the last. LiteLLM
@@ -266,6 +277,10 @@ class Settings(BaseSettings):
             Role.BALANCED: self.concurrency_balanced,
             Role.REASONING: self.concurrency_reasoning,
         }[role]
+
+    def timeout_for(self, role: Role) -> float:
+        """Seconds before one call on this tier is abandoned and retried."""
+        return self.request_timeout_fast if role is Role.FAST else self.request_timeout
 
     def effort_for(self, role: Role) -> Effort | None:
         """How hard this tier may think, or `None` to send nothing and take the default."""

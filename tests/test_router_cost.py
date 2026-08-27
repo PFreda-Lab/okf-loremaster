@@ -170,6 +170,35 @@ async def test_effort_is_sent_per_tier_and_not_to_the_others(settings_factory: A
     assert "reasoning_effort" not in completion.calls[2]
 
 
+async def test_screening_gets_a_shorter_deadline_than_extraction(settings_factory: Any) -> None:
+    """The timeout is the only thing that turns a wedged call into a retryable error, so
+    it is also what a hang costs. Extraction needs minutes and screening needs seconds;
+    one number for both makes every tier pay extraction's price for a stall."""
+    completion = FakeCompletion()
+    router, _ = _router(settings_factory, completion=completion)
+
+    await router.complete(Role.FAST, MESSAGES, node="screen")
+    await router.complete(Role.BALANCED, MESSAGES, node="extract")
+    await router.complete(Role.REASONING, MESSAGES, node="charter")
+
+    assert completion.calls[0]["timeout"] == 60.0
+    assert completion.calls[1]["timeout"] == 300.0
+    assert completion.calls[2]["timeout"] == 300.0
+
+
+async def test_both_deadlines_are_configurable(settings_factory: Any) -> None:
+    completion = FakeCompletion()
+    router, _ = _router(
+        settings_factory, completion=completion, request_timeout=90.0, request_timeout_fast=15.0
+    )
+
+    await router.complete(Role.FAST, MESSAGES, node="screen")
+    await router.complete(Role.BALANCED, MESSAGES, node="extract")
+
+    assert completion.calls[0]["timeout"] == 15.0
+    assert completion.calls[1]["timeout"] == 90.0
+
+
 async def test_a_thinking_budget_is_added_to_the_reply_allowance_not_taken_from_it(
     settings_factory: Any,
 ) -> None:

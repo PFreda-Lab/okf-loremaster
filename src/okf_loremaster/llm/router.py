@@ -413,6 +413,7 @@ class Router:
                     temperature=temperature,
                     response_format=response_format,
                     effort=self._settings.effort_for(role),
+                    timeout=self._settings.timeout_for(role),
                 )
             except BaseException as exc:
                 if response_format is not None and not schema_retried and _refuses_schema(exc):
@@ -486,12 +487,13 @@ class Router:
         temperature: float,
         response_format: dict[str, Any] | None,
         effort: Effort | None = None,
+        timeout: float,
     ) -> Any:
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
-            "timeout": self._settings.request_timeout,
+            "timeout": timeout,
         }
         # Effort and temperature are mutually exclusive, and the two branches below are the
         # only requests the providers accept.
