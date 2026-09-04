@@ -12,6 +12,7 @@ arrives in, and hand-authoring is explicitly as valid as building.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -375,3 +376,64 @@ def test_warnings_never_fail_the_gate_and_errors_always_do(tmp_path: Path) -> No
     assert all(f.severity is Severity.ERROR for f in report.errors)
     assert all(f.severity is Severity.WARNING for f in report.warnings)
     assert "fails with" in report.summary()
+
+
+# --- escapes that outlived the decoder --------------------------------------
+
+
+async def test_a_markdown_file_spelling_a_character_as_an_escape_is_an_error(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The defect a downstream consumer found: `\\u2265` written out as six characters.
+
+    Invisible to every other check in this module — the file parses, the frontmatter
+    agrees with itself, the links resolve, and the text says something else.
+    """
+    bundle = await bundle_for(settings_factory, tmp_path, monkeypatch)
+    document = one_document(bundle)
+    document.write_text(
+        document.read_text(encoding="utf-8") + "\n\nviral load \\u2265100,000 copies/ml\n",
+        encoding="utf-8",
+    )
+
+    assert "\\u2265 as literal text" in messages(bundle)
+
+
+async def test_the_catalog_is_decoded_before_it_is_checked(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One level of escaping in JSON is legal and means the character; two is the defect.
+
+    Checking the raw line would report the legal form, which is how a check like this
+    ends up switched off for being noisy.
+    """
+    bundle = await bundle_for(settings_factory, tmp_path, monkeypatch)
+    catalog = bundle / CATALOG_FILENAME
+    rows = [json.loads(line) for line in catalog.read_text(encoding="utf-8").splitlines() if line]
+
+    # One level: the row means `≥`, and is correct however it is spelled on disk.
+    rows[0]["title"] = "CD4 ≥500 cells/µl"
+    legal = "\n".join(json.dumps(row, ensure_ascii=True) for row in rows)
+    catalog.write_text(legal + "\n", encoding="utf-8")
+    assert "\\u2265" in legal, "the escaped form is what this test needs to be checking"
+    assert "literal text" not in messages(bundle)
+
+    # Two levels: the row's value *is* the escape text, which is what breaks a consumer.
+    rows[0]["title"] = "CD4 \\u2265500 cells/ml"
+    doubled = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    catalog.write_text(doubled + "\n", encoding="utf-8")
+    assert "\\u2265 as literal text" in messages(bundle)
+
+
+async def test_a_bundle_that_is_merely_full_of_real_characters_passes(
+    settings_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check must not fire on the characters it exists to protect."""
+    bundle = await bundle_for(settings_factory, tmp_path, monkeypatch)
+    document = one_document(bundle)
+    # The en dash is one of the five characters the reported bundle got wrong, so its
+    # ambiguity with a hyphen is the subject of the test rather than a slip in it.
+    added = "\n\nCD4 ≥500 cells/µl, VL ≤1000 – measured\n"  # noqa: RUF001
+    document.write_text(document.read_text(encoding="utf-8") + added, encoding="utf-8")
+
+    assert validate_bundle(bundle).ok

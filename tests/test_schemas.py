@@ -1052,3 +1052,78 @@ def test_requiring_every_property_leaves_a_nullable_field_nullable() -> None:
     # And a field that was never nullable stays that way: it is written as its default.
     assert "predictor" in row["required"]
     assert "anyOf" not in row["properties"]["predictor"]
+
+
+# --- escapes a model wrote twice --------------------------------------------
+
+
+def test_a_double_escaped_character_is_decoded_wherever_it_arrives() -> None:
+    """A model writing `\\u2265` where it meant `≥` produces valid JSON that is wrong.
+
+    Reported from downstream and reproduced from cache: 12 of 1025 cached extractions
+    carried it, against 486 that carried the same characters correctly. Repaired at the
+    schema rather than at the reply parser because the cache and a hand-edited
+    `charter.yaml` are doors the parser does not stand in.
+    """
+    verdict = ScreenVerdict.model_validate(
+        {
+            "pmid": "1",
+            "include": True,
+            "topic": "some-topic",
+            "reason": "baseline viral load \\u2265100,000 copies/ml and CD4 \\u2264200",
+        }
+    )
+
+    assert verdict.reason == "baseline viral load ≥100,000 copies/ml and CD4 ≤200"
+
+
+def test_the_decoding_reaches_into_nested_rows_and_lists() -> None:
+    """The defect showed up in table cells, not just in top-level prose."""
+    extraction = Extraction.model_validate(
+        {
+            "pmid": "1",
+            "predictors": [
+                {
+                    "predictor": "CD4 count",
+                    "operationalization": "dichotomized as <500 vs \\u2265500 cells/\\u00b5l",
+                    "outcome": "suppression",
+                    "direction": "increases",
+                }
+            ],
+            "vocabulary_hints": [{"concept": "dose \\u226510 \\u03bcg", "codes": []}],
+            "adjusted_for": ["age \\u226550"],
+        }
+    )
+
+    assert extraction.predictors[0].operationalization == "dichotomized as <500 vs ≥500 cells/µl"
+    assert extraction.vocabulary_hints[0].concept == "dose ≥10 μg"
+    assert extraction.adjusted_for == ["age ≥50"]
+
+
+def test_an_escaped_newline_is_left_alone_rather_than_turned_into_structure() -> None:
+    """Decoding this one in place would split a markdown table row in half. The bundle
+    validator reports it instead, which is a stopped build rather than a silent one."""
+    verdict = ScreenVerdict.model_validate(
+        {
+            "pmid": "1",
+            "include": True,
+            "topic": "some-topic",
+            "reason": "first\\u000asecond and a pipe \\u007c and a quote \\u0022",
+        }
+    )
+
+    assert "\n" not in verdict.reason
+    assert verdict.reason == "first\\u000asecond and a pipe \\u007c and a quote \\u0022"
+
+
+def test_text_that_merely_contains_a_backslash_is_untouched() -> None:
+    verdict = ScreenVerdict.model_validate(
+        {
+            "pmid": "1",
+            "include": True,
+            "topic": "some-topic",
+            "reason": r"the \upsilon term, C:\users\data, and 90% \u00b1 correct",
+        }
+    )
+
+    assert verdict.reason == r"the \upsilon term, C:\users\data, and 90% ± correct"

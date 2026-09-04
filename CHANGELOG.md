@@ -8,6 +8,34 @@ The bundle contract downstream reads is the part to watch — it is called out h
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-09-04
+
+**The bundle contract is unchanged**, but the text inside a bundle can be. If you hold a bundle
+built with 0.4.0 or earlier, run `okf-loremaster validate <bundle>` against it — the new check below
+reports the defect, and rebuilding repairs it without re-reading any paper.
+
+### Fixed
+
+- **A character written as `\u2265` instead of `≥`.** A model occasionally emits a JSON escape twice
+  over, and `json.loads` then hands back the six characters `\`, `u`, `2`, `2`, `6`, `5` rather than
+  the character they name. Every writer was already emitting UTF-8 faithfully; what they were handed
+  was already the escape text. Seen on 12 of 1025 cached extractions, against 486 that carried the
+  same characters correctly. Now decoded where a reply becomes a schema object, which also covers
+  the extraction cache and a hand-edited `charter.yaml` — so a cache written before this release
+  repairs itself on the next read instead of replaying the defect. Only characters above ASCII are
+  decoded: an escaped newline, pipe or quote would introduce structure into a markdown table or a
+  JSONL row, so those are left alone and reported by the validator instead.
+
+  This mattered more than it looked. A downstream consumer that screens outbound text for runs of
+  seven or more digits — the shape of a patient identifier, which nothing else distinguishes — reads
+  `\u2265100,000` as `2265100` and refuses the bundle. `≥100,000` contains no such run.
+
+### Added
+
+- **`validate` errors on any `\uXXXX` left as literal text.** JSON and YAML are decoded before the
+  check, so one level of escaping — which is legal and means the character — is not reported; two
+  levels, where the stored value *is* the escape text, is. Markdown is checked as it sits.
+
 ## [0.4.0] — 2026-08-27
 
 **The bundle contract is unchanged.** Nothing about a document, its frontmatter, its table or the
@@ -305,7 +333,8 @@ First public release.
 - Apache-2.0 covers this code, not the bundles it builds. Each emitted document records the
   `license` its publisher reported, and `export_safe` says whether it may leave.
 
-[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.1.3...v0.2.0

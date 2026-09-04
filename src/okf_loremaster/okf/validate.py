@@ -24,6 +24,7 @@ line-parser is a bundle that means two different things depending on who opens i
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from contextlib import suppress
@@ -85,6 +86,12 @@ _LINK = re.compile(r"\]\(([^)\s]+)\)")
 # string lists; OKF's nested blocks arrive as flow maps. Anything else is a bare scalar,
 # which reads as an unquoted string at one end and as a typed value at the other.
 _ALLOWED_VALUE_STARTS = ('"', "[", "{")
+
+# A `\uXXXX` still spelled out in text a consumer reads. Deliberately a second copy of
+# the pattern `schemas/common.py` repairs with, and not an import of it: this module
+# checks a finished bundle from the outside, and a check that imports the writer's own
+# idea of the defect can only confirm the writer agrees with itself.
+_STRAY_ESCAPE = re.compile(r"\\u[0-9a-fA-F]{4}")
 
 
 class Severity(StrEnum):
@@ -153,6 +160,7 @@ def validate_bundle(path: Path, *, embed_model: str = "") -> BundleReport:
     _check_catalog(bundle, findings)
     _check_links(bundle, findings)
     _check_ids(bundle, findings)
+    _check_escapes(bundle, findings)
     _check_embedder(embed_model, findings)
     _check_vector_index(bundle, findings)
 
@@ -481,6 +489,77 @@ def _check_ids(bundle: OkfBundle, findings: list[Finding]) -> None:
             )
             continue
         seen[handle] = document.path
+
+
+def _check_escapes(bundle: OkfBundle, findings: list[Finding]) -> None:
+    """No file may still spell a character as `\\uXXXX` once it has been decoded.
+
+    The last line of defense for a defect that is invisible to every other check here:
+    the file parses, the frontmatter agrees with itself, the links resolve, and the text
+    is wrong. `schemas/common.py` decodes these where a reply enters, so nothing should
+    reach this — which is exactly why it is worth asserting rather than assuming.
+
+    An error, not a warning, because it demonstrably breaks a consumer. One that screens
+    outbound text for runs of seven or more digits, on the grounds that a patient
+    identifier has no other distinguishing shape, reads the escape text `\\u2265100,000`
+    as `2265100` and refuses the whole bundle. The correct `≥100,000` contains no such
+    run, so the defect does not merely look untidy — it turns prose into something
+    indistinguishable from patient data and stops the run that consumes it.
+
+    JSON is decoded before it is checked. One level of `\\uXXXX` in a `.jsonl` line is
+    legal and means the character, so the raw line is the wrong thing to look at; the
+    decoded values are the text a consumer actually gets. YAML is read the same way.
+    Markdown carries no escaping layer, so its text is checked as it sits.
+    """
+    for path in sorted(p for p in bundle.path.rglob("*") if p.is_file()):
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue  # not text, or unreadable — other checks own those
+        found = sorted({m.group(0) for m in _STRAY_ESCAPE.finditer(_decoded_text(path, raw))})
+        if found:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    f"contains {', '.join(found)} as literal text rather than the "
+                    f"character(s) it names",
+                    path,
+                )
+            )
+
+
+def _decoded_text(path: Path, raw: str) -> str:
+    """The text a consumer reads out of this file, with any encoding layer undone.
+
+    A parse failure falls back to the raw text rather than skipping the file. A `.jsonl`
+    we cannot decode is already broken, and the escape check is not the place to stay
+    quiet about the contents.
+    """
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".jsonl":
+            rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+            return "\n".join(_strings(row) for row in rows)
+        if suffix in (".json", ".yaml", ".yml"):
+            return _strings(yaml.safe_load(raw))
+    except (ValueError, yaml.YAMLError):
+        return raw
+    return raw
+
+
+def _strings(value: object) -> str:
+    """Every string anywhere in a decoded structure, joined. Keys included.
+
+    Keys as well as values, because a key is text a consumer reads too, and one spelled
+    with an escape is a field nobody can look up by the name they were promised.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        return "\n".join(f"{key}\n{_strings(item)}" for key, item in value.items())
+    if isinstance(value, list):
+        return "\n".join(_strings(item) for item in value)
+    return ""
 
 
 # --- advisory ---------------------------------------------------------------

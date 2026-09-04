@@ -9,10 +9,17 @@ fields still fail loudly; only unexpected ones are dropped.
 from __future__ import annotations
 
 import re
+import unicodedata
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    StringConstraints,
+    model_validator,
+)
 
 from okf_loremaster.basis import TextBasisPolicy
 from okf_loremaster.schemas.limits import truncate_chars
@@ -70,6 +77,49 @@ def prose(limit: int) -> AfterValidator:
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _FILENAME_UNSAFE = re.compile(r"[^A-Za-z0-9]+")
 
+# A JSON escape that outlived the decoder. A model writing `\\u2265` where it meant
+# `≥` produces, after `json.loads`, the six characters `\`, `u`, `2`, `2`, `6`, `5`
+# rather than `≥` — valid JSON the whole way, and wrong from the moment it is read.
+_STRAY_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+# Unicode categories a bundle must never contain: controls, format characters,
+# surrogates, private use, unassigned, and the two separators that end a line. An escaped
+# newline decoded in place would split a markdown table row in half, so these are left as
+# they came and reported by the validator rather than quietly turned into structure.
+_UNWRITABLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
+def _decode_stray_escapes(text: str) -> str:
+    """Turn a `\\uXXXX` that survived JSON decoding back into the character it names.
+
+    Only above ASCII, and only for a character that can be written. An escape for an
+    ASCII character is never necessary in a JSON reply, and decoding one could introduce
+    a quote, a backslash or a pipe into text that a markdown table or a JSONL row is
+    about to be built from — so those are left alone deliberately, and the bundle
+    validator errors on anything still escaped when the writing is done.
+    """
+    if "\\u" not in text:
+        return text
+
+    def one(match: re.Match[str]) -> str:
+        char = chr(int(match.group(1), 16))
+        if ord(char) < 0x80 or unicodedata.category(char) in _UNWRITABLE_CATEGORIES:
+            return match.group(0)
+        return char
+
+    return _STRAY_ESCAPE.sub(one, text)
+
+
+def _repaired(value: Any) -> Any:
+    """`value` with every string in it decoded. Keys are left alone — they are ASCII."""
+    if isinstance(value, str):
+        return _decode_stray_escapes(value)
+    if isinstance(value, dict):
+        return {key: _repaired(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_repaired(item) for item in value]
+    return value
+
 
 class Model(BaseModel):
     """Base for every schema in this package."""
@@ -82,6 +132,29 @@ class Model(BaseModel):
         use_enum_values=False,
         validate_default=True,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _decode_escapes(cls, data: Any) -> Any:
+        """Undo a JSON escape a model wrote twice, before anything is built from it.
+
+        Here rather than in `parse.py` because a reply is not the only way one of these
+        gets in. The same value comes back out of the extraction cache, and out of a
+        `charter.yaml` a person edited, and each of those is a door `parse.py` does not
+        stand in — so a cache written before this existed would replay the defect on the
+        next resume, and only the model boundary was ever guarded.
+
+        Observed on 12 of 1025 cached extractions (1.2%), against 486 that carried the
+        same characters correctly, so this is a model that occasionally double-escapes
+        rather than a writer that always does. Every emitter downstream was already
+        writing UTF-8 faithfully; what they were handed was already the escape text.
+
+        It matters more than it looks. A consumer that scans outbound text for runs of
+        seven or more digits — the shape of a patient identifier, which nothing else
+        distinguishes — reads `\\u2265100,000` as `2265100` and refuses the bundle. The
+        correct `≥100,000` carries no such run. That is a stopped run, from prose.
+        """
+        return _repaired(data) if isinstance(data, dict | list) else data
 
 
 class Confidence(StrEnum):
