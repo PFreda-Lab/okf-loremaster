@@ -8,6 +8,19 @@ The bundle contract downstream reads is the part to watch — it is called out h
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-11-16
+
+**The bundle contract is unchanged.** Only the `.env` template that `init` writes moved.
+
+### Changed
+
+- **The `.env` template now binds Claude Haiku 5.5, Sonnet 5.5 and Opus 5.5**, replacing Sonnet 5
+  and Opus 5, and sets FAST's effort to `medium`. Haiku 5.5 reasons by default, and its reasoning
+  counts against screening's 256-token verdict cap. With FAST's effort left unset, Haiku spent the
+  whole cap reasoning and wrote nothing, so every paper was billed twice: once cut off, once
+  retried at 512. Setting effort adds room for the reasoning. An existing `.env` that binds FAST to
+  Haiku 5.5 needs `OKF_LOREMASTER_EFFORT_FAST` set by hand; `init` does not overwrite it.
+
 ## [0.4.1] — 2026-09-04
 
 **The bundle contract is unchanged**, but the text inside a bundle can be. If you hold a bundle
@@ -333,7 +346,8 @@ First public release.
 - Apache-2.0 covers this code, not the bundles it builds. Each emitted document records the
   `license` its publisher reported, and `export_safe` says whether it may leave.
 
-[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/PFreda-Lab/okf-loremaster/compare/v0.2.0...v0.3.0

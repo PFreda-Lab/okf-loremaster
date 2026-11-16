@@ -98,9 +98,9 @@ checkout, otherwise from the copy carried inside the package, so it works on a p
 **3 — choose a provider.** Open `.env`. The top block is the models:
 
 ```bash
-OKF_LOREMASTER_MODEL_FAST=claude-sonnet-5
-OKF_LOREMASTER_MODEL_BALANCED=claude-sonnet-5
-OKF_LOREMASTER_MODEL_REASONING=claude-opus-5
+OKF_LOREMASTER_MODEL_FAST=claude-haiku-5-5
+OKF_LOREMASTER_MODEL_BALANCED=claude-sonnet-5-5
+OKF_LOREMASTER_MODEL_REASONING=claude-opus-5-5
 OKF_LOREMASTER_API_KEY=
 ```
 
@@ -172,9 +172,9 @@ limit from 3 to 10 requests a second.
 
 ```
  env files  /home/you/loremaster/.env
-      fast  claude-sonnet-5
-  balanced  claude-sonnet-5
- reasoning  claude-opus-5
+      fast  claude-haiku-5-5
+  balanced  claude-sonnet-5-5
+ reasoning  claude-opus-5-5
    api key  set
 NCBI email  you@example.edu
   NCBI key  set (10 req/s)
