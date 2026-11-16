@@ -29,6 +29,7 @@ from typing import Any
 import pytest
 import typer
 import yaml
+from typer.testing import CliRunner
 
 from okf_loremaster.basis import TextBasisPolicy
 from okf_loremaster.cli import app
@@ -81,6 +82,10 @@ def test_the_default_is_read_whatever_each_paper_offers() -> None:
     `--abstracts` and `--full-text` as separate switches have a fourth state — both — that
     means nothing, and the answer to "what happens with neither" has to be documented
     rather than read off the signature.
+
+    The choices are checked through the command line, not through the option object.
+    Typer 0.29 dropped the option's `.type` attribute, which an earlier version of this
+    test read; what a user can type is the part that has to hold.
     """
     group = typer.main.get_command(app)
     params = {
@@ -89,7 +94,9 @@ def test_the_default_is_read_whatever_each_paper_offers() -> None:
     }
 
     assert params["basis"].default is TextBasisPolicy.ANY
-    assert set(params["basis"].type.choices) == {"any", "abstract", "full-text"}
+    assert {policy.value for policy in TextBasisPolicy} == {"any", "abstract", "full-text"}
+    rejected = CliRunner().invoke(app, ["build", "a prompt", "--basis", "both"])
+    assert rejected.exit_code == 2, rejected.output
 
 
 # --- abstracts only ---------------------------------------------------------
